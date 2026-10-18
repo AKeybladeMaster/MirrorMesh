@@ -1,32 +1,37 @@
-# ADR-0005 — SQLite trusted-peer store adapter
+# ADR-0005  SQLite trusted-peer store adapter
 
 - **Decision date:** 2026-10-18
-- **Status:** Proposed; implementation deferred because Cargo cannot reach crates.io in this environment
+- **Status:** Proposed; adapter implemented and locally verified, cross-platform builds pending
 
 ## Context
 
-Task 03 requires a local SQLite table for public trusted-peer data. The current `mm-store` only has a bounded preferences file and no SQLite library. The store must work on Windows/Linux and the Android/iOS targets without storing private keys or depending on a preinstalled SQLite version. An implementation attempt could not fetch the candidate crate because no `rusqlite` source is cached and Cargo could not reach the crates.io index; no dependency or unresolved lockfile change was left in the project.
+Task 03 requires durable local storage for public trusted-peer data. `mm-store` previously contained only a bounded preferences file. The adapter must use a bundled SQLite engine so app builds do not rely on a system SQLite installation, and it must never persist private keys or key-store secrets.
 
 ## Decision
 
-- Use `rusqlite` pinned to `0.39.0`, default features disabled, and the `bundled` feature enabled when the reviewed dependency source is available.
-- Bundle the SQLite engine so application builds do not depend on a machine's system SQLite installation. Keep the database limited to device ID, display name, public key, fingerprint, explicit grants, and pairing/last-seen/revocation timestamps.
-- Apply schema version 1 transactionally and reject unsupported future schema versions. Use prepared statements and bound values for all peer data.
-- Enforce the shared record limits in the domain and database constraints; cap returned peer records and preserve revoked rows for the settings/revocation view.
-- Keep local private keys in OS keychain adapters; never add them or keychain secret material to this database.
+- Use `rusqlite = 0.39.0` with default features disabled and only `bundled` enabled.
+- Bundle SQLite for application builds and keep the database limited to device ID, display name, public key, fingerprint, explicit grants, and pairing/last-seen/revocation timestamps.
+- Apply schema version 1 in an immediate transaction and reject negative or unsupported future schema versions without changing them.
+- Use prepared statements and bound values for all peer data.
+- Enforce domain bounds and database constraints. Cap the store and returned list at 1,024 peers; fail closed if an externally modified database exceeds that bound.
+- Retain revoked rows for settings and review. The application coordinator calls `save_peer` only after explicit approval; an approved re-pair for the same device ID replaces the stored row and clears its prior revocation.
+- Keep private keys in OS keychain adapters; never add private-key material or keychain secrets to this database.
 
 ## License and dependency review
 
-The official rusqlite 0.39.0 package declares MIT and documents the `bundled` feature. The bundled SQLite source is public domain. This stays within the repository's existing MIT policy; the dependency graph and generated notice preview still need local `cargo-deny`, `cargo-audit`, and `cargo-about` verification after the lockfile update.
+The exact `rusqlite 0.39.0` package declares MIT and its `bundled` feature compiles the SQLite sources. Its selected dependency graph passed the repository's offline `cargo-deny` advisory, ban, license, and source checks. The delivered SQLite engine code is public domain. The generated Rust notice snapshot includes the new dependency graph. The Cargo manifest does not declare an MSRV; focused Windows checks and tests passed on the workspace minimum Rust 1.85.
 
-## Consequences
+## Consequences and evidence
 
-- SQLite will give `TrustedPeerPort` a durable local adapter and transaction boundary once implemented.
-- Bundling adds a native C build and a larger package; Windows is the only platform runner available here. Android, iOS, and Linux builds remain unverified until their target toolchains are available.
-- The database is not encrypted by this adapter. Store only public peer data; rely on app sandbox permissions and OS keychain protection for private keys.
+- `SqliteTrustedPeers` implements `TrustedPeerPort` in `crates/mm-store/`, serializes access to one connection, migrates an empty database transactionally, and rejects malformed stored records.
+- Ten integration tests cover persistence across reopen, safe parameter binding, schema migration/rollback/future-version rejection, revocation and reapproval, malformed rows, and the peer cap.
+- The Windows Rust 1.85 check and focused test suite pass. Linux, Android, and iOS builds remain unverified; the adapter has not yet been wired into application startup.
+- The database is not encrypted. It stores public peer data only and relies on the app sandbox; private keys remain in OS-protected storage.
 - The existing preferences file remains separate and is not migrated by this ADR.
 
 ## Official references
 
-- [rusqlite 0.39.0 documentation](https://docs.rs/crate/rusqlite/0.39.0)
+- [rusqlite 0.39.0 package metadata](https://docs.rs/crate/rusqlite/0.39.0)
+- [rusqlite 0.39.0 manifest and license](https://docs.rs/crate/rusqlite/0.39.0/source/Cargo.toml.orig)
+- [rusqlite 0.39.0 feature list](https://docs.rs/crate/rusqlite/0.39.0/features)
 - [SQLite copyright and public-domain statement](https://www.sqlite.org/copyright.html)

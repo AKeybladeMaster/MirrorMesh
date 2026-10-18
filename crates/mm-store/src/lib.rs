@@ -7,6 +7,9 @@ use std::sync::Mutex;
 
 use mm_ports::{PortError, PreferencesPort};
 
+mod sqlite_trusted_peers;
+pub use sqlite_trusted_peers::{MAX_TRUSTED_PEERS, SqliteTrustedPeers};
+
 const FILE_HEADER: &str = "mirrormesh-preferences-v1\n";
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_KEY_BYTES: usize = 128;
@@ -18,6 +21,8 @@ pub enum StoreError {
     InvalidValue,
     MalformedFile,
     FileTooLarge,
+    Sqlite(rusqlite::Error),
+    UnsupportedSchema(i64),
     Io(std::io::Error),
 }
 
@@ -28,6 +33,10 @@ impl fmt::Display for StoreError {
             Self::InvalidValue => formatter.write_str("preference value exceeds its allowed size"),
             Self::MalformedFile => formatter.write_str("preferences file is malformed"),
             Self::FileTooLarge => formatter.write_str("preferences file exceeds its allowed size"),
+            Self::Sqlite(error) => write!(formatter, "SQLite storage failed: {error}"),
+            Self::UnsupportedSchema(version) => {
+                write!(formatter, "unsupported SQLite schema version: {version}")
+            }
             Self::Io(error) => write!(formatter, "preferences I/O failed: {error}"),
         }
     }
@@ -38,6 +47,12 @@ impl std::error::Error for StoreError {}
 impl From<std::io::Error> for StoreError {
     fn from(error: std::io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+impl From<rusqlite::Error> for StoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
     }
 }
 

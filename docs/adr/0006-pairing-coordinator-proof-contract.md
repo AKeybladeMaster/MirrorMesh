@@ -21,7 +21,7 @@ Task 03 needs one shared application flow between the QR parser, one-time nonce 
 - Unit tests use fake identity and storage ports. A stateless Ed25519 verifier candidate exists in `mm-adapter-identity`, but it is not wired into the coordinator. There is no QR UI, transport/listener, rate limiter, or durable trusted-peer adapter; these tests do not prove end-to-end pairing.
 - The coordinator consumes a nonce only after successful signature and fingerprint operations. A failed proof leaves it available until expiry; a network adapter must rate-limit attempts without making arbitrary remote requests able to silently approve or persist trust.
 - Wall-clock QR expiry and process-local monotonic approval expiry are separate checks. A host restart invalidates outstanding in-memory invitations.
-- Fingerprint computation must use an explicitly selected canonical public-key encoding once the key algorithm is chosen. ADR-0004 currently defines the fingerprint size/hash contract but intentionally leaves key encoding open.
+- Proposed ADR-0007 selects raw Ed25519 public-key bytes for the 32-byte SHA-256 fingerprint, but the encoding and strict-verification profile are not frozen until cross-track/security review.
 
 ## Verification
 
