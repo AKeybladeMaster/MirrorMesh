@@ -1,5 +1,5 @@
 # License choices follow the repository's reviewed cargo-deny allow-list.
-accepted = ["Apache-2.0", "MIT", "Unicode-3.0", "0BSD", "Unlicense", "Zlib"]
+accepted = ["Apache-2.0", "MIT", "Unicode-3.0", "0BSD", "Unlicense", "Zlib", "BSD-3-Clause"]
 
 targets = [
     "x86_64-pc-windows-msvc",

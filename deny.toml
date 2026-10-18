@@ -8,6 +8,7 @@ yanked = "deny"
 allow = [
     "0BSD",
     "Apache-2.0",
+    "BSD-3-Clause",
     "MIT",
     "Unicode-3.0",
     "Unlicense",

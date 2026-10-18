@@ -1,32 +1,33 @@
-# Spike report — pairing identity provider candidate
+# Spike report  pairing identity provider candidate
 
 **Date:** 2026-10-18  
-**Result:** Ed25519 encoding proposed; implementation crate/version unresolved; exact-source and security review blocked on registry access.
+**Result:** A stateless Ed25519 public-key verifier candidate is implemented and locally tested. Its wire acceptance profile remains proposed pending cross-track and security review.
 
 ## Question
 
-Which production signature/key representation can back `PairingIdentityPort` and the signed proof contract in [ADR-0006](../adr/0006-pairing-coordinator-proof-contract.md), while respecting the current dependency license allow-list?
+Which signature and public-key representation can back `PairingIdentityPort` and the signed proof contract in [ADR-0006](../adr/0006-pairing-coordinator-proof-contract.md), while respecting the repository's dependency license policy?
 
 ## Proposed identity representation
 
-- Use Ed25519 as specified by [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html): a 32-byte raw public key and a 64-byte signature. Use the canonical raw public-key bytes as the input to the existing SHA-256 fingerprint contract; expose the fingerprint as the existing 64-character lowercase hexadecimal string.
-- Verify the existing `PairingProof::signed_bytes()` payload exactly. The verifier must reject malformed or non-canonical public keys and signatures, including weak/small-order public keys. Add published test vectors and malformed-key/signature tests before wiring the provider into the coordinator.
-- Keep local private-key generation, signing, rotation, and deletion behind a platform identity adapter backed by the OS key store. The current `PairingIdentityPort` is receiver-side verification/fingerprint only; local signing and key lifecycle need an explicit port/API before a sender implementation is complete.
+- Use Ed25519 as specified by [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html): a 32-byte raw public key and a 64-byte signature.
+- Compute the existing SHA-256 fingerprint over the exact raw public-key bytes and expose it as 64 lowercase hexadecimal characters.
+- Verify the exact domain-separated `PairingProof::signed_bytes()` payload. The current provider only implements the existing receiver-side fingerprint and verification port.
+- Keep local private-key generation, signing, rotation, and deletion behind a separate platform identity adapter backed by the operating system's protected key store.
 
-## Crate candidates
+## Candidate dependency profile
 
-No crate version is currently verified as the implementation candidate. A prior entry named `ed25519-compact 2.6.0` based on a docs.rs `latest` page, but a renewed upstream lookup produced inconsistent views: the accessible [docs.rs latest manifest](https://docs.rs/crate/ed25519-compact/latest/source/Cargo.toml.orig) identifies itself as 2.4.0 and declares MIT with optional `getrandom ^0.4`; a [docs.rs package-page result](https://docs.rs/crate/ed25519-compact/2.0.6) listed versions through 2.4.2. The exact 2.6.0 docs.rs pages were inaccessible in this session and the [crates.io page](https://crates.io/crates/ed25519-compact) rendered only its JavaScript requirement. These views may be stale; they do not prove that 2.6.0 is unpublished. Treat 2.6.0 as an unverified proposed pin, and do not transfer 2.4.x metadata or source claims to it. The exact 2.6.0 archive, manifest, source, license file, feature graph, target support, and advisory status remain unaudited. The upstream project's claim of formally verified Curve25519 field arithmetic applies to that arithmetic component only; it is not a claim that the whole crate or MirrorMesh pairing flow is formally verified.
+- `ed25519-dalek = 3.0.0`, `curve25519-dalek = 5.0.0`, and `sha2 = 0.11.0` are exact-pinned in the workspace and lockfile. The SHA-2 version respects the workspace Rust 1.85 MSRV.
+- Exact package metadata, source, and license terms were reviewed. `ed25519-dalek` and `curve25519-dalek` declare BSD-3-Clause; that license was reviewed and added to `deny.toml` and `about.toml`. `ed25519-dalek` has default features disabled and enables `zeroize` only; `curve25519-dalek` defaults are disabled.
+- The provider checks 32-byte key length, canonical point encoding by decompressing and recompressing, and rejects small-order points. It checks 64-byte signature length and verifies with `VerifyingKey::verify_strict`.
+- Upstream documents that `verify_strict` rejects weak keys and applies stricter signature checks than RFC 8032's generic verification behavior. The exact acceptance profile must be reviewed by every track before protocol adoption. See the [versioned VerifyingKey docs](https://docs.rs/ed25519-dalek/3.0.0/ed25519_dalek/struct.VerifyingKey.html) and [package metadata](https://docs.rs/crate/ed25519-dalek/3.0.0).
 
-`ed25519-dalek 3.0.0` has strict verification APIs, but its [manifest declares BSD-3-Clause](https://docs.rs/crate/ed25519-dalek/latest/source/Cargo.toml.orig), which is not currently in the repository's `deny.toml` license allow-list. It is therefore not selected under current policy without a separate license-policy review.
+## Local evidence
 
-## Environment evidence
+- Cargo resolved and fetched the exact pinned dependency graph. The dependency graph passed `cargo-deny 0.20.2 --offline check` for advisories, bans, licenses, and sources using the cached advisory database. The advisory database was not refreshed from the network. Warnings remain for `allo-isolate 0.1.27`'s missing manifest license field and duplicate crate versions.
+- Six `mm-adapter-identity` tests pass: an RFC 8032 valid proof, known SHA-256 fingerprint, message/signature rejection, malformed input lengths, non-canonical public-key rejection, and low-order public-key rejection.
+- `cargo fmt --all -- --check`, workspace Clippy with warnings denied, and `cargo test --locked --offline --workspace --all-features` pass. The workspace run includes 69 unit tests, 3 FFI integration tests, 6 identity integration tests, and doc tests.
+- Rust notices were regenerated twice with `cargo-about 0.9.2`; the 174,946-byte snapshot hash is `1E2CA97DE557BC8925D25A217D44132664C52D1674C391C214F6685685140C25`.
 
-- A Cargo fetch probe for the exact `ed25519-compact = 2.6.0` candidate failed with exit code 101 while trying to reach `https://index.crates.io/config.json` (`Could not connect to server`).
-- The isolated probe was retried during the next continuation; it again failed with exit code 101 at `index.crates.io:443` after Cargo's three connection attempts. The registry access blocker is still active.
-- A renewed official web lookup did not verify the 2.6.0 version: accessible docs.rs views differed (2.4.0 manifest versus a version list through 2.4.2); the exact 2.6.0 docs.rs page and crates.io version API were not accessible. This is inconclusive evidence, not proof that the version does not exist.
-- No Ed25519 provider was added to a workspace manifest or lockfile. No production identity provider is implemented; existing pairing tests use a fake identity port.
-- The source could not be audited, so no dependency or security approval is inferred from documentation or the upstream verification claim.
+## Limits and next evidence
 
-## Next evidence needed
-
-First confirm the exact published version through an authoritative package index or approved local registry/cache. Then fetch its exact archive and transitive graph; inspect source, manifest, license, features, targets, and advisories; verify malformed/weak-key rejection behavior; and only then decide whether to add a locked dependency and test-first provider. Define the local signing/key-lifecycle port and OS-keystore adapter separately. Update notices and rerun dependency security gates after any lockfile change.
+The verifier is not wired into `PairingCoordinator`, and it does not create or manage private keys. No local signing/key-lifecycle API, protected OS key store, SQLite trusted-peer adapter, mDNS discovery, authenticated TLS/WSS listener, rate limiter, QR/approval UI, or revocation-driven transport closure is implemented. No target-platform build, owned-LAN pairing, or cross-track interoperability test ran. These remain separate Task 03 work; the proposed algorithm and verification profile are not frozen.

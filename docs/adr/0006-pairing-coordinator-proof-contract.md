@@ -18,7 +18,7 @@ Task 03 needs one shared application flow between the QR parser, one-time nonce 
 ## Consequences
 
 - Platform UI and network code can share one deny-by-default consent sequence without depending on an OS SDK.
-- Unit tests use fake identity and storage ports. There is no production cryptographic provider, QR UI, transport/listener, rate limiter, or durable trusted-peer adapter yet; these tests do not prove identity security or end-to-end pairing.
+- Unit tests use fake identity and storage ports. A stateless Ed25519 verifier candidate exists in `mm-adapter-identity`, but it is not wired into the coordinator. There is no QR UI, transport/listener, rate limiter, or durable trusted-peer adapter; these tests do not prove end-to-end pairing.
 - The coordinator consumes a nonce only after successful signature and fingerprint operations. A failed proof leaves it available until expiry; a network adapter must rate-limit attempts without making arbitrary remote requests able to silently approve or persist trust.
 - Wall-clock QR expiry and process-local monotonic approval expiry are separate checks. A host restart invalidates outstanding in-memory invitations.
 - Fingerprint computation must use an explicitly selected canonical public-key encoding once the key algorithm is chosen. ADR-0004 currently defines the fingerprint size/hash contract but intentionally leaves key encoding open.

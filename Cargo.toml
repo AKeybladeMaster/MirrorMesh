@@ -5,6 +5,7 @@ members = [
     "crates/mm-protocol",
     "crates/mm-ports",
     "crates/mm-security",
+    "crates/mm-adapter-identity",
     "crates/mm-store",
     "crates/mm-runtime",
     "crates/mm-transport",
@@ -24,6 +25,7 @@ mm-application = { path = "crates/mm-application" }
 mm-protocol = { path = "crates/mm-protocol" }
 mm-ports = { path = "crates/mm-ports" }
 mm-security = { path = "crates/mm-security" }
+mm-adapter-identity = { path = "crates/mm-adapter-identity" }
 mm-store = { path = "crates/mm-store" }
 mm-runtime = { path = "crates/mm-runtime" }
 mm-transport = { path = "crates/mm-transport" }
@@ -31,4 +33,7 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["raw_value"] }
 flutter_rust_bridge = "=2.13.0"
 getrandom = "=0.4.3"
+curve25519-dalek = { version = "=5.0.0", default-features = false }
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
+sha2 = { version = "=0.11.0", default-features = false }
 
