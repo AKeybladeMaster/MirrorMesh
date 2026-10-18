@@ -188,3 +188,18 @@ This CORE candidate addresses the controlled disconnect/revocation parts of M-01
 | `cargo check --target x86_64-unknown-linux-gnu --locked --offline -p mm-runtime` — Rust 1.99.1 and 1.85 | 0 | GNU/Linux target compilation passes on both toolchains; no Linux runtime was executed. |
 
 Because `cargo` is absent from the PowerShell PATH in this environment, Rust commands used the installed toolchain's `cargo.exe` directly; Rust 1.85 checks set `RUSTC` to that toolchain's `rustc.exe`. The only lockfile change records the local `mm-protocol` test dependency; no external dependency was added. The fake-backed tests do not open sockets. No platform adapter, authenticated signaling, capture/codec teardown, benchmark, LAN, or physical-device test ran. `TrustedSessionRuntime` and its ordering remain proposed pending security and cross-track review.
+
+## Task 12: SQLite-backed revocation integration (2026-10-18)
+
+Added `crates/mm-runtime/tests/trusted_session_revocation_sqlite.rs`. The test stores two active peers in a temporary file-backed SQLite database, starts two sessions for one peer and one for the other, revokes the first peer, verifies only its transports close, drops and reopens the store, and confirms a new runtime still denies the revoked peer while allowing the other. The transport remains fake-backed; this is not a process restart, network exchange, platform test, or hardware result. TDD caught a test helper returning a reference to a temporary path; it now returns an owned `PathBuf`.
+
+| Command / toolchain | Exit | Result |
+|---|---:|---|
+| `cargo fmt --all -- --check` — Rust 1.99.1 | 0 | Workspace formatting passes. |
+| `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` — Rust 1.99.1 | 0 | Strict workspace lint passes. |
+| `cargo test --locked --offline --workspace --all-features` — Rust 1.99.1 | 0 | 131 unit tests, 22 integration tests, and doc tests pass. |
+| `cargo test --locked --offline -p mm-runtime` — Rust 1.85 | 0 | 16 runtime unit tests and 3 runtime integration tests pass. |
+| `cargo check --target x86_64-unknown-linux-gnu --locked --offline -p mm-runtime` — Rust 1.99.1 and 1.85 | 0 | GNU/Linux target compilation passes on both toolchains; no Linux runtime was executed. |
+| `git diff --check` | 0 | Patch whitespace check passes. |
+
+No dependency changed for this integration test. No network socket, authenticated signaling, OS key store, platform capture/codec, LAN, benchmark, or physical device was exercised.
