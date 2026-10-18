@@ -55,3 +55,9 @@ The file-backed SQLite integration in `crates/mm-runtime/tests/trusted_session_r
 ## Acceptance
 
 Two devices pair over owned LAN; unpaired device cannot view stream; QR replay/expiry and MITM rejected; disconnection and revoked access reliably close transport; docs include exact certificate/key handling and screenshot of pairing UX.
+
+### Strict `pair.begin` runtime bridge (2026-10-19)
+
+`crates/mm-protocol` now validates the candidate pairing payload and `tests/protocol-golden/pair-begin-v1.json` records its exact field names and encodings. `PairingRuntime::verify_pair_begin_from` reserves the source budget before parsing, builds the existing `PairingProof`, and verifies through the existing coordinator; `MirrorMeshRuntime` exposes the same entry point. Six pairing/SQLite integration tests cover typed proofs and raw frames, including approval-only persistence, tampered signatures, and malformed-frame throttling. Proposed [ADR-0020](../docs/adr/0020-pair-begin-wire-encoding-candidate.md) records the wire candidate. Rust 1.99.1 workspace gates pass, focused protocol/runtime tests and GNU/Linux compilation pass on Rust 1.85, and no listener, TLS, platform app, network, or device was exercised. The encoding and Ed25519 profile still need security and cross-track approval before v1 freeze.
+
+**Next single code task:** implement the authenticated signaling listener boundary that obtains the socket peer address, applies TLS peer identity checks, and routes only admitted `pair.begin` frames to this runtime. First write a listener-specific patch plan and ADR if the chosen TLS/pinning contract changes public interfaces; do not claim an end-to-end result until a local two-process exchange is tested.

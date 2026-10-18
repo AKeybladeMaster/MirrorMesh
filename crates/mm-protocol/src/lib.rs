@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::str;
 
-use mm_domain::{DeviceId, MessageId, SessionId};
+use mm_domain::{DeviceId, MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, MessageId, SessionId};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
@@ -191,9 +191,13 @@ pub struct DeviceHello {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PairBegin {
+    pub receiver_id: String,
     pub nonce: String,
+    pub peer_id: String,
+    pub display_name: String,
+    pub public_key: String,
     pub requested_grants: Vec<String>,
-    pub sender_ephemeral_key: String,
+    pub signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -411,9 +415,21 @@ pub fn parse_message(bytes: &[u8]) -> Result<ValidatedMessage, ProtocolError> {
         }
         MessageKind::PairBegin => {
             let value: PairBegin = decode(raw.payload)?;
-            bounded_text(&value.nonce, 1, 256)?;
+            validate_canonical_identifier(&value.receiver_id)?;
+            validate_lower_hex(&value.nonce, 16)?;
+            validate_canonical_identifier(&value.peer_id)?;
+            if value.display_name.is_empty()
+                || value.display_name.chars().count() > MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS
+                || contains_control(&value.display_name)
+            {
+                return Err(ProtocolError::InvalidPayload);
+            }
+            validate_lower_hex(&value.public_key, 32)?;
             validate_grants(&value.requested_grants)?;
-            bounded_text(&value.sender_ephemeral_key, 1, 4096)?;
+            if value.requested_grants.is_empty() {
+                return Err(ProtocolError::InvalidPayload);
+            }
+            validate_lower_hex(&value.signature, 64)?;
             MessagePayload::PairBegin(value)
         }
         MessageKind::PairApprove => {
@@ -569,6 +585,14 @@ fn validate_identifier(value: &str) -> Result<(), ProtocolError> {
         .map_err(|_| ProtocolError::InvalidIdentifier)
 }
 
+fn validate_canonical_identifier(value: &str) -> Result<(), ProtocolError> {
+    let device_id = DeviceId::parse(value).map_err(|_| ProtocolError::InvalidIdentifier)?;
+    if device_id.to_string() != value {
+        return Err(ProtocolError::InvalidIdentifier);
+    }
+    Ok(())
+}
+
 fn validate_capabilities(value: &Capabilities) -> Result<(), ProtocolError> {
     if value.video.is_empty()
         || value.video.len() > 8
@@ -645,6 +669,17 @@ fn validate_grants(values: &[String]) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn validate_lower_hex(value: &str, expected_bytes: usize) -> Result<(), ProtocolError> {
+    if value.len() != expected_bytes * 2
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    Ok(())
+}
+
 /// Tracks monotonically increasing sequence numbers per authenticated peer/session.
 /// The caller must remove a session when it is closed to keep this map bounded.
 pub struct SequenceTracker {
@@ -693,12 +728,14 @@ impl SequenceTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, ProtocolError, SequenceTracker, parse_message,
-        preflight_json, validate_version,
+        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, ProtocolError, SequenceTracker,
+        parse_message, preflight_json, validate_version,
     };
     use mm_domain::{DeviceId, SessionId};
 
     const VALID_OFFER: &str = include_str!("../../../tests/protocol-golden/session-offer-v1.json");
+    const VALID_PAIR_BEGIN: &str =
+        include_str!("../../../tests/protocol-golden/pair-begin-v1.json");
 
     fn id(value: u8) -> [u8; 16] {
         [value; 16]
@@ -744,6 +781,75 @@ mod tests {
     }
 
     #[test]
+    fn accepts_golden_pair_begin_with_application_proof_fields() {
+        let parsed = parse_message(VALID_PAIR_BEGIN.as_bytes()).unwrap();
+        assert_eq!(parsed.header.kind, super::MessageKind::PairBegin);
+        match parsed.payload {
+            MessagePayload::PairBegin(value) => {
+                assert_eq!(value.receiver_id, "00000000-0000-0000-0000-000000000001");
+                assert_eq!(value.nonce, "00112233445566778899aabbccddeeff");
+                assert_eq!(value.peer_id, "00000000-0000-0000-0000-000000000002");
+                assert_eq!(value.display_name, "Sender laptop");
+                assert_eq!(value.public_key.len(), 64);
+                assert_eq!(value.requested_grants, vec!["view", "send"]);
+                assert_eq!(value.signature.len(), 128);
+            }
+            _ => panic!("pair.begin must decode to PairBegin"),
+        }
+    }
+
+    #[test]
+    fn rejects_noncanonical_pair_begin_key_and_signature_encodings() {
+        let uppercase_key = VALID_PAIR_BEGIN.replace(
+            &format!("\"public_key\": \"{}\"", "00".repeat(32)),
+            &format!("\"public_key\": \"{}\"", "AA".repeat(32)),
+        );
+        assert_eq!(
+            parse_message(uppercase_key.as_bytes()).unwrap_err(),
+            ProtocolError::InvalidPayload
+        );
+
+        let short_signature = VALID_PAIR_BEGIN.replace(
+            &format!("\"signature\": \"{}\"", "00".repeat(64)),
+            "\"signature\": \"00\"",
+        );
+        assert_eq!(
+            parse_message(short_signature.as_bytes()).unwrap_err(),
+            ProtocolError::InvalidPayload
+        );
+    }
+
+    #[test]
+    fn rejects_pair_begin_without_a_grant_or_with_noncanonical_nonce() {
+        let no_grants = VALID_PAIR_BEGIN.replace(
+            "\"requested_grants\": [\"view\", \"send\"]",
+            "\"requested_grants\": []",
+        );
+        assert_eq!(
+            parse_message(no_grants.as_bytes()).unwrap_err(),
+            ProtocolError::InvalidPayload
+        );
+
+        let uppercase_nonce = VALID_PAIR_BEGIN.replace(
+            "00112233445566778899aabbccddeeff",
+            "00112233445566778899AABBCCDDEEFF",
+        );
+        assert_eq!(
+            parse_message(uppercase_nonce.as_bytes()).unwrap_err(),
+            ProtocolError::InvalidPayload
+        );
+
+        let uppercase_id = VALID_PAIR_BEGIN.replace(
+            "00000000-0000-0000-0000-000000000002",
+            "00000000-0000-0000-0000-00000000000A",
+        );
+        assert_eq!(
+            parse_message(uppercase_id.as_bytes()).unwrap_err(),
+            ProtocolError::InvalidIdentifier
+        );
+    }
+
+    #[test]
     fn enforces_session_and_sequence_rules() {
         let missing_session = VALID_OFFER.replace(
             "\"session_id\": \"8b3d8788-1476-4aae-a287-334a428b5b6f\",",
@@ -762,9 +868,12 @@ mod tests {
 
     #[test]
     fn rejects_grants_outside_the_shared_permission_vocabulary() {
-        let unknown_grant = br#"{"v":1,"type":"pair.begin","message_id":"b8298043-8b3b-4a86-86e3-79c0b863879b","seq":1,"sent_at_ms":0,"payload":{"nonce":"nonce","requested_grants":["admin"],"sender_ephemeral_key":"key"}}"#;
+        let unknown_grant = VALID_PAIR_BEGIN.replace(
+            "\"requested_grants\": [\"view\", \"send\"]",
+            "\"requested_grants\": [\"admin\"]",
+        );
         assert!(matches!(
-            parse_message(unknown_grant),
+            parse_message(unknown_grant.as_bytes()),
             Err(ProtocolError::InvalidPayload)
         ));
     }

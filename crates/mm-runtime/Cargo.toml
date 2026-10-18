@@ -8,11 +8,11 @@ publish.workspace = true
 mm-application.workspace = true
 mm-domain.workspace = true
 mm-ports.workspace = true
+mm-protocol.workspace = true
 mm-security.workspace = true
 
 [dev-dependencies]
 ed25519-dalek.workspace = true
 mm-adapter-identity.workspace = true
-mm-protocol.workspace = true
 mm-store.workspace = true
 

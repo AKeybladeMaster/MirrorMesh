@@ -141,6 +141,44 @@ fn signed_proof(nonce: PairingNonce, tamper_signature: bool) -> PairingProof {
     .unwrap()
 }
 
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
+fn signed_pair_begin_frame(nonce: PairingNonce, tamper_signature: bool) -> Vec<u8> {
+    let sender_key = SigningKey::from_bytes(&[0x42; 32]);
+    let public_key = PeerPublicKey::new(sender_key.verifying_key().to_bytes().to_vec()).unwrap();
+    let grants = TrustedPeerGrants::new(true, true, true).unwrap();
+    let unsigned = PairingProof::new(
+        RECEIVER_ID,
+        nonce,
+        SENDER_ID,
+        "Sender laptop".to_owned(),
+        public_key.clone(),
+        grants,
+        vec![0; 64],
+    )
+    .unwrap();
+    let mut signature = sender_key.sign(&unsigned.signing_message()).to_bytes();
+    if tamper_signature {
+        signature[0] ^= 1;
+    }
+
+    format!(
+        r#"{{"v":1,"type":"pair.begin","message_id":"b8298043-8b3b-4a86-86e3-79c0b863879b","seq":1,"sent_at_ms":100,"payload":{{"receiver_id":"{RECEIVER_ID}","nonce":"{}","peer_id":"{SENDER_ID}","display_name":"Sender laptop","public_key":"{}","requested_grants":["view","send","annotate"],"signature":"{}"}}}}"#,
+        nonce.to_hex(),
+        hex(public_key.as_bytes()),
+        hex(&signature),
+    )
+    .into_bytes()
+}
+
 #[test]
 fn verifies_real_signature_and_persists_sqlite_trust_only_after_approval() {
     let identity = TestIdentity::new([0x11; 32]);
@@ -186,6 +224,61 @@ fn rejects_modified_real_signature_without_persisting_trust() {
 }
 
 #[test]
+fn verifies_signed_pair_begin_frame_without_persisting_before_approval() {
+    let identity = TestIdentity::new([0x11; 32]);
+    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
+    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let nonce = invitation_nonce(&mut runtime);
+
+    let pending = runtime
+        .verify_pair_begin_from(source_ip(), &signed_pair_begin_frame(nonce, false), 101)
+        .unwrap();
+    assert_eq!(pending.approval().peer_id(), SENDER_ID);
+    assert!(peers.get_peer(SENDER_ID).unwrap().is_none());
+
+    let approved = runtime.approve(pending, view_scope(), 102, 1_000).unwrap();
+    assert_eq!(peers.get_peer(SENDER_ID).unwrap(), Some(approved));
+}
+
+#[test]
+fn rejects_tampered_pair_begin_frame_without_persisting_trust() {
+    let identity = TestIdentity::new([0x11; 32]);
+    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
+    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let nonce = invitation_nonce(&mut runtime);
+
+    assert!(matches!(
+        runtime.verify_pair_begin_from(source_ip(), &signed_pair_begin_frame(nonce, true), 101),
+        Err(PairingRuntimeError::Coordinator(
+            mm_application::PairingCoordinatorError::IdentityRejected
+        ))
+    ));
+    assert!(peers.get_peer(SENDER_ID).unwrap().is_none());
+}
+
+#[test]
+fn malformed_frames_consume_the_source_attempt_budget_before_parsing() {
+    let identity = TestIdentity::new([0x11; 32]);
+    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
+    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let nonce = invitation_nonce(&mut runtime);
+
+    for _ in 0..5 {
+        assert!(matches!(
+            runtime.verify_pair_begin_from(source_ip(), &[], 101),
+            Err(PairingRuntimeError::Protocol(
+                mm_protocol::ProtocolError::EmptyFrame
+            ))
+        ));
+    }
+    assert!(matches!(
+        runtime.verify_pair_begin_from(source_ip(), &signed_pair_begin_frame(nonce, false), 101),
+        Err(PairingRuntimeError::CoolingDown { .. })
+    ));
+    assert!(peers.get_peer(SENDER_ID).unwrap().is_none());
+}
+
+#[test]
 fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
     let identity = TestIdentity::new([0x11; 32]);
     let peers = SqliteTrustedPeers::open_in_memory().unwrap();
@@ -206,7 +299,7 @@ fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
         .unwrap()
         .nonce();
     let pending = runtime
-        .verify_proof_from(source_ip(), signed_proof(nonce, false), 101)
+        .verify_pair_begin_from(source_ip(), &signed_pair_begin_frame(nonce, false), 101)
         .unwrap();
     assert!(!peers.is_trusted(SENDER_ID).unwrap());
 

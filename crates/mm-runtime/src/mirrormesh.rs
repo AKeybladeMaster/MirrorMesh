@@ -71,6 +71,17 @@ where
             .verify_proof_from(source_ip, proof, now_monotonic_ms)
     }
 
+    /// Parses and verifies one signed `pair.begin` frame through source-aware admission.
+    pub fn verify_pair_begin_from(
+        &mut self,
+        source_ip: IpAddr,
+        frame: &[u8],
+        now_monotonic_ms: u64,
+    ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
+        self.pairing
+            .verify_pair_begin_from(source_ip, frame, now_monotonic_ms)
+    }
+
     /// Persists only the grant subset explicitly approved by the local user.
     pub fn approve(
         &self,

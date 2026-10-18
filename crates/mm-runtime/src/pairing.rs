@@ -5,10 +5,12 @@ use mm_application::{
     PairingCoordinator, PairingCoordinatorError, PairingInvitation, PairingProof,
     PendingPairingApproval,
 };
-use mm_domain::{DeviceId, TrustedPeer, TrustedPeerGrants};
+use mm_domain::{DeviceId, PeerPublicKey, TrustedPeer, TrustedPeerGrants};
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
+use mm_protocol::{MessagePayload, ProtocolError, parse_message};
 use mm_security::{
-    PairingAttemptDecision, PairingAttemptLimiter, PairingAttemptLimiterError, PendingPairingNonces,
+    PairingAttemptDecision, PairingAttemptLimiter, PairingAttemptLimiterError, PairingNonce,
+    PendingPairingNonces,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -30,6 +32,9 @@ impl AdmittedPendingPairingApproval {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairingRuntimeError {
     Coordinator(PairingCoordinatorError),
+    Protocol(ProtocolError),
+    InvalidPairBegin,
+    UnexpectedMessageType,
     AdmissionState(PairingAttemptLimiterError),
     AdmissionCleanup(PairingAttemptLimiterError),
     CoolingDown { retry_after_ms: u64 },
@@ -40,6 +45,11 @@ impl fmt::Display for PairingRuntimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Coordinator(error) => write!(formatter, "pairing coordinator failed: {error:?}"),
+            Self::Protocol(error) => write!(formatter, "pairing frame is invalid: {error}"),
+            Self::InvalidPairBegin => formatter.write_str("pair.begin proof fields are invalid"),
+            Self::UnexpectedMessageType => {
+                formatter.write_str("pairing frame is not a pair.begin message")
+            }
             Self::AdmissionState(error) => write!(formatter, "pairing admission failed: {error}"),
             Self::AdmissionCleanup(error) => {
                 write!(
@@ -154,23 +164,83 @@ where
         proof: PairingProof,
         now_monotonic_ms: u64,
     ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
+        self.reserve_source_attempt(source_ip, now_monotonic_ms)?;
+        self.verify_admitted_proof(source_ip, proof, now_monotonic_ms)
+    }
+
+    fn reserve_source_attempt(
+        &self,
+        source_ip: IpAddr,
+        now_monotonic_ms: u64,
+    ) -> Result<(), PairingRuntimeError> {
         match self
             .attempt_limiter
             .begin_attempt(source_ip, now_monotonic_ms)?
         {
-            PairingAttemptDecision::Allowed => {}
+            PairingAttemptDecision::Allowed => Ok(()),
             PairingAttemptDecision::CoolingDown { retry_after_ms } => {
-                return Err(PairingRuntimeError::CoolingDown { retry_after_ms });
+                Err(PairingRuntimeError::CoolingDown { retry_after_ms })
             }
-            PairingAttemptDecision::CapacityLimited => {
-                return Err(PairingRuntimeError::CapacityLimited);
-            }
+            PairingAttemptDecision::CapacityLimited => Err(PairingRuntimeError::CapacityLimited),
         }
+    }
+
+    fn verify_admitted_proof(
+        &mut self,
+        source_ip: IpAddr,
+        proof: PairingProof,
+        now_monotonic_ms: u64,
+    ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
         let approval = self.coordinator.verify_proof(proof, now_monotonic_ms)?;
         Ok(AdmittedPendingPairingApproval {
             source_ip,
             approval,
         })
+    }
+
+    /// Parses a bounded v1 `pair.begin` frame, then admits and verifies its signed proof.
+    /// Reserves the source budget before parsing so malformed frames are throttled as well.
+    pub fn verify_pair_begin_from(
+        &mut self,
+        source_ip: IpAddr,
+        frame: &[u8],
+        now_monotonic_ms: u64,
+    ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
+        self.reserve_source_attempt(source_ip, now_monotonic_ms)?;
+        let message = parse_message(frame).map_err(PairingRuntimeError::Protocol)?;
+        let MessagePayload::PairBegin(payload) = message.payload else {
+            return Err(PairingRuntimeError::UnexpectedMessageType);
+        };
+
+        let receiver_id = DeviceId::parse(&payload.receiver_id)
+            .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
+        let nonce = PairingNonce::from_hex(&payload.nonce)
+            .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
+        let peer_id =
+            DeviceId::parse(&payload.peer_id).map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
+        let public_key = PeerPublicKey::new(decode_lower_hex(&payload.public_key, 32)?)
+            .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
+        let requested_grants = TrustedPeerGrants::new(
+            payload.requested_grants.iter().any(|grant| grant == "view"),
+            payload.requested_grants.iter().any(|grant| grant == "send"),
+            payload
+                .requested_grants
+                .iter()
+                .any(|grant| grant == "annotate"),
+        )
+        .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
+        let signature = decode_lower_hex(&payload.signature, 64)?;
+        let proof = PairingProof::new(
+            receiver_id,
+            nonce,
+            peer_id,
+            payload.display_name,
+            public_key,
+            requested_grants,
+            signature,
+        )?;
+
+        self.verify_admitted_proof(source_ip, proof, now_monotonic_ms)
     }
 
     /// Persists only the explicitly approved subset of the sender's requested grants.
@@ -192,6 +262,30 @@ where
             .record_success(source_ip)
             .map_err(PairingRuntimeError::AdmissionCleanup)?;
         Ok(peer)
+    }
+}
+
+fn decode_lower_hex(value: &str, expected_bytes: usize) -> Result<Vec<u8>, PairingRuntimeError> {
+    if value.len() != expected_bytes * 2 {
+        return Err(PairingRuntimeError::InvalidPairBegin);
+    }
+    let mut decoded = Vec::with_capacity(expected_bytes);
+    for index in 0..expected_bytes {
+        let offset = index * 2;
+        let high =
+            decode_nibble(value.as_bytes()[offset]).ok_or(PairingRuntimeError::InvalidPairBegin)?;
+        let low = decode_nibble(value.as_bytes()[offset + 1])
+            .ok_or(PairingRuntimeError::InvalidPairBegin)?;
+        decoded.push((high << 4) | low);
+    }
+    Ok(decoded)
+}
+
+fn decode_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        _ => None,
     }
 }
 #[cfg(test)]
