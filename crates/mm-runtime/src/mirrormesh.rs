@@ -87,13 +87,15 @@ where
         )
     }
 
-    /// Starts a session only if the same store used by pairing still marks the peer active.
+    /// Starts a control session only if the peer is active and the requested grants were approved.
     pub fn start_session(
         &mut self,
         peer_id: DeviceId,
         session_id: SessionId,
+        required_grants: TrustedPeerGrants,
     ) -> Result<(), TrustedSessionError> {
-        self.sessions.start_session(peer_id, session_id)
+        self.sessions
+            .start_session(peer_id, session_id, required_grants)
     }
 
     /// Closes a tracked session, retaining it for retry if the transport close fails.

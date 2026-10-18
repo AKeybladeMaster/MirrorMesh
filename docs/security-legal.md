@@ -14,6 +14,10 @@ The proposed DNS-SD record publishes only a version, persistent device identifie
 
 `mm-security::PairingAttemptLimiter` tracks a bounded in-memory budget per source IP. The `mm-runtime::PairingRuntime` candidate reserves an attempt before invoking proof verification and carries the admitted IP into explicit approval; successful persistence clears that source's history. The default policy (five attempts, a 60-second partial-history window, a 30-second cooldown, and 1,024 tracked sources) is proposed and awaits security/cross-track review. The future listener must supply the remote socket address and a consistent monotonic clock, keep the runtime alive for its lifetime, and add global connection/message limits. No listener or network behavior is implemented or tested.
 
+### Trusted-session grant scope
+
+Before it starts a control transport, `TrustedSessionRuntime` loads the peer's active persisted record and checks that the caller-requested `TrustedPeerGrants` are covered by the approved grant set. A denied request returns `GrantNotAuthorized` before transport start. The composed `MirrorMeshRuntime` applies the same gate. The runtime cannot infer local sender/receiver direction; callers must choose the correct operation scope, and capture, annotation, media, and signaling code must enforce their own required grants at those boundaries. Proposed [ADR-0019](adr/0019-trusted-session-grant-scope-candidate.md) records the API candidate. Unit and fake-transport SQLite integration tests cover the denial boundary; no platform, signaling, or real-media path uses it yet.
+
 ## Rust dependency policy
 
 The separate fuzz workspace lockfile is included in the same advisory, license, and source policy checks. Its libFuzzer dependency is isolated from shipped application packages.

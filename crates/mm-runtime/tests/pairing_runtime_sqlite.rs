@@ -16,6 +16,10 @@ use mm_store::SqliteTrustedPeers;
 const RECEIVER_ID: DeviceId = DeviceId::from_bytes([1; 16]);
 const SENDER_ID: DeviceId = DeviceId::from_bytes([2; 16]);
 
+fn view_scope() -> TrustedPeerGrants {
+    TrustedPeerGrants::new(true, false, false).unwrap()
+}
+
 #[derive(Clone, Default)]
 struct RecordingTransport(Arc<Mutex<TransportLog>>);
 
@@ -191,7 +195,7 @@ fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
     let session_id = SessionId::from_bytes([9; 16]);
 
     assert_eq!(
-        runtime.start_session(SENDER_ID, session_id),
+        runtime.start_session(SENDER_ID, session_id, view_scope()),
         Err(TrustedSessionError::PeerNotTrusted)
     );
 
@@ -216,7 +220,17 @@ fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
         .unwrap();
     assert!(peers.is_trusted(SENDER_ID).unwrap());
 
-    runtime.start_session(SENDER_ID, session_id).unwrap();
+    let send_scope = TrustedPeerGrants::new(false, true, false).unwrap();
+    assert_eq!(
+        runtime.start_session(SENDER_ID, session_id, send_scope),
+        Err(TrustedSessionError::GrantNotAuthorized)
+    );
+    assert!(transport_log.lock().unwrap().started.is_empty());
+
+    let granted_view_scope = TrustedPeerGrants::new(true, false, false).unwrap();
+    runtime
+        .start_session(SENDER_ID, session_id, granted_view_scope)
+        .unwrap();
     runtime.revoke_peer(SENDER_ID, 2_000).unwrap();
     assert!(!peers.is_trusted(SENDER_ID).unwrap());
     assert_eq!(transport_log.lock().unwrap().closed, vec![session_id]);
@@ -226,7 +240,7 @@ fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
     let mut restarted =
         MirrorMeshRuntime::new(RECEIVER_ID, &identity, &peers, restarted_transport).unwrap();
     assert_eq!(
-        restarted.start_session(SENDER_ID, SessionId::from_bytes([10; 16])),
+        restarted.start_session(SENDER_ID, SessionId::from_bytes([10; 16]), view_scope(),),
         Err(TrustedSessionError::PeerNotTrusted)
     );
     assert!(restarted_log.lock().unwrap().started.is_empty());

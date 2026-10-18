@@ -78,6 +78,10 @@ fn session(value: u8) -> SessionId {
     SessionId::from_bytes([value; 16])
 }
 
+fn view_scope() -> TrustedPeerGrants {
+    TrustedPeerGrants::new(true, false, false).unwrap()
+}
+
 #[test]
 fn revoke_closes_only_owned_sessions_and_survives_sqlite_reopen() {
     let database = TempDatabase::new();
@@ -93,9 +97,15 @@ fn revoke_closes_only_owned_sessions_and_survives_sqlite_reopen() {
     let transport_state = Arc::clone(&transport.0);
     {
         let mut runtime = TrustedSessionRuntime::new(&store, transport);
-        runtime.start_session(first_peer_id, session(1)).unwrap();
-        runtime.start_session(first_peer_id, session(2)).unwrap();
-        runtime.start_session(second_peer_id, session(3)).unwrap();
+        runtime
+            .start_session(first_peer_id, session(1), view_scope())
+            .unwrap();
+        runtime
+            .start_session(first_peer_id, session(2), view_scope())
+            .unwrap();
+        runtime
+            .start_session(second_peer_id, session(3), view_scope())
+            .unwrap();
 
         runtime.revoke_peer(first_peer_id, 2_000).unwrap();
 
@@ -116,11 +126,11 @@ fn revoke_closes_only_owned_sessions_and_survives_sqlite_reopen() {
     let restarted_state = Arc::clone(&restarted_transport.0);
     let mut restarted_runtime = TrustedSessionRuntime::new(&reopened_store, restarted_transport);
     assert_eq!(
-        restarted_runtime.start_session(first_peer_id, session(4)),
+        restarted_runtime.start_session(first_peer_id, session(4), view_scope()),
         Err(TrustedSessionError::PeerNotTrusted)
     );
     restarted_runtime
-        .start_session(second_peer_id, session(5))
+        .start_session(second_peer_id, session(5), view_scope())
         .unwrap();
     assert_eq!(
         restarted_state.lock().unwrap().started,

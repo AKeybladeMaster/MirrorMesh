@@ -31,5 +31,5 @@ This candidate has not passed security review, cross-track API review, or a real
 ## Consequences and open gates
 
 - The shared signing port is a proposed public contract and requires CORE/cross-track review before other platform teams depend on it.
-- Generic coordinator/runtime composition is proposed in [ADR-0010](0010-pairing-runtime-composition.md). Concrete Windows adapter assembly plus Linux Secret Service, Android Keystore, iOS Keychain, pairing UI, authenticated signaling, and revocation-driven transport closure remain open.
+- Generic coordinator/runtime composition is proposed in [ADR-0010](0010-pairing-runtime-composition.md). Concrete Windows adapter assembly plus Linux Secret Service, Android Keystore, iOS Keychain, pairing UI, authenticated signaling, and wiring the revocation/grant-gated runtime into platform resources remain open.
 - The existing verifier profile in ADR-0007 remains proposed. No network pairing, trust UI, real Credential Manager run, or owned-LAN acceptance scenario has passed.

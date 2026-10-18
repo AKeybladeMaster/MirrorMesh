@@ -13,7 +13,7 @@
 - Add `MirrorMeshRuntime`, which constructs both components over the same `LocalPairingIdentityPort`, `PairingIdentityPort`, `TrustedPeerPort`, and one `TransportPort` instance.
 - Expose the consent-gated invitation, source-aware proof verification, explicit grant approval, trusted transport start/stop, and peer revoke operations through the facade.
 - Recreate the facade after local identity rotation or deletion. Serialize mutating calls through one application runtime owner.
-- `start_session` starts a trusted peer's control transport only. It does not create an offer, authorize capture, or establish media; a future signaling/session layer must apply direction-specific grants and capture consent before media setup.
+- `start_session` starts a trusted peer's control transport only and requires a caller-supplied operation grant set, checked against persisted approval as described in proposed [ADR-0019](0019-trusted-session-grant-scope-candidate.md). It does not create an offer, authorize capture, or establish media; future signaling, capture, annotation, and media boundaries must apply their operation-specific grants and capture consent.
 
 ## Consequences and open gates
 
