@@ -10,3 +10,8 @@ mm-domain.workspace = true
 mm-ports.workspace = true
 mm-security.workspace = true
 
+[dev-dependencies]
+ed25519-dalek.workspace = true
+mm-adapter-identity.workspace = true
+mm-store.workspace = true
+

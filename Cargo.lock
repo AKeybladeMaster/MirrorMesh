@@ -1052,10 +1052,13 @@ dependencies = [
 name = "mm-runtime"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
+ "mm-adapter-identity",
  "mm-application",
  "mm-domain",
  "mm-ports",
  "mm-security",
+ "mm-store",
 ]
 
 [[package]]
