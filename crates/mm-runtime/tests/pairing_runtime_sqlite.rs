@@ -1,14 +1,20 @@
+use std::net::{IpAddr, Ipv4Addr};
+
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
-use mm_application::{PairingCoordinatorError, PairingProof};
+use mm_application::PairingProof;
 use mm_domain::{DeviceId, PeerGrant, PeerPublicKey, TrustedPeerGrants};
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
-use mm_runtime::PairingRuntime;
+use mm_runtime::{PairingRuntime, PairingRuntimeError};
 use mm_security::{PairingNonce, parse_pairing_qr};
 use mm_store::SqliteTrustedPeers;
 
 const RECEIVER_ID: DeviceId = DeviceId::from_bytes([1; 16]);
 const SENDER_ID: DeviceId = DeviceId::from_bytes([2; 16]);
+
+fn source_ip() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))
+}
 
 struct TestIdentity(SigningKey);
 
@@ -110,7 +116,7 @@ fn verifies_real_signature_and_persists_sqlite_trust_only_after_approval() {
     let nonce = invitation_nonce(&mut runtime);
 
     let pending = runtime
-        .verify_proof(signed_proof(nonce, false), 101)
+        .verify_proof_from(source_ip(), signed_proof(nonce, false), 101)
         .unwrap();
     assert!(peers.get_peer(SENDER_ID).unwrap().is_none());
 
@@ -138,8 +144,10 @@ fn rejects_modified_real_signature_without_persisting_trust() {
     let nonce = invitation_nonce(&mut runtime);
 
     assert!(matches!(
-        runtime.verify_proof(signed_proof(nonce, true), 101),
-        Err(PairingCoordinatorError::IdentityRejected)
+        runtime.verify_proof_from(source_ip(), signed_proof(nonce, true), 101),
+        Err(PairingRuntimeError::Coordinator(
+            mm_application::PairingCoordinatorError::IdentityRejected
+        ))
     ));
     assert!(peers.get_peer(SENDER_ID).unwrap().is_none());
 }

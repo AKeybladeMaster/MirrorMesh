@@ -1,6 +1,6 @@
 mod pairing;
 
-pub use pairing::PairingRuntime;
+pub use pairing::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
 
 use std::collections::HashMap;
 use std::fmt;

@@ -1,22 +1,90 @@
+use std::fmt;
+use std::net::IpAddr;
+
 use mm_application::{
     PairingCoordinator, PairingCoordinatorError, PairingInvitation, PairingProof,
     PendingPairingApproval,
 };
 use mm_domain::{DeviceId, TrustedPeer, TrustedPeerGrants};
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
-use mm_security::PendingPairingNonces;
+use mm_security::{
+    PairingAttemptDecision, PairingAttemptLimiter, PairingAttemptLimiterError, PendingPairingNonces,
+};
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AdmittedPendingPairingApproval {
+    source_ip: IpAddr,
+    approval: PendingPairingApproval,
+}
+
+impl AdmittedPendingPairingApproval {
+    pub const fn source_ip(&self) -> IpAddr {
+        self.source_ip
+    }
+
+    pub const fn approval(&self) -> &PendingPairingApproval {
+        &self.approval
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairingRuntimeError {
+    Coordinator(PairingCoordinatorError),
+    AdmissionState(PairingAttemptLimiterError),
+    AdmissionCleanup(PairingAttemptLimiterError),
+    CoolingDown { retry_after_ms: u64 },
+    CapacityLimited,
+}
+
+impl fmt::Display for PairingRuntimeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Coordinator(error) => write!(formatter, "pairing coordinator failed: {error:?}"),
+            Self::AdmissionState(error) => write!(formatter, "pairing admission failed: {error}"),
+            Self::AdmissionCleanup(error) => {
+                write!(
+                    formatter,
+                    "peer was saved but admission cleanup failed: {error}"
+                )
+            }
+            Self::CoolingDown { retry_after_ms } => {
+                write!(
+                    formatter,
+                    "pairing source is cooling down for {retry_after_ms} ms"
+                )
+            }
+            Self::CapacityLimited => formatter.write_str("pairing source capacity is full"),
+        }
+    }
+}
+
+impl std::error::Error for PairingRuntimeError {}
+
+impl From<PairingCoordinatorError> for PairingRuntimeError {
+    fn from(error: PairingCoordinatorError) -> Self {
+        Self::Coordinator(error)
+    }
+}
+
+impl From<PairingAttemptLimiterError> for PairingRuntimeError {
+    fn from(error: PairingAttemptLimiterError) -> Self {
+        Self::AdmissionState(error)
+    }
+}
 
 /// Runtime composition for the consent-gated pairing flow.
 ///
 /// This runtime captures the local key fingerprint when it is constructed. Drop
 /// and recreate it after rotating or deleting the local identity before issuing
-/// another invitation.
+/// another invitation. Keep it alive for the listener lifetime so its in-memory
+/// per-source attempt budgets are not reset between requests.
 pub struct PairingRuntime<'a, P, I>
 where
     P: TrustedPeerPort,
     I: LocalPairingIdentityPort + PairingIdentityPort,
 {
     coordinator: PairingCoordinator<'a, P, I>,
+    attempt_limiter: PairingAttemptLimiter,
 }
 
 impl<'a, P, I> PairingRuntime<'a, P, I>
@@ -33,6 +101,21 @@ where
         identity: &'a I,
         peers: &'a P,
     ) -> Result<Self, PortError> {
+        Self::new_with_limiter(
+            local_device_id,
+            identity,
+            peers,
+            PairingAttemptLimiter::default(),
+        )
+    }
+
+    /// Initializes pairing with an injected attempt limiter for explicit policy ownership.
+    pub fn new_with_limiter(
+        local_device_id: DeviceId,
+        identity: &'a I,
+        peers: &'a P,
+        attempt_limiter: PairingAttemptLimiter,
+    ) -> Result<Self, PortError> {
         let local_public_key = identity.local_public_key()?;
         let local_fingerprint = identity.fingerprint_public_key(&local_public_key)?;
         let coordinator = PairingCoordinator::new(
@@ -42,7 +125,10 @@ where
             identity,
             peers,
         );
-        Ok(Self { coordinator })
+        Ok(Self {
+            coordinator,
+            attempt_limiter,
+        })
     }
 
     /// Creates a user-displayable invitation for an explicitly approved endpoint.
@@ -61,43 +147,69 @@ where
         )
     }
 
-    /// Verifies possession and returns a pending approval without persisting trust.
-    pub fn verify_proof(
+    /// Reserves an attempt before proof verification and binds the source to pending approval.
+    pub fn verify_proof_from(
         &mut self,
+        source_ip: IpAddr,
         proof: PairingProof,
         now_monotonic_ms: u64,
-    ) -> Result<PendingPairingApproval, PairingCoordinatorError> {
-        self.coordinator.verify_proof(proof, now_monotonic_ms)
+    ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
+        match self
+            .attempt_limiter
+            .begin_attempt(source_ip, now_monotonic_ms)?
+        {
+            PairingAttemptDecision::Allowed => {}
+            PairingAttemptDecision::CoolingDown { retry_after_ms } => {
+                return Err(PairingRuntimeError::CoolingDown { retry_after_ms });
+            }
+            PairingAttemptDecision::CapacityLimited => {
+                return Err(PairingRuntimeError::CapacityLimited);
+            }
+        }
+        let approval = self.coordinator.verify_proof(proof, now_monotonic_ms)?;
+        Ok(AdmittedPendingPairingApproval {
+            source_ip,
+            approval,
+        })
     }
 
     /// Persists only the explicitly approved subset of the sender's requested grants.
     pub fn approve(
         &self,
-        pending: PendingPairingApproval,
+        pending: AdmittedPendingPairingApproval,
         approved_grants: TrustedPeerGrants,
         now_monotonic_ms: u64,
         paired_at_unix_ms: u64,
-    ) -> Result<TrustedPeer, PairingCoordinatorError> {
-        self.coordinator.approve(
-            pending,
+    ) -> Result<TrustedPeer, PairingRuntimeError> {
+        let source_ip = pending.source_ip;
+        let peer = self.coordinator.approve(
+            pending.approval,
             approved_grants,
             now_monotonic_ms,
             paired_at_unix_ms,
-        )
+        )?;
+        self.attempt_limiter
+            .record_success(source_ip)
+            .map_err(PairingRuntimeError::AdmissionCleanup)?;
+        Ok(peer)
     }
 }
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use mm_application::{PairingCoordinatorError, PairingProof};
     use mm_domain::{
         DeviceId, PeerFingerprint, PeerGrant, PeerPublicKey, TrustedPeer, TrustedPeerGrants,
     };
     use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
-    use mm_security::{PairingNonce, parse_pairing_qr};
+    use mm_security::{
+        PairingAttemptLimiter, PairingAttemptPolicy, PairingNonce, parse_pairing_qr,
+    };
 
-    use super::PairingRuntime;
+    use super::{PairingRuntime, PairingRuntimeError};
 
     const RECEIVER_ID: DeviceId = DeviceId::from_bytes([1; 16]);
     const SENDER_ID: DeviceId = DeviceId::from_bytes([2; 16]);
@@ -107,6 +219,7 @@ mod tests {
         fail_local_key: bool,
         fail_fingerprint: bool,
         reject_signature: bool,
+        verify_calls: AtomicUsize,
     }
 
     impl FakeIdentity {
@@ -116,6 +229,7 @@ mod tests {
                 fail_local_key: false,
                 fail_fingerprint: false,
                 reject_signature: false,
+                verify_calls: AtomicUsize::new(0),
             }
         }
 
@@ -125,6 +239,7 @@ mod tests {
                 fail_local_key: true,
                 fail_fingerprint: false,
                 reject_signature: false,
+                verify_calls: AtomicUsize::new(0),
             }
         }
     }
@@ -171,6 +286,7 @@ mod tests {
             _message: &[u8],
             signature: &[u8],
         ) -> Result<(), PortError> {
+            self.verify_calls.fetch_add(1, Ordering::Relaxed);
             if self.reject_signature || signature.len() != 64 {
                 return Err(PortError::IdentityRejected);
             }
@@ -249,6 +365,93 @@ mod tests {
         parse_pairing_qr(invitation, 200, &[8765]).unwrap().nonce()
     }
 
+    fn admission_limiter(max_attempts: u8) -> PairingAttemptLimiter {
+        PairingAttemptLimiter::new(
+            PairingAttemptPolicy::new(max_attempts, 60_000, 30_000, 4).unwrap(),
+        )
+    }
+
+    fn source_ip() -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))
+    }
+
+    #[test]
+    fn cooldown_rejects_before_signature_verification() {
+        let identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
+        let store = FakeTrustedPeers::default();
+        let mut runtime =
+            PairingRuntime::new_with_limiter(RECEIVER_ID, &identity, &store, admission_limiter(1))
+                .unwrap();
+        let invitation = runtime
+            .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
+            .unwrap();
+        let nonce = invitation_nonce(invitation.uri());
+        let invalid_proof = || {
+            PairingProof::new(
+                RECEIVER_ID,
+                nonce,
+                SENDER_ID,
+                "Sender laptop".to_owned(),
+                PeerPublicKey::new(vec![7; 32]).unwrap(),
+                requested_grants(),
+                vec![1],
+            )
+            .unwrap()
+        };
+
+        assert_eq!(
+            runtime.verify_proof_from(source_ip(), invalid_proof(), 101),
+            Err(PairingRuntimeError::Coordinator(
+                PairingCoordinatorError::IdentityRejected
+            ))
+        );
+        assert_eq!(
+            runtime.verify_proof_from(source_ip(), invalid_proof(), 102),
+            Err(PairingRuntimeError::CoolingDown {
+                retry_after_ms: 29_999
+            })
+        );
+        assert_eq!(identity.verify_calls.load(Ordering::Relaxed), 1);
+        assert!(store.list_peers().unwrap().is_empty());
+    }
+
+    #[test]
+    fn approved_pairing_clears_the_admitted_source_budget() {
+        let identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
+        let store = FakeTrustedPeers::default();
+        let mut runtime =
+            PairingRuntime::new_with_limiter(RECEIVER_ID, &identity, &store, admission_limiter(1))
+                .unwrap();
+        let invitation = runtime
+            .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
+            .unwrap();
+        let pending = runtime
+            .verify_proof_from(
+                source_ip(),
+                pairing_proof(invitation_nonce(invitation.uri())),
+                101,
+            )
+            .unwrap();
+
+        runtime
+            .approve(pending, requested_grants(), 102, 500)
+            .unwrap();
+
+        let next_invitation = runtime
+            .create_invitation("127.0.0.1:8765", &[8765], 103, 200)
+            .unwrap();
+        assert!(
+            runtime
+                .verify_proof_from(
+                    source_ip(),
+                    pairing_proof(invitation_nonce(next_invitation.uri())),
+                    104,
+                )
+                .is_ok()
+        );
+        assert_eq!(identity.verify_calls.load(Ordering::Relaxed), 2);
+    }
+
     #[test]
     fn derives_local_fingerprint_and_persists_only_after_explicit_approval() {
         let identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
@@ -262,7 +465,7 @@ mod tests {
         assert_eq!(payload.fingerprint(), PeerFingerprint::from_bytes([9; 32]));
 
         let pending = runtime
-            .verify_proof(pairing_proof(payload.nonce()), 101)
+            .verify_proof_from(source_ip(), pairing_proof(payload.nonce()), 101)
             .unwrap();
         assert!(store.list_peers().unwrap().is_empty());
 
@@ -311,8 +514,10 @@ mod tests {
         let nonce = invitation_nonce(invitation.uri());
 
         assert!(matches!(
-            runtime.verify_proof(pairing_proof(nonce), 101),
-            Err(PairingCoordinatorError::IdentityRejected)
+            runtime.verify_proof_from(source_ip(), pairing_proof(nonce), 101),
+            Err(PairingRuntimeError::Coordinator(
+                PairingCoordinatorError::IdentityRejected
+            ))
         ));
         assert!(store.list_peers().unwrap().is_empty());
     }
@@ -326,12 +531,16 @@ mod tests {
             .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
             .unwrap();
         let nonce = invitation_nonce(invitation.uri());
-        let pending = runtime.verify_proof(pairing_proof(nonce), 101).unwrap();
+        let pending = runtime
+            .verify_proof_from(source_ip(), pairing_proof(nonce), 101)
+            .unwrap();
 
         assert!(store.list_peers().unwrap().is_empty());
         assert_eq!(
             runtime.approve(pending, requested_grants(), 102, 500),
-            Err(PairingCoordinatorError::StoreFailure)
+            Err(PairingRuntimeError::Coordinator(
+                PairingCoordinatorError::StoreFailure
+            ))
         );
         assert!(store.list_peers().unwrap().is_empty());
     }

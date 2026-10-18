@@ -18,7 +18,7 @@ The pairing proof verifier is exposed to untrusted network input once an authent
 
 ## Consequences and remaining evidence
 
-The core now provides an atomic admission primitive before expensive verification and tests 20 attempt admissions from one source across cooldowns. It is not wired into a signaling listener because no listener exists. The default policy and capacity behavior remain a proposal pending security review; table saturation can temporarily deny previously unseen sources. No sockets, network traffic, or device pairing are exercised.
+The core now provides an atomic admission primitive before expensive verification. `mm-runtime::PairingRuntime::verify_proof_from` calls it before the identity verifier and carries the admitted IP into the pending approval so successful trust persistence clears the matching history. Runtime tests exercise rejection before signature verification and clearing after approval. No signaling listener exists yet, so no network path uses this composition. The default policy and capacity behavior remain a proposal pending security review; table saturation can temporarily deny previously unseen sources. No sockets, network traffic, or device pairing are exercised.
 
 ## Verification
 
