@@ -10,6 +10,10 @@ The shared CORE contract now has a bounded manual endpoint parser, strict QR par
 
 ## Deliverables and detailed steps
 
+### Shared mDNS discovery candidate (2026-10-18)
+
+`crates/mm-adapter-discovery/` now contains a `DiscoveryPort` candidate backed by pinned `mdns-sd 0.21.5`. It browses `_mirrormesh._tcp.local.` for at most two seconds, parses the proposed strict TXT v1 fields, filters unusable endpoints, and returns device hints and resolved addresses. Eleven parser tests pass on Rust 1.99.1 and Rust 1.85 without opening sockets. This is not yet assembled into app startup and did not exercise multicast or an owned LAN. Proposed [ADR-0012](../docs/adr/0012-mdns-discovery-candidate.md) records the dependency and schema; its cross-track/security review remains pending. The upstream compatibility statement covers Windows, Linux, and macOS; Android and iOS still need native discovery and permission adapters.
+
 1. Implement `DiscoveryPort` adapter using vetted mDNS/DNS-SD Rust crate, test `_mirrormesh._tcp.local` TXT in real LAN; no BLE dependency in MVP.
 2. Add strict manual URI/IP:port parser; reject URL schemes, DNS rebinding/redirection, private-key contents or arbitrary ports not explicitly user-approved.
 3. Generate OS keychain private identity and SQLite public peer table from `docs/protocol.md`; signed challenge proves possession and matches QR fingerprint. Security review must evaluate self-signed TLS pinning and replay handling.

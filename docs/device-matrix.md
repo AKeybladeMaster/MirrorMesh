@@ -51,7 +51,7 @@ Task 07 is **BLOCKED at its entry gate**: no implemented sender and native Andro
 ## Radio and networking reality
 
 - BLE advertising/scan may help identify device IDs or exchange onboarding hints but cannot be treated as a 1080p screen-video transport.
-- Same Wi-Fi is helpful, **same subnet/multicast visibility** is needed for mDNS discovery. Client isolation/VLAN/VPN may prevent this; manual address and TURN can address different cases.
+- Same Wi-Fi is helpful, **same subnet/multicast visibility** is needed for mDNS discovery. Client isolation/VLAN/VPN may prevent this; manual address and TURN can address different cases. The shared Rust browser candidate currently has parser/unit-test evidence only; platform permission behavior and owned-LAN interoperability remain unverified.
 - WebRTC uses ICE for candidates, DTLS/SRTP for media, and a separate authenticated signaling path; simply opening a TCP listener does not implement interoperability.
 - Tethering/hotspot and USB are optional transport alternatives if both devices permit IP traffic.
 - Chromecast, AirPlay, Miracast, DLNA and app-specific WebRTC are **different** protocols with different capabilities and conditions.
