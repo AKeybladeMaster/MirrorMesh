@@ -1,5 +1,6 @@
 use std::fmt;
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -56,6 +57,21 @@ pub trait ClockPort: Send + Sync {
 pub trait DiscoveryPort: Send + Sync {
     fn discover(&self) -> Result<Vec<Device>, PortError>;
     fn stop(&self) -> Result<(), PortError>;
+}
+
+/// A single unauthenticated device hint and the resolved network addresses associated with it.
+///
+/// The device identifier, metadata, and endpoints are attacker-controlled until pairing proves
+/// the peer identity. This value must never imply trust or authorization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryCandidate {
+    pub device: Device,
+    pub endpoints: Vec<SocketAddr>,
+}
+
+/// Endpoint-preserving discovery extension for use cases that need to initiate pairing.
+pub trait DiscoveryCandidatesPort: DiscoveryPort {
+    fn discover_candidates(&self) -> Result<Vec<DiscoveryCandidate>, PortError>;
 }
 
 pub trait CapturePort: Send {

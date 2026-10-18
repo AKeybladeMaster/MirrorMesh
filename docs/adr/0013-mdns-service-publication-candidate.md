@@ -18,7 +18,7 @@ ADR-0012 defines a candidate DNS-SD record and a bounded browser. The adapter al
 
 ## Consequences and remaining evidence
 
-Nineteen host unit tests now cover strict parsing and service-record construction, including local-address restrictions, capability bounds, address limits, and inactive-stop idempotence. They do not start the mDNS daemon or send packets. The publisher is not wired into app startup or a user-facing discoverability control; stable identity/runtime assembly and cross-track FFI review are still required. Android and iOS need separate native discovery/permission adapters. Owned-LAN interoperability remains unverified.
+Twenty-one host unit tests now cover strict parsing, service-record construction, and endpoint conversion, including local-address restrictions, capability bounds, address limits, and inactive-stop idempotence. They do not start the mDNS daemon or send packets. The publisher is not wired into app startup or a user-facing discoverability control; stable identity/runtime assembly and cross-track FFI review are still required. Android and iOS need separate native discovery/permission adapters. Owned-LAN interoperability remains unverified.
 
 ## Sources
 

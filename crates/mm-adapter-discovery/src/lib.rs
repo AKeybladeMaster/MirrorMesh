@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mdns_sd::{DaemonStatus, ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use mm_domain::{CapabilitySet, Device, DeviceId, DeviceRole};
-use mm_ports::{DiscoveryPort, PortError};
+use mm_ports::{DiscoveryCandidate, DiscoveryCandidatesPort, DiscoveryPort, PortError};
 
 pub const MIRRORMESH_SERVICE_TYPE: &str = "_mirrormesh._tcp.local.";
 pub const MIRRORMESH_SIGNALING_PORT: u16 = 8765;
@@ -509,10 +509,49 @@ fn parse_resolved_service(
     )
 }
 
+fn candidate_from_service(service: DiscoveredService) -> DiscoveryCandidate {
+    let port = service.endpoint.port;
+    let mut endpoints: Vec<_> = service
+        .endpoint
+        .addresses
+        .into_iter()
+        .filter_map(|address| socket_addr(address, port))
+        .collect();
+    endpoints.sort();
+    endpoints.dedup();
+    DiscoveryCandidate {
+        device: service.device,
+        endpoints,
+    }
+}
+
+fn socket_addr(address: ScopedIp, port: u16) -> Option<SocketAddr> {
+    match address {
+        ScopedIp::V4(address) => Some(SocketAddrV4::new(*address.addr(), port).into()),
+        ScopedIp::V6(address) => Some(socket_addr_v6(
+            *address.addr(),
+            port,
+            address.scope_id().index,
+        )),
+        _ => None,
+    }
+}
+
+fn socket_addr_v6(address: Ipv6Addr, port: u16, scope_id: u32) -> SocketAddr {
+    SocketAddrV6::new(address, port, 0, scope_id).into()
+}
+
+impl DiscoveryCandidatesPort for MdnsDiscoveryAdapter {
+    fn discover_candidates(&self) -> Result<Vec<DiscoveryCandidate>, PortError> {
+        self.discover_services()
+            .map(|services| services.into_iter().map(candidate_from_service).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
     use mdns_sd::ScopedIp;
 
@@ -906,5 +945,39 @@ mod tests {
             Err(mm_ports::PortError::InvalidConfiguration)
         );
         assert_eq!(publisher.stop(), Ok(()));
+    }
+
+    #[test]
+    fn discovery_candidate_preserves_and_normalizes_resolved_socket_endpoints() {
+        let ipv4 = ScopedIp::from(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40)));
+        let ipv6 = ScopedIp::from(IpAddr::V6("fd12:3456:789a::1".parse::<Ipv6Addr>().unwrap()));
+        let service = super::DiscoveredService {
+            device: local_device(),
+            endpoint: super::DiscoveredEndpoint {
+                port: 8765,
+                addresses: vec![ipv6, ipv4.clone(), ipv4],
+            },
+        };
+
+        let candidate = super::candidate_from_service(service);
+
+        assert_eq!(candidate.endpoints.len(), 2);
+        assert_eq!(
+            candidate.endpoints,
+            vec![
+                "192.168.1.40:8765".parse::<SocketAddr>().unwrap(),
+                "[fd12:3456:789a::1]:8765".parse::<SocketAddr>().unwrap(),
+            ]
+        );
+        assert!(
+            matches!(candidate.endpoints[1], SocketAddr::V6(address) if address.scope_id() == 0)
+        );
+    }
+
+    #[test]
+    fn ipv6_socket_endpoint_carries_its_interface_scope() {
+        let endpoint = super::socket_addr_v6("fe80::1".parse().unwrap(), 8765, 7);
+
+        assert!(matches!(endpoint, SocketAddr::V6(address) if address.scope_id() == 7));
     }
 }
