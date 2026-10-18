@@ -20,6 +20,8 @@ The Rust protocol parser accepts a strict candidate payload: canonical lowercase
 
 `mm-protocol::encode_pair_begin` uses the same payload validation when serializing sender frames. Its caller supplies the signature; the encoder does not sign JSON or establish peer identity. `PairingProof` accessors expose immutable references/copies of the already validated proof data, while its fields remain private. Proposed [ADR-0021](adr/0021-pair-begin-outbound-encoding-candidate.md) records this API; signing and authenticated transport remain separate trust boundaries.
 
+`PairingProof::create_signed` creates the signature through `LocalPairingIdentityPort` and rejects self-pairing before calling the signer. Its caller remains responsible for validating the QR, expiry, receiver fingerprint, and local device-ID binding. Proposed [ADR-0022](adr/0022-sender-proof-creation-candidate.md) records this candidate API; it neither verifies a receiver nor persists trust.
+
 ### Trusted-session grant scope
 
 Before it starts a control transport, `TrustedSessionRuntime` loads the peer's active persisted record and checks that the caller-requested `TrustedPeerGrants` are covered by the approved grant set. A denied request returns `GrantNotAuthorized` before transport start. The composed `MirrorMeshRuntime` applies the same gate. The runtime cannot infer local sender/receiver direction; callers must choose the correct operation scope, and capture, annotation, media, and signaling code must enforce their own required grants at those boundaries. Proposed [ADR-0019](adr/0019-trusted-session-grant-scope-candidate.md) records the API candidate. Unit and fake-transport SQLite integration tests cover the denial boundary; no platform, signaling, or real-media path uses it yet.

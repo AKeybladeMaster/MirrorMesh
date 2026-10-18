@@ -110,33 +110,31 @@ fn invitation_nonce(
 }
 
 fn signed_proof(nonce: PairingNonce, tamper_signature: bool) -> PairingProof {
-    let sender_key = SigningKey::from_bytes(&[0x42; 32]);
-    let sender_public_key =
-        PeerPublicKey::new(sender_key.verifying_key().to_bytes().to_vec()).unwrap();
+    let sender_identity = TestIdentity::new([0x42; 32]);
     let grants = TrustedPeerGrants::new(true, true, true).unwrap();
-    let unsigned = PairingProof::new(
+    let proof = PairingProof::create_signed(
         RECEIVER_ID,
         nonce,
         SENDER_ID,
         "Sender laptop".to_owned(),
-        sender_public_key.clone(),
         grants,
-        vec![0; 64],
+        &sender_identity,
     )
     .unwrap();
-    let mut signature = sender_key.sign(&unsigned.signing_message()).to_bytes();
-    if tamper_signature {
-        signature[0] ^= 1;
+    if !tamper_signature {
+        return proof;
     }
 
+    let mut signature = proof.signature().to_vec();
+    signature[0] ^= 1;
     PairingProof::new(
-        RECEIVER_ID,
-        nonce,
-        SENDER_ID,
-        "Sender laptop".to_owned(),
-        sender_public_key,
-        grants,
-        signature.to_vec(),
+        proof.receiver_id(),
+        proof.nonce(),
+        proof.peer_id(),
+        proof.display_name().to_owned(),
+        proof.public_key().clone(),
+        proof.requested_grants(),
+        signature,
     )
     .unwrap()
 }

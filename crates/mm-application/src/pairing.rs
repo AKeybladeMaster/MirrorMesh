@@ -1,8 +1,10 @@
+use std::fmt;
+
 use mm_domain::{
     DeviceId, MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, PeerFingerprint, PeerGrant, PeerPublicKey,
     TrustedPeer, TrustedPeerGrants,
 };
-use mm_ports::{PairingIdentityPort, TrustedPeerPort};
+use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
 use mm_security::{
     ManualEndpointError, NonceIssueError, PairingNonce, PendingPairingNonces, format_pairing_qr,
     parse_manual_ip_endpoint, parse_pairing_qr,
@@ -26,6 +28,25 @@ pub enum PairingCoordinatorError {
     GrantNotRequested,
     StoreFailure,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairingProofSigningError {
+    SelfPairing,
+    Identity(PortError),
+    InvalidProof(PairingCoordinatorError),
+}
+
+impl fmt::Display for PairingProofSigningError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SelfPairing => formatter.write_str("a device cannot pair with itself"),
+            Self::Identity(error) => write!(formatter, "pairing signer failed: {error}"),
+            Self::InvalidProof(error) => write!(formatter, "pairing proof is invalid: {error:?}"),
+        }
+    }
+}
+
+impl std::error::Error for PairingProofSigningError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairingInvitation {
@@ -89,6 +110,53 @@ impl PairingProof {
             requested_grants,
             signature,
         })
+    }
+
+    /// Creates a possession proof using a device's protected local signing identity.
+    ///
+    /// The caller must obtain the receiver ID and nonce from a validated invitation, verify the
+    /// receiver fingerprint through its connection policy, and supply the sender's local device
+    /// ID. This method only validates and signs the canonical proof; it does not validate QR
+    /// expiry or authenticate a transport connection.
+    pub fn create_signed(
+        receiver_id: DeviceId,
+        nonce: PairingNonce,
+        peer_id: DeviceId,
+        display_name: String,
+        requested_grants: TrustedPeerGrants,
+        identity: &impl LocalPairingIdentityPort,
+    ) -> Result<Self, PairingProofSigningError> {
+        if receiver_id == peer_id {
+            return Err(PairingProofSigningError::SelfPairing);
+        }
+
+        let public_key = identity
+            .local_public_key()
+            .map_err(PairingProofSigningError::Identity)?;
+        let unsigned = Self::new(
+            receiver_id,
+            nonce,
+            peer_id,
+            display_name.clone(),
+            public_key.clone(),
+            requested_grants,
+            vec![0],
+        )
+        .map_err(PairingProofSigningError::InvalidProof)?;
+        let signature = identity
+            .sign_pairing_message(&unsigned.signing_message())
+            .map_err(PairingProofSigningError::Identity)?;
+
+        Self::new(
+            receiver_id,
+            nonce,
+            peer_id,
+            display_name,
+            public_key,
+            requested_grants,
+            signature,
+        )
+        .map_err(PairingProofSigningError::InvalidProof)
     }
 
     /// Canonical bytes the sender signs and the receiver verifies.
