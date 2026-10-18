@@ -610,6 +610,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mm-adapter-win"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "getrandom",
+ "mm-adapter-identity",
+ "mm-domain",
+ "mm-ports",
+ "windows-sys",
+ "zeroize",
+]
+
+[[package]]
 name = "mm-application"
 version = "0.1.0"
 dependencies = [
@@ -1115,6 +1128,15 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "windows-sys"
+version = "0.61.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+dependencies = [
+ "windows-link",
+]
 
 [[package]]
 name = "zeroize"

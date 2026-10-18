@@ -130,6 +130,23 @@ pub trait TrustedPeerPort: Send + Sync {
     }
 }
 
+/// Local signing and lifecycle boundary for a device's pairing identity.
+///
+/// Implementations must keep private material inside the platform identity adapter,
+/// refuse to sign non-domain-separated pairing messages, and never export the private seed.
+pub trait LocalPairingIdentityPort: Send + Sync {
+    fn local_public_key(&self) -> Result<PeerPublicKey, PortError>;
+
+    /// Signs the canonical domain-separated message produced by the pairing application.
+    fn sign_pairing_message(&self, message: &[u8]) -> Result<Vec<u8>, PortError>;
+
+    /// Rotates the local key only after the replacement is durably protected by the OS.
+    fn rotate_identity(&self) -> Result<PeerPublicKey, PortError>;
+
+    /// Removes the persisted key and disables signing through this loaded identity.
+    fn delete_identity(&self) -> Result<(), PortError>;
+}
+
 /// Cryptographic identity boundary for the first-time pairing proof.
 ///
 /// Implementations must compute SHA-256 over the agreed canonical public-key
