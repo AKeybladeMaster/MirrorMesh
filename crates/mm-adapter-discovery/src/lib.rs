@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent};
+use mdns_sd::{DaemonStatus, ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use mm_domain::{CapabilitySet, Device, DeviceId, DeviceRole};
 use mm_ports::{DiscoveryPort, PortError};
 
@@ -16,6 +16,7 @@ const DISCOVERY_WINDOW: Duration = Duration::from_secs(2);
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_ENDPOINT_ADDRESSES: usize = 16;
 const MAX_DISCOVERED_SERVICES: usize = 64;
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const TXT_KEYS: [&str; 8] = ["v", "id", "roles", "pair", "tls", "video", "audio", "max"];
 
 /// A resolved address and signaling port from an unauthenticated mDNS response.
@@ -178,6 +179,198 @@ pub struct MdnsDiscoveryAdapter {
     cancelled: AtomicBool,
 }
 
+/// Publishes one caller-approved local MirrorMesh service advertisement.
+///
+/// The caller supplies a device record from its stable local identity and explicit LAN
+/// addresses. Publishing is opt-in; this type does not start itself or expose private keys.
+pub struct MdnsServicePublisher {
+    active_daemon: Mutex<Option<ServiceDaemon>>,
+}
+
+impl MdnsServicePublisher {
+    pub fn new() -> Self {
+        Self {
+            active_daemon: Mutex::new(None),
+        }
+    }
+
+    /// Queues the strict protocol-v1 advertisement with the local mDNS daemon.
+    ///
+    /// Success means the daemon accepted the registration request. It does not prove that
+    /// multicast is available or that another device can see the service.
+    pub fn publish(
+        &self,
+        device: &Device,
+        host_name: &str,
+        addresses: &[IpAddr],
+    ) -> Result<(), PortError> {
+        let service_info = service_info_for(device, host_name, addresses)
+            .map_err(|_| PortError::InvalidConfiguration)?;
+        let mut active = self
+            .active_daemon
+            .lock()
+            .map_err(|_| PortError::Unavailable)?;
+        if active.is_some() {
+            return Err(PortError::Unavailable);
+        }
+
+        let daemon = ServiceDaemon::new().map_err(|_| PortError::Unavailable)?;
+        if daemon.register(service_info).is_err() {
+            let _ = shutdown_daemon(daemon);
+            return Err(PortError::Unavailable);
+        }
+        *active = Some(daemon);
+        Ok(())
+    }
+
+    /// Stops advertising and waits briefly for the daemon's graceful shutdown response.
+    pub fn stop(&self) -> Result<(), PortError> {
+        let daemon = self
+            .active_daemon
+            .lock()
+            .map_err(|_| PortError::Unavailable)?
+            .take();
+        match daemon {
+            Some(daemon) => shutdown_daemon(daemon),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Default for MdnsServicePublisher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for MdnsServicePublisher {
+    fn drop(&mut self) {
+        if let Ok(active) = self.active_daemon.get_mut() {
+            if let Some(daemon) = active.take() {
+                let _ = daemon.shutdown();
+            }
+        }
+    }
+}
+
+fn shutdown_daemon(daemon: ServiceDaemon) -> Result<(), PortError> {
+    let status = daemon
+        .shutdown()
+        .map_err(|_| PortError::Unavailable)?
+        .recv_timeout(SHUTDOWN_TIMEOUT)
+        .map_err(|_| PortError::Unavailable)?;
+    match status {
+        DaemonStatus::Shutdown => Ok(()),
+        _ => Err(PortError::Unavailable),
+    }
+}
+
+fn service_info_for(
+    device: &Device,
+    host_name: &str,
+    addresses: &[IpAddr],
+) -> Result<ServiceInfo, AdvertisementError> {
+    if device.display_name.is_empty()
+        || device.display_name.len() > 63
+        || device.display_name.chars().any(char::is_control)
+    {
+        return Err(AdvertisementError::InvalidRecord);
+    }
+
+    let capabilities = CapabilitySet::new(
+        device.capabilities.max_width,
+        device.capabilities.max_height,
+        device.capabilities.max_fps,
+        device.capabilities.h264,
+        device.capabilities.opus,
+    )
+    .map_err(|_| AdvertisementError::InvalidRecord)?;
+    if !capabilities.h264 {
+        return Err(AdvertisementError::InvalidRecord);
+    }
+
+    let roles = match (device.role.can_send(), device.role.can_receive()) {
+        (true, true) => "send,recv",
+        (true, false) => "send",
+        (false, true) => "recv",
+        (false, false) => return Err(AdvertisementError::InvalidRecord),
+    };
+
+    let mut usable_addresses: Vec<_> = addresses
+        .iter()
+        .copied()
+        .filter(|address| is_publishable_address(*address))
+        .collect();
+    usable_addresses.sort_by_key(ToString::to_string);
+    usable_addresses.dedup();
+    usable_addresses.truncate(MAX_ENDPOINT_ADDRESSES);
+    if usable_addresses.is_empty() || !valid_local_hostname(host_name) {
+        return Err(AdvertisementError::InvalidEndpoint);
+    }
+
+    let properties = [
+        ("v", "1".to_owned()),
+        ("id", device.id.to_string()),
+        ("roles", roles.to_owned()),
+        ("pair", "qr".to_owned()),
+        ("tls", "1".to_owned()),
+        ("video", "h264".to_owned()),
+        (
+            "audio",
+            if capabilities.opus { "opus" } else { "none" }.to_owned(),
+        ),
+        (
+            "max",
+            format!(
+                "{}x{}@{}",
+                capabilities.max_width, capabilities.max_height, capabilities.max_fps
+            ),
+        ),
+    ];
+    ServiceInfo::new(
+        MIRRORMESH_SERVICE_TYPE,
+        &device.display_name,
+        host_name,
+        usable_addresses.as_slice(),
+        MIRRORMESH_SIGNALING_PORT,
+        &properties[..],
+    )
+    .map_err(|_| AdvertisementError::InvalidEndpoint)
+}
+
+fn valid_local_hostname(host_name: &str) -> bool {
+    host_name.len() <= 255
+        && host_name.len() > ".local.".len()
+        && host_name.ends_with(".local.")
+        && host_name != ".local."
+}
+
+fn is_publishable_address(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            let octets = address.octets();
+            let is_private = octets[0] == 10
+                || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 168);
+            let is_link_local = octets[0] == 169 && octets[1] == 254;
+            !address.is_unspecified()
+                && !address.is_loopback()
+                && !address.is_multicast()
+                && !address.is_broadcast()
+                && (is_private || is_link_local)
+        }
+        IpAddr::V6(address) => {
+            let first_segment = address.segments()[0];
+            let is_unique_local = first_segment & 0xfe00 == 0xfc00;
+            let is_link_local = first_segment & 0xffc0 == 0xfe80;
+            !address.is_unspecified()
+                && !address.is_loopback()
+                && !address.is_multicast()
+                && (is_unique_local || is_link_local)
+        }
+    }
+}
+
 impl MdnsDiscoveryAdapter {
     pub fn new() -> Self {
         Self {
@@ -323,7 +516,10 @@ mod tests {
 
     use mdns_sd::ScopedIp;
 
-    use super::{AdvertisementError, DiscoveredService, parse_advertisement};
+    use super::{
+        AdvertisementError, DiscoveredService, MIRRORMESH_SIGNALING_PORT, parse_advertisement,
+    };
+    use mm_domain::{CapabilitySet, Device, DeviceId, DeviceRole};
 
     const SERVICE_TYPE: &str = "_mirrormesh._tcp.local.";
     const INSTANCE: &str = "Living Room TV._mirrormesh._tcp.local.";
@@ -346,6 +542,16 @@ mod tests {
 
     fn ipv4() -> Vec<ScopedIp> {
         vec![ScopedIp::from(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40)))]
+    }
+
+    fn local_device() -> Device {
+        Device::new(
+            DeviceId::parse("8b3d8788-1476-4aae-a287-334a428b5b6f").unwrap(),
+            "Living Room TV".to_owned(),
+            DeviceRole::sender_and_receiver(),
+            CapabilitySet::new(1920, 1080, 30, true, true).unwrap(),
+        )
+        .unwrap()
     }
 
     fn parse(
@@ -548,5 +754,157 @@ mod tests {
             service.endpoint.addresses[0].to_string(),
             "2001:4860:4860::8888"
         );
+    }
+
+    #[test]
+    fn builds_a_local_service_record_with_only_protocol_v1_hints() {
+        let service_info = super::service_info_for(
+            &local_device(),
+            "receiver.local.",
+            &[IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40))],
+        )
+        .unwrap();
+
+        assert_eq!(service_info.get_type(), SERVICE_TYPE);
+        assert_eq!(
+            service_info.get_fullname(),
+            "Living Room TV._mirrormesh._tcp.local."
+        );
+        assert_eq!(service_info.get_port(), 8765);
+        assert_eq!(service_info.get_property_val_str("v"), Some("1"));
+        assert_eq!(
+            service_info.get_property_val_str("id"),
+            Some("8b3d8788-1476-4aae-a287-334a428b5b6f")
+        );
+        assert_eq!(
+            service_info.get_property_val_str("roles"),
+            Some("send,recv")
+        );
+        assert_eq!(service_info.get_property_val_str("pair"), Some("qr"));
+        assert_eq!(service_info.get_property_val_str("tls"), Some("1"));
+        assert_eq!(service_info.get_property_val_str("video"), Some("h264"));
+        assert_eq!(service_info.get_property_val_str("audio"), Some("opus"));
+        assert_eq!(
+            service_info.get_property_val_str("max"),
+            Some("1920x1080@30")
+        );
+        assert_eq!(service_info.get_addresses().len(), 1);
+
+        let resolved = service_info.as_resolved_service();
+        let parsed = super::parse_resolved_service(&resolved).unwrap();
+        assert_eq!(parsed.device, local_device());
+        assert_eq!(parsed.endpoint.port, MIRRORMESH_SIGNALING_PORT);
+    }
+
+    #[test]
+    fn service_record_omits_audio_when_the_device_does_not_support_opus() {
+        let mut device = local_device();
+        device.capabilities.opus = false;
+
+        let service_info = super::service_info_for(
+            &device,
+            "receiver.local.",
+            &[IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40))],
+        )
+        .unwrap();
+
+        assert_eq!(service_info.get_property_val_str("audio"), Some("none"));
+    }
+
+    #[test]
+    fn service_record_rejects_non_local_addresses_and_empty_address_sets() {
+        for address in [
+            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6("2001:4860:4860::8888".parse().unwrap()),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ] {
+            assert!(
+                super::service_info_for(&local_device(), "receiver.local.", &[address]).is_err()
+            );
+        }
+
+        assert!(super::service_info_for(&local_device(), "receiver.local.", &[]).is_err());
+    }
+
+    #[test]
+    fn service_record_rejects_invalid_host_names_instance_names_and_capabilities() {
+        assert!(
+            super::service_info_for(
+                &local_device(),
+                "receiver.example.com.",
+                &[IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40))]
+            )
+            .is_err()
+        );
+
+        let mut long_name = local_device();
+        long_name.display_name = "x".repeat(64);
+        assert!(
+            super::service_info_for(
+                &long_name,
+                "receiver.local.",
+                &[IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40))]
+            )
+            .is_err()
+        );
+
+        let mut unsupported_video = local_device();
+        unsupported_video.capabilities.h264 = false;
+        assert!(
+            super::service_info_for(
+                &unsupported_video,
+                "receiver.local.",
+                &[IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40))]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn service_record_accepts_private_ipv4_and_unique_local_ipv6_addresses() {
+        let service_info = super::service_info_for(
+            &local_device(),
+            "receiver.local.",
+            &[
+                IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40)),
+                IpAddr::V6("fd12:3456:789a::1".parse().unwrap()),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(service_info.get_addresses().len(), 2);
+    }
+
+    #[test]
+    fn service_record_caps_the_number_of_published_addresses() {
+        let addresses: Vec<_> = (1..=20)
+            .map(|last_octet| IpAddr::V4(Ipv4Addr::new(10, 0, 0, last_octet)))
+            .collect();
+        let service_info =
+            super::service_info_for(&local_device(), "receiver.local.", &addresses).unwrap();
+
+        assert_eq!(service_info.get_addresses().len(), 16);
+    }
+
+    #[test]
+    fn stopping_an_inactive_publisher_is_idempotent() {
+        let publisher = super::MdnsServicePublisher::new();
+
+        assert_eq!(publisher.stop(), Ok(()));
+        assert_eq!(publisher.stop(), Ok(()));
+    }
+
+    #[test]
+    fn invalid_advertisement_is_rejected_before_creating_a_daemon() {
+        let publisher = super::MdnsServicePublisher::new();
+        let invalid_address = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
+
+        assert_eq!(
+            publisher.publish(&local_device(), "receiver.local.", &[invalid_address]),
+            Err(mm_ports::PortError::InvalidConfiguration)
+        );
+        assert_eq!(publisher.stop(), Ok(()));
     }
 }

@@ -20,9 +20,9 @@ The reviewed implementation candidate is [`mdns-sd 0.21.5`](https://docs.rs/crat
 
 ## Consequences and remaining evidence
 
-The DNS-SD record and adapter are candidates, not frozen cross-track contracts. Device capabilities and endpoints are now available to the shared Rust caller without changing `mm-ports` or FFI. The exact capability fields must receive cross-track review before protocol v1 is declared frozen.
+The DNS-SD record and adapter are candidates, not frozen cross-track contracts. Device capabilities and endpoints are available to the shared Rust caller without changing `mm-ports` or FFI. A matching explicit publisher candidate is described in [ADR-0013](0013-mdns-service-publication-candidate.md). The exact capability fields must receive cross-track review before protocol v1 is declared frozen.
 
-Eleven parser tests exercise valid records, DNS case-insensitivity, invalid fields, bounds, and unusable endpoints without opening sockets. Host tests do not establish multicast visibility or LAN interoperability. The current upstream support statement covers Windows, Linux, and macOS; Android and iOS require separate native discovery and permission validation before being represented as supported. Local service publication, application startup assembly, Android/iOS adapters, cancellation under a live LAN browse, and owned-LAN testing remain open.
+Nineteen parser and service-record tests exercise valid records, DNS case-insensitivity, invalid fields, bounds, and endpoint rules without opening sockets. Host tests do not establish multicast visibility or LAN interoperability. The current upstream support statement covers Windows, Linux, and macOS; Android and iOS require separate native discovery and permission validation before being represented as supported. Publisher startup is not wired into the app; application startup assembly, Android/iOS adapters, cancellation under a live LAN browse, and owned-LAN testing remain open.
 
 ## Sources
 
