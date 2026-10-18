@@ -1,7 +1,7 @@
 # Spike report  trusted-peer SQLite adapter
 
 **Date:** 2026-10-18  
-**Result:** The earlier registry-access blocker is cleared for the ADR-pinned rusqlite version. A transactional SQLite adapter now implements `TrustedPeerPort`; Android/iOS/Linux builds and runtime wiring remain open.
+**Result:** The earlier registry-access blocker is cleared for the ADR-pinned rusqlite version. A transactional SQLite adapter now implements `TrustedPeerPort`; Android/iOS/Linux builds and concrete application startup assembly remain open.
 
 ## Question
 
@@ -25,4 +25,4 @@ Can CORE provide durable trusted-peer storage with a reviewed, locked SQLite dep
 
 ## Limits and next evidence
 
-The adapter is a standalone port implementation; application startup does not yet inject it into `PairingCoordinator`. Its Windows build and tests do not prove Linux, Android, or iOS support. The store keeps only public data and does not encrypt its database. Next Task 03 work still includes runtime wiring, local signing/key lifecycle, protected OS key storage, discovery, authenticated TLS/WSS signaling and rate limiting, pairing UI, revocation-driven transport closure, and owned-LAN/device checks.
+The adapter is a standalone port implementation; application startup does not yet inject it into `PairingCoordinator`. Its Windows build and tests do not prove Linux, Android, or iOS support. The store keeps only public data and does not encrypt its database. Remaining Task 03 work includes concrete platform assembly, local signing/key lifecycle, protected OS key storage, discovery, authenticated TLS/WSS signaling and rate limiting, pairing UI, revocation-driven transport closure, and owned-LAN/device checks.

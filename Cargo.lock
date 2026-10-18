@@ -666,8 +666,10 @@ dependencies = [
 name = "mm-runtime"
 version = "0.1.0"
 dependencies = [
+ "mm-application",
  "mm-domain",
  "mm-ports",
+ "mm-security",
 ]
 
 [[package]]
