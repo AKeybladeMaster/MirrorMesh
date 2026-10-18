@@ -173,3 +173,18 @@ Pairing identity benchmark: not run. Once the provider is implemented, record ke
 | not built | none | iOS screen permission | not run | unverified | none |
 
 Fail closed on any release without security/capture acceptance and platform-specific install test. Public README only promotes rows from this ledger.
+
+## Task 11: trusted-session revocation runtime (2026-10-18)
+
+This CORE candidate addresses the controlled disconnect/revocation parts of M-01 and M-06, and Task 03 step 7. TDD first failed compilation because the trusted-session runtime API did not exist; the implementation then exposed nondeterministic `HashMap` close order in one test, which was fixed by sorting session IDs before closure.
+
+| Command / toolchain | Exit | Result |
+|---|---:|---|
+| `cargo fmt --all -- --check` — Rust 1.99.1 | 0 | Workspace formatting passes. |
+| `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` — Rust 1.99.1 | 0 | Strict workspace lint passes. |
+| `cargo test --locked --offline --workspace --all-features` — Rust 1.99.1 | 0 | 131 unit tests, 21 integration tests, and doc tests pass. |
+| `cargo test --locked --offline -p mm-runtime` — Rust 1.99.1 | 0 | 16 runtime unit tests and 2 pairing integration tests pass. |
+| `cargo test --locked --offline -p mm-runtime` — Rust 1.85 | 0 | The same 16 unit tests and 2 integrations pass. |
+| `cargo check --target x86_64-unknown-linux-gnu --locked --offline -p mm-runtime` — Rust 1.99.1 and 1.85 | 0 | GNU/Linux target compilation passes on both toolchains; no Linux runtime was executed. |
+
+Because `cargo` is absent from the PowerShell PATH in this environment, Rust commands used the installed toolchain's `cargo.exe` directly; Rust 1.85 checks set `RUSTC` to that toolchain's `rustc.exe`. The only lockfile change records the local `mm-protocol` test dependency; no external dependency was added. The fake-backed tests do not open sockets. No platform adapter, authenticated signaling, capture/codec teardown, benchmark, LAN, or physical-device test ran. `TrustedSessionRuntime` and its ordering remain proposed pending security and cross-track review.

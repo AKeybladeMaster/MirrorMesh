@@ -13,5 +13,6 @@ mm-security.workspace = true
 [dev-dependencies]
 ed25519-dalek.workspace = true
 mm-adapter-identity.workspace = true
+mm-protocol.workspace = true
 mm-store.workspace = true
 

@@ -10,6 +10,8 @@ Task 07 is **BLOCKED at its entry gate**: no implemented sender and native Andro
 
 **Pairing identity compatibility:** The proposed Ed25519 encoding in [ADR-0007](adr/0007-ed25519-identity-candidate.md) has a stateless Rust verifier candidate in `crates/mm-adapter-identity/`. It is not wired into a platform app or pairing coordinator, and no Windows, Linux, Android, iOS, or Android TV build has verified the provider. Keep every platform marked unverified until target builds and owned-device pairing tests pass.
 
+**Revocation compatibility:** The proposed Rust `TrustedSessionRuntime` in [ADR-0017](adr/0017-trusted-session-revocation-runtime-candidate.md) gates starts on active trust and closes only the tracked `TransportPort` sessions in fake-backed tests. No platform signaling or capture/codec adapter uses it, so platform disconnect/revoke compatibility remains unverified.
+
 **Annotation compatibility:** normalized-coordinate, `BoxFit`, and quarter-turn transforms pass Flutter unit tests on this Windows host. Flutter widget tests cover per-stroke palette/width selection, semantic control labels, and P / Ctrl+Z / ⌘+Z shortcuts; an overlay golden renders over a synthetic RGB frame. Native keyboard behavior, decoder orientation, texture/surface lifecycle, and input latency have not been validated on any device row.
 
 **Responsive shell:** a Flutter widget test confirms bottom navigation at 400 logical pixels and the navigation rail at 800 logical pixels with a simulated 2x device-pixel ratio. Physical monitor scaling, display rotation, and touch behavior remain unverified.

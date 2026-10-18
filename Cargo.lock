@@ -1111,6 +1111,7 @@ dependencies = [
  "mm-application",
  "mm-domain",
  "mm-ports",
+ "mm-protocol",
  "mm-security",
  "mm-store",
 ]

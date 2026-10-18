@@ -1,6 +1,8 @@
 mod pairing;
+mod trusted_sessions;
 
 pub use pairing::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
+pub use trusted_sessions::{TrustedSessionError, TrustedSessionRuntime};
 
 use std::collections::HashMap;
 use std::fmt;

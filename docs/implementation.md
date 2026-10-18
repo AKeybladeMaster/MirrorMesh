@@ -99,6 +99,8 @@ These statuses describe scaffold and kickoff evidence. **No platform has passed 
 
 **Task 03 attempt admission:** Proposed [ADR-0015](adr/0015-pairing-attempt-limiter-candidate.md) adds `mm-security::PairingAttemptLimiter`; proposed [ADR-0016](adr/0016-pairing-runtime-admission-candidate.md) composes it into `PairingRuntime::verify_proof_from` before proof verification and carries the source address through explicit approval. The limiter normalizes mapped IPv4, applies a default five-attempt threshold and 30-second cooldown, and caps tracked sources. Eight limiter tests and eleven runtime tests pass. The admission policy awaits security review, and no signaling listener uses it yet.
 
+**Task 03 revocation-aware sessions:** Proposed [ADR-0017](adr/0017-trusted-session-revocation-runtime-candidate.md) adds `mm-runtime::TrustedSessionRuntime`. It requires active stored trust before starting a `TransportPort` session, blocks new starts in memory before attempting persistence, then closes all tracked transports for that peer even if storage fails. Failed closes remain available for retry. Five fake-backed tests cover trust gating, peer-scoped closure, reconnect rejection, storage failure, startup cleanup, and retryable close failure. If persistence fails, the peer may be active after a process restart. The runtime is not assembled into a platform or signaling listener; its port does not itself stop OS capture, codecs, renderers, or untracked WebRTC resources. ADR-0017 is pending security/cross-track review, and no network or hardware test ran.
+
 ## P2 — concurrent native workstreams (weeks 3–9)
 
 - **WIN:** [task 05a](../codex/05a-windows.md): WGC + MF encode/decode + D3D texture + installer prototype.
