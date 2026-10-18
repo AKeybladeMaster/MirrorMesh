@@ -7,6 +7,7 @@ members = [
     "crates/mm-security",
     "crates/mm-adapter-identity",
     "crates/mm-adapter-win",
+    "crates/mm-adapter-linux",
     "crates/mm-store",
     "crates/mm-runtime",
     "crates/mm-transport",
@@ -28,6 +29,7 @@ mm-ports = { path = "crates/mm-ports" }
 mm-security = { path = "crates/mm-security" }
 mm-adapter-identity = { path = "crates/mm-adapter-identity" }
 mm-adapter-win = { path = "crates/mm-adapter-win" }
+mm-adapter-linux = { path = "crates/mm-adapter-linux" }
 mm-store = { path = "crates/mm-store" }
 mm-runtime = { path = "crates/mm-runtime" }
 mm-transport = { path = "crates/mm-transport" }
@@ -37,6 +39,8 @@ flutter_rust_bridge = "=2.13.0"
 getrandom = "=0.4.3"
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 windows-sys = { version = "=0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Threading"] }
+libc = "=0.2.177"
+secret-service = { version = "=5.1.0", default-features = false, features = ["rt-async-io-crypto-rust"] }
 curve25519-dalek = { version = "=5.0.0", default-features = false }
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
 sha2 = { version = "=0.11.0", default-features = false }
