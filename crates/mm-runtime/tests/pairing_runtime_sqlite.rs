@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
 use mm_application::PairingProof;
-use mm_domain::{DeviceId, PeerGrant, PeerPublicKey, SessionId, TrustedPeerGrants};
+use mm_domain::{DeviceId, MessageId, PeerGrant, PeerPublicKey, SessionId, TrustedPeerGrants};
 use mm_ports::{
     LocalPairingIdentityPort, PairingIdentityPort, PortError, TransportPort, TrustedPeerPort,
 };
-use mm_protocol::Envelope;
+use mm_protocol::{Envelope, PairBegin, encode_pair_begin};
 use mm_runtime::{MirrorMeshRuntime, PairingRuntime, PairingRuntimeError, TrustedSessionError};
 use mm_security::{PairingNonce, parse_pairing_qr};
 use mm_store::SqliteTrustedPeers;
@@ -152,31 +152,28 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn signed_pair_begin_frame(nonce: PairingNonce, tamper_signature: bool) -> Vec<u8> {
-    let sender_key = SigningKey::from_bytes(&[0x42; 32]);
-    let public_key = PeerPublicKey::new(sender_key.verifying_key().to_bytes().to_vec()).unwrap();
-    let grants = TrustedPeerGrants::new(true, true, true).unwrap();
-    let unsigned = PairingProof::new(
-        RECEIVER_ID,
-        nonce,
-        SENDER_ID,
-        "Sender laptop".to_owned(),
-        public_key.clone(),
-        grants,
-        vec![0; 64],
-    )
-    .unwrap();
-    let mut signature = sender_key.sign(&unsigned.signing_message()).to_bytes();
-    if tamper_signature {
-        signature[0] ^= 1;
-    }
+    let proof = signed_proof(nonce, tamper_signature);
+    let grants = proof.requested_grants();
+    let requested_grants = [
+        (PeerGrant::View, "view"),
+        (PeerGrant::Send, "send"),
+        (PeerGrant::Annotate, "annotate"),
+    ]
+    .into_iter()
+    .filter(|(grant, _)| grants.allows(*grant))
+    .map(|(_, name)| name.to_owned())
+    .collect();
+    let payload = PairBegin {
+        receiver_id: proof.receiver_id().to_string(),
+        nonce: proof.nonce().to_hex(),
+        peer_id: proof.peer_id().to_string(),
+        display_name: proof.display_name().to_owned(),
+        public_key: hex(proof.public_key().as_bytes()),
+        requested_grants,
+        signature: hex(proof.signature()),
+    };
 
-    format!(
-        r#"{{"v":1,"type":"pair.begin","message_id":"b8298043-8b3b-4a86-86e3-79c0b863879b","seq":1,"sent_at_ms":100,"payload":{{"receiver_id":"{RECEIVER_ID}","nonce":"{}","peer_id":"{SENDER_ID}","display_name":"Sender laptop","public_key":"{}","requested_grants":["view","send","annotate"],"signature":"{}"}}}}"#,
-        nonce.to_hex(),
-        hex(public_key.as_bytes()),
-        hex(&signature),
-    )
-    .into_bytes()
+    encode_pair_begin(MessageId::from_bytes([0xb8; 16]), 1, 100, &payload).unwrap()
 }
 
 #[test]

@@ -3,8 +3,8 @@ use std::fmt;
 use std::str;
 
 use mm_domain::{DeviceId, MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, MessageId, SessionId};
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 pub const MAX_ENVELOPE_BYTES: usize = 256 * 1024;
@@ -345,6 +345,28 @@ struct RawEnvelope<'a> {
     payload: &'a RawValue,
 }
 
+#[derive(Serialize)]
+struct PairBeginEnvelope<'a> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: PairBeginPayloadRef<'a>,
+}
+
+#[derive(Serialize)]
+struct PairBeginPayloadRef<'a> {
+    receiver_id: &'a str,
+    nonce: &'a str,
+    peer_id: &'a str,
+    display_name: &'a str,
+    public_key: &'a str,
+    requested_grants: &'a [String],
+    signature: &'a str,
+}
+
 /// Performs byte and UTF-8 checks before a JSON decoder allocates a payload tree.
 /// This is deliberately a preflight step, not a JSON parser.
 pub fn preflight_json(bytes: &[u8]) -> Result<&str, ProtocolError> {
@@ -363,6 +385,42 @@ pub fn validate_version(version: u16) -> Result<(), ProtocolError> {
     } else {
         Err(ProtocolError::UnsupportedVersion)
     }
+}
+
+/// Encodes one validated `pair.begin` payload in the common sessionless v1 envelope.
+/// The caller must provide a signature over the canonical application proof bytes.
+pub fn encode_pair_begin(
+    message_id: MessageId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &PairBegin,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    validate_pair_begin(payload)?;
+
+    let envelope = PairBeginEnvelope {
+        v: 1,
+        message_type: "pair.begin",
+        message_id: message_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload: PairBeginPayloadRef {
+            receiver_id: &payload.receiver_id,
+            nonce: &payload.nonce,
+            peer_id: &payload.peer_id,
+            display_name: &payload.display_name,
+            public_key: &payload.public_key,
+            requested_grants: &payload.requested_grants,
+            signature: &payload.signature,
+        },
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    Ok(bytes)
 }
 
 /// Parses a complete v1 JSON control message with strict envelope and payload schemas.
@@ -415,21 +473,7 @@ pub fn parse_message(bytes: &[u8]) -> Result<ValidatedMessage, ProtocolError> {
         }
         MessageKind::PairBegin => {
             let value: PairBegin = decode(raw.payload)?;
-            validate_canonical_identifier(&value.receiver_id)?;
-            validate_lower_hex(&value.nonce, 16)?;
-            validate_canonical_identifier(&value.peer_id)?;
-            if value.display_name.is_empty()
-                || value.display_name.chars().count() > MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS
-                || contains_control(&value.display_name)
-            {
-                return Err(ProtocolError::InvalidPayload);
-            }
-            validate_lower_hex(&value.public_key, 32)?;
-            validate_grants(&value.requested_grants)?;
-            if value.requested_grants.is_empty() {
-                return Err(ProtocolError::InvalidPayload);
-            }
-            validate_lower_hex(&value.signature, 64)?;
+            validate_pair_begin(&value)?;
             MessagePayload::PairBegin(value)
         }
         MessageKind::PairApprove => {
@@ -593,6 +637,25 @@ fn validate_canonical_identifier(value: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn validate_pair_begin(value: &PairBegin) -> Result<(), ProtocolError> {
+    validate_canonical_identifier(&value.receiver_id)?;
+    validate_lower_hex(&value.nonce, 16)?;
+    validate_canonical_identifier(&value.peer_id)?;
+    if value.display_name.is_empty()
+        || value.display_name.chars().count() > MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS
+        || contains_control(&value.display_name)
+    {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_lower_hex(&value.public_key, 32)?;
+    validate_grants(&value.requested_grants)?;
+    if value.requested_grants.is_empty() {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_lower_hex(&value.signature, 64)?;
+    Ok(())
+}
+
 fn validate_capabilities(value: &Capabilities) -> Result<(), ProtocolError> {
     if value.video.is_empty()
         || value.video.len() > 8
@@ -728,10 +791,10 @@ impl SequenceTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, ProtocolError, SequenceTracker,
-        parse_message, preflight_json, validate_version,
+        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairBegin, ProtocolError,
+        SequenceTracker, encode_pair_begin, parse_message, preflight_json, validate_version,
     };
-    use mm_domain::{DeviceId, SessionId};
+    use mm_domain::{DeviceId, MessageId, SessionId};
 
     const VALID_OFFER: &str = include_str!("../../../tests/protocol-golden/session-offer-v1.json");
     const VALID_PAIR_BEGIN: &str =
@@ -796,6 +859,74 @@ mod tests {
             }
             _ => panic!("pair.begin must decode to PairBegin"),
         }
+    }
+
+    #[test]
+    fn encodes_pair_begin_as_a_sessionless_v1_envelope() {
+        let payload = PairBegin {
+            receiver_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            nonce: "00112233445566778899aabbccddeeff".to_owned(),
+            peer_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            display_name: "Sender laptop".to_owned(),
+            public_key: "00".repeat(32),
+            requested_grants: vec!["view".to_owned(), "send".to_owned()],
+            signature: "00".repeat(64),
+        };
+        let message_id = MessageId::from_bytes([0xb8; 16]);
+        let frame = encode_pair_begin(message_id, 1, 100, &payload).unwrap();
+        let parsed = parse_message(&frame).unwrap();
+
+        assert_eq!(parsed.header.kind, super::MessageKind::PairBegin);
+        assert_eq!(parsed.header.message_id, message_id);
+        assert_eq!(parsed.header.sequence, 1);
+        assert_eq!(parsed.header.sent_at_ms, 100);
+        assert!(parsed.header.session_id.is_none());
+        match parsed.payload {
+            MessagePayload::PairBegin(value) => {
+                assert_eq!(value.receiver_id, payload.receiver_id);
+                assert_eq!(value.nonce, payload.nonce);
+                assert_eq!(value.peer_id, payload.peer_id);
+                assert_eq!(value.display_name, payload.display_name);
+            }
+            _ => panic!("encoded frame must decode to PairBegin"),
+        }
+    }
+
+    #[test]
+    fn refuses_to_encode_pair_begin_with_zero_sequence() {
+        let payload = PairBegin {
+            receiver_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            nonce: "00112233445566778899aabbccddeeff".to_owned(),
+            peer_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            display_name: "Sender laptop".to_owned(),
+            public_key: "00".repeat(32),
+            requested_grants: vec!["view".to_owned()],
+            signature: "00".repeat(64),
+        };
+
+        assert_eq!(
+            encode_pair_begin(MessageId::from_bytes([0xb8; 16]), 0, 100, &payload),
+            Err(ProtocolError::InvalidSequence)
+        );
+    }
+
+    #[test]
+    fn refuses_to_encode_a_noncanonical_pair_begin_payload() {
+        let mut payload = PairBegin {
+            receiver_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            nonce: "00112233445566778899aabbccddeeff".to_owned(),
+            peer_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            display_name: "Sender laptop".to_owned(),
+            public_key: "00".repeat(32),
+            requested_grants: vec!["view".to_owned()],
+            signature: "00".repeat(64),
+        };
+        payload.public_key = "AA".repeat(32);
+
+        assert_eq!(
+            encode_pair_begin(MessageId::from_bytes([0xb8; 16]), 1, 100, &payload),
+            Err(ProtocolError::InvalidPayload)
+        );
     }
 
     #[test]

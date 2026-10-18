@@ -112,6 +112,34 @@ impl PairingProof {
         message.push(grant_bits);
         message
     }
+
+    pub const fn receiver_id(&self) -> DeviceId {
+        self.receiver_id
+    }
+
+    pub const fn nonce(&self) -> PairingNonce {
+        self.nonce
+    }
+
+    pub const fn peer_id(&self) -> DeviceId {
+        self.peer_id
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub fn public_key(&self) -> &PeerPublicKey {
+        &self.public_key
+    }
+
+    pub const fn requested_grants(&self) -> TrustedPeerGrants {
+        self.requested_grants
+    }
+
+    pub fn signature(&self) -> &[u8] {
+        &self.signature
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
