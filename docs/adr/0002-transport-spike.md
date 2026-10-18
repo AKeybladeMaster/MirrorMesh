@@ -13,7 +13,7 @@ The previous transport spike stopped before a candidate build because its origin
 
 ## Decision
 
-Use the upstream `flutter_webrtc` package as the initial libwebrtc integration for the Windows, Linux, Android phone and iOS Flutter applications. Pin `1.6.2+hotfix.4` when adding it to the Flutter package graph. This release is active and its published feature matrix covers media and WebRTC APIs on those target families; per-OS capture and codec availability still requires capability checks.
+Use the upstream `flutter_webrtc` package as the initial libwebrtc integration for the Windows, Linux, Android phone and iOS Flutter applications. The Flutter app pins `1.6.2+hotfix.4` in `pubspec.yaml` and `pubspec.lock`; its metadata-only adapter is under `apps/mirrormesh_flutter/lib/webrtc_engine.dart`. This release is active and its published feature matrix covers media and WebRTC APIs on those target families; per-OS capture and codec availability still requires capability checks.
 
 Keep the Android TV application native Kotlin. Its adapter will use the same libwebrtc API family directly, with `io.github.webrtc-sdk:android:150.7871.01` as the current artifact candidate declared by the Flutter plugin's Android build. Confirm that exact artifact against the selected package tag, checksum, notices and Android SDK before pinning it in the TV Gradle build.
 
@@ -35,7 +35,7 @@ This is an implementation choice based on the target matrix and current upstream
 
 `crates/mm-transport/` now provides tested control-state logic, bounded trickle ICE buffering, retry deadlines, RTP timestamp conversion, a bounded encoded-frame queue, and a timestamped synthetic I420 source for a native encoder. `crates/mm-ports/` exposes an async engine boundary with control and track metadata events only.
 
-The Flutter package is not yet in `pubspec.yaml`/`pubspec.lock` and is not present in the local pub cache. The existing Windows Flutter build predates this transport code. Android SDK/Gradle and the physical Android TV run are unavailable in this workspace. Therefore, the selected library has **not** been compiled or integrated here; its public support matrix is not local build or device evidence.
+The exact Flutter package source resolved from pub.dev and is pinned in `pubspec.lock`; 6 fake-backed adapter tests and Flutter analysis pass. `flutter build windows --release --no-pub` exits 1 before compilation because this host requires Windows Developer Mode for plugin symlinks. This adapter is not wired to authenticated signaling, capture, a video renderer, or the demo UI. Android SDK/Gradle and physical-device tests remain unavailable; published platform support is not local build or device evidence.
 
 ## Security and compatibility constraints
 
@@ -47,7 +47,7 @@ The Flutter package is not yet in `pubspec.yaml`/`pubspec.lock` and is not prese
 
 ## Follow-up validation
 
-1. Add and lock `flutter_webrtc` and verify Windows compilation with local source/package access; then add Linux, Android and iOS runner builds.
+1. Build the pinned Flutter plugin on a Windows runner with plugin symlink support; then add Linux, Android and iOS runner builds.
 2. Implement Task 03 authenticated signaling, and connect the browser and native clients to the same protocol fixture.
 3. Add the Kotlin Android TV peer connection, explicit approval, MediaCodec decoder and native surface renderer.
 4. Generate synthetic video through a real encoder; verify selected H.264 profile/packetization, ICE candidate completion, DTLS-SRTP, disconnect and reconnect.

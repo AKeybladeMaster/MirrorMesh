@@ -1,14 +1,14 @@
 # TASK 02 — Real H.264 WebRTC spike + ADR-0002
 
-**Status (2026-10-18): IN_PROGRESS — software control path implemented; engine integration underway.** Hardware and interoperability testing are deferred and do not block source work. ADR-0002 selects the libwebrtc path for implementation, with local builds and runtime evidence still pending.
+**Status (2026-10-18): IN_PROGRESS — transport controls and metadata-only Flutter adapter implemented; native plugin build and interoperability evidence pending.** Hardware and interoperability testing are deferred and do not block source work. ADR-0002 selects the libwebrtc path for implementation.
 
 ### Separate implementation and verification status
 
 - **Software implementation:** Rust transport lifecycle, bounded SDP/ICE handling, reconnect policy, 90 kHz timestamp clock, bounded encoded-frame queue, synthetic timestamped I420 color-bar source, and an async `WebRtcEnginePort` control/metadata boundary are implemented in `crates/mm-transport/` and `crates/mm-ports/`.
-- **Local compilation:** Rust workspace builds and its full tests/Clippy pass on the Windows host. `flutter_webrtc` has not yet been added to the Flutter package graph or compiled; it is absent from the local pub cache.
-- **Automated tests:** Rust transport tests cover limits, state transitions, reconnect, timestamp rollover and queue recovery. They do not encode or decode H.264 and do not exercise libwebrtc.
+- **Local compilation:** Rust workspace gates pass. `flutter_webrtc` is pinned at `1.6.2+hotfix.4` and resolved; Flutter analysis passes, but the Windows release build exits before compilation because plugin symlink support requires Windows Developer Mode.
+- **Automated tests:** 15 Rust transport tests and 6 fake-backed Flutter adapter tests pass. The adapter forwards only SDP/ICE/connection/track metadata; tests do not instantiate the native engine or encode/decode H.264.
 - **Hardware verification:** `DEFERRED_HARDWARE_TEST`. No Android TV decoder, named TV browser, authenticated signaling peer, media interoperability, soak or latency run has occurred.
-- **Next code work:** integrate the pinned libwebrtc engine into platform adapters, authenticated signaling with Task 03, real H.264 encoder output, and native rendering. Continue without waiting for physical devices.
+- **Next code work:** connect the Flutter engine boundary to Task 03 authenticated signaling; implement the native Android TV engine/decoder behind explicit approval; then add real H.264 encoder output and rendering. Continue without waiting for physical devices.
 
 See [ADR-0002](../docs/adr/0002-transport-spike.md), the [implementation status ledger](../docs/IMPLEMENTATION_STATUS.md), and the [transport implementation and deferred-test report](../docs/spikes/transport-experiment-blocker.md).
 

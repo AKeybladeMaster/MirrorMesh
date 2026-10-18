@@ -22,7 +22,7 @@ Relevant sources: [Flutter demo flow](../../apps/mirrormesh_flutter/lib/app.dart
 
 ADR-0008 defines three named operations: `discover_demo_receiver`, `begin_demo_pairing`, and `disconnect_demo_receiver`. Discovery supports rediscovery from `Stopped` by resetting the demo session first. Disconnect emits Stop and CleanupComplete and returns `Stopped`. Flutter labels the state Pairing and does not claim that a peer is connected or trusted.
 
-Rust FFI integration tests cover invalid pairing before discovery, `Idle → Discovered → Pairing → Stopped`, rediscovery from `Stopped`, and rejection of unauthorized streaming. The native Flutter integration test clicks the UI actions and reads the corresponding Rust state through the generated bridge. Current verification results are recorded in [verification.md](../verification.md). The FFI surface remains a candidate until CORE/GUI cross-track review; this workspace has no Git metadata or remote for a review PR.
+Rust FFI integration tests cover invalid pairing before discovery, `Idle → Discovered → Pairing → Stopped`, rediscovery from `Stopped`, and rejection of unauthorized streaming. The native Flutter integration test clicks the UI actions and reads the corresponding Rust state through the generated bridge. Current verification results are recorded in [verification.md](../verification.md). The FFI surface remains a candidate until CORE/GUI cross-track review. This earlier spike predates Git initialization; the current work is tracked on pushed task branches, while that cross-track review remains pending.
 
 ## Current verification
 
