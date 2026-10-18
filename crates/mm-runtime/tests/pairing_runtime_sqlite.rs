@@ -1,16 +1,45 @@
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::{Arc, Mutex};
 
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
 use mm_application::PairingProof;
-use mm_domain::{DeviceId, PeerGrant, PeerPublicKey, TrustedPeerGrants};
-use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
-use mm_runtime::{PairingRuntime, PairingRuntimeError};
+use mm_domain::{DeviceId, PeerGrant, PeerPublicKey, SessionId, TrustedPeerGrants};
+use mm_ports::{
+    LocalPairingIdentityPort, PairingIdentityPort, PortError, TransportPort, TrustedPeerPort,
+};
+use mm_protocol::Envelope;
+use mm_runtime::{MirrorMeshRuntime, PairingRuntime, PairingRuntimeError, TrustedSessionError};
 use mm_security::{PairingNonce, parse_pairing_qr};
 use mm_store::SqliteTrustedPeers;
 
 const RECEIVER_ID: DeviceId = DeviceId::from_bytes([1; 16]);
 const SENDER_ID: DeviceId = DeviceId::from_bytes([2; 16]);
+
+#[derive(Clone, Default)]
+struct RecordingTransport(Arc<Mutex<TransportLog>>);
+
+#[derive(Default)]
+struct TransportLog {
+    started: Vec<(SessionId, DeviceId)>,
+    closed: Vec<SessionId>,
+}
+
+impl TransportPort for RecordingTransport {
+    fn start(&mut self, session_id: SessionId, peer_id: DeviceId) -> Result<(), PortError> {
+        self.0.lock().unwrap().started.push((session_id, peer_id));
+        Ok(())
+    }
+
+    fn send_control(&mut self, _message: &Envelope<Vec<u8>>) -> Result<(), PortError> {
+        Ok(())
+    }
+
+    fn close(&mut self, session_id: SessionId) -> Result<(), PortError> {
+        self.0.lock().unwrap().closed.push(session_id);
+        Ok(())
+    }
+}
 
 fn source_ip() -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))
@@ -150,4 +179,55 @@ fn rejects_modified_real_signature_without_persisting_trust() {
         ))
     ));
     assert!(peers.get_peer(SENDER_ID).unwrap().is_none());
+}
+
+#[test]
+fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
+    let identity = TestIdentity::new([0x11; 32]);
+    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
+    let transport = RecordingTransport::default();
+    let transport_log = Arc::clone(&transport.0);
+    let mut runtime = MirrorMeshRuntime::new(RECEIVER_ID, &identity, &peers, transport).unwrap();
+    let session_id = SessionId::from_bytes([9; 16]);
+
+    assert_eq!(
+        runtime.start_session(SENDER_ID, session_id),
+        Err(TrustedSessionError::PeerNotTrusted)
+    );
+
+    let invitation = runtime
+        .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
+        .unwrap();
+    let nonce = parse_pairing_qr(invitation.uri(), 200, &[8765])
+        .unwrap()
+        .nonce();
+    let pending = runtime
+        .verify_proof_from(source_ip(), signed_proof(nonce, false), 101)
+        .unwrap();
+    assert!(!peers.is_trusted(SENDER_ID).unwrap());
+
+    runtime
+        .approve(
+            pending,
+            TrustedPeerGrants::new(true, false, false).unwrap(),
+            102,
+            1_000,
+        )
+        .unwrap();
+    assert!(peers.is_trusted(SENDER_ID).unwrap());
+
+    runtime.start_session(SENDER_ID, session_id).unwrap();
+    runtime.revoke_peer(SENDER_ID, 2_000).unwrap();
+    assert!(!peers.is_trusted(SENDER_ID).unwrap());
+    assert_eq!(transport_log.lock().unwrap().closed, vec![session_id]);
+
+    let restarted_transport = RecordingTransport::default();
+    let restarted_log = Arc::clone(&restarted_transport.0);
+    let mut restarted =
+        MirrorMeshRuntime::new(RECEIVER_ID, &identity, &peers, restarted_transport).unwrap();
+    assert_eq!(
+        restarted.start_session(SENDER_ID, SessionId::from_bytes([10; 16])),
+        Err(TrustedSessionError::PeerNotTrusted)
+    );
+    assert!(restarted_log.lock().unwrap().started.is_empty());
 }

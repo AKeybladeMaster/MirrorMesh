@@ -34,6 +34,10 @@ The endpoint-preserving mDNS application boundary is now present as a proposed C
 
 The file-backed SQLite integration in `crates/mm-runtime/tests/trusted_session_revocation_sqlite.rs` verifies per-peer closure, persists revocation across database close/reopen, and checks that a newly constructed runtime blocks the revoked peer while allowing another. This remains a local adapter test with a fake transport, not a process, network, or device test.
 
+### Pairing and trusted-session runtime composition candidate (2026-10-18)
+
+`mm-runtime::MirrorMeshRuntime` constructs `PairingRuntime` and `TrustedSessionRuntime` with one identity, one `TrustedPeerPort`, and one transport. The real-verifier/SQLite integration harness now exercises invitation creation, admitted proof verification, explicit approval, trusted control-transport start, persisted revoke/close, and start denial after runtime recreation. Proposed [ADR-0018](../docs/adr/0018-pairing-session-runtime-composition-candidate.md) records the public facade; cross-track/security review remains pending. No protocol, listener, session offer, capture grant, media, app startup, or platform path is included.
+
 1. Implement `DiscoveryPort` adapter using vetted mDNS/DNS-SD Rust crate, test `_mirrormesh._tcp.local` TXT in real LAN; no BLE dependency in MVP.
 2. Add strict manual URI/IP:port parser; reject URL schemes, DNS rebinding/redirection, private-key contents or arbitrary ports not explicitly user-approved.
 3. Generate OS keychain private identity and SQLite public peer table from `docs/protocol.md`; signed challenge proves possession and matches QR fingerprint. Security review must evaluate self-signed TLS pinning and replay handling.

@@ -1,6 +1,8 @@
+mod mirrormesh;
 mod pairing;
 mod trusted_sessions;
 
+pub use mirrormesh::MirrorMeshRuntime;
 pub use pairing::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
 pub use trusted_sessions::{TrustedSessionError, TrustedSessionRuntime};
 
