@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "type": "session.offer",
+  "message_id": "b8298043-8b3b-4a86-86e3-79c0b863879b",
+  "session_id": "8b3d8788-1476-4aae-a287-334a428b5b6f",
+  "seq": 7,
+  "sent_at_ms": 1792316000000,
+  "payload": {
+    "role": "sender",
+    "capabilities": {
+      "video": ["H264"],
+      "audio": ["opus"],
+      "max_width": 1920,
+      "max_height": 1080,
+      "max_fps": 60
+    },
+    "sdp": "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=MirrorMesh test offer\r\nt=0 0\r\n"
+  }
+}

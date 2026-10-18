@@ -1,0 +1,22 @@
+{
+  "release_tag": "<replace-with-release-tag>",
+  "source_revision": "<replace-with-full-commit-id>",
+  "platform": "<replace-with-track-id>",
+  "runner_image": "<replace-with-observed-image-and-version>",
+  "sdk_versions": {
+    "rust": "<replace-with-exact-version>",
+    "flutter": "<replace-with-exact-version-if-used>",
+    "dart": "<replace-with-exact-version-if-used>",
+    "platform_sdk": "<replace-with-exact-version-if-used>",
+    "build_tools": "<replace-with-exact-version-if-used>"
+  },
+  "build_commands": [
+    "<replace-with-exact-successful-build-command>"
+  ],
+  "reproducibility": {
+    "status": "not_verified",
+    "notes": "Record the rebuild method and whether independent outputs matched. Do not mark verified without evidence."
+  },
+  "sbom_file": "<replace-with-package-sbom-filename>",
+  "third_party_notices_file": "THIRD-PARTY-NOTICES.txt"
+}

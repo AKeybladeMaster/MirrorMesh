@@ -1,0 +1,32 @@
+name: Feature proposal
+description: Propose a scoped improvement to MirrorMesh.
+title: "feat: "
+body:
+  - type: textarea
+    id: user_need
+    attributes:
+      label: User need
+      description: Who needs this and what problem does it solve?
+    validations:
+      required: true
+  - type: input
+    id: requirement
+    attributes:
+      label: Requirement or workstream
+      placeholder: M-xx / CORE / WIN / LNX / AND / IOS / TV / WEB
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Platform and security constraints
+      description: Note OS permissions, privacy, codec, or compatibility considerations.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: Describe the tests, SDK build, or hardware evidence needed.
+    validations:
+      required: true

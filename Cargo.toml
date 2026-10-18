@@ -1,0 +1,34 @@
+[workspace]
+members = [
+    "crates/mm-domain",
+    "crates/mm-application",
+    "crates/mm-protocol",
+    "crates/mm-ports",
+    "crates/mm-security",
+    "crates/mm-store",
+    "crates/mm-runtime",
+    "crates/mm-transport",
+    "crates/mm-ffi",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace.dependencies]
+mm-domain = { path = "crates/mm-domain" }
+mm-application = { path = "crates/mm-application" }
+mm-protocol = { path = "crates/mm-protocol" }
+mm-ports = { path = "crates/mm-ports" }
+mm-security = { path = "crates/mm-security" }
+mm-store = { path = "crates/mm-store" }
+mm-runtime = { path = "crates/mm-runtime" }
+mm-transport = { path = "crates/mm-transport" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["raw_value"] }
+flutter_rust_bridge = "=2.13.0"
+getrandom = "=0.4.3"
+

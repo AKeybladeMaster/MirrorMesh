@@ -1,0 +1,26 @@
+@startuml
+title MirrorMesh — consent and pairing
+actor "User" as U
+participant "Receiver GUI" as R
+participant "Sender GUI" as S
+participant "Rust security/session layer" as C
+participant "WebRTC native stack" as W
+R -> R : generate scoped QR with public fingerprint,\n128-bit nonce, 2 minute expiry
+U -> S : scan QR
+S -> C : validate QR expiry and peer identity fingerprint
+C -> R : TLS pinned exchange + pairing request
+R -> U : show sender identity + requested grants
+U -> R : Approve or reject
+alt approved, identity proven
+R -> C : signed proof, scoped grant
+C -> S : paired
+U -> S : choose screen/window; grant OS capture
+S -> W : create offer and ICE; authenticate
+W -> R : encrypted DTLS/SRTP stream
+else declined / mismatch
+R --> S : reject; no video
+end
+U -> S : Disconnect
+S -> W : stop frames and ICE
+S -> R : revoke session tokens
+@enduml

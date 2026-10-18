@@ -1,0 +1,275 @@
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use mm_domain::{
+    CaptureConfig, Device, DeviceId, NegotiatedCapabilities, PeerFingerprint, PeerPublicKey,
+    SessionId, TrustedPeer, VideoCodec,
+};
+use mm_protocol::Envelope;
+use mm_transport::{IceCandidate, RtcConnectionState, SdpType};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortError {
+    Unavailable,
+    PermissionDenied,
+    InvalidConfiguration,
+    StorageFailure,
+    TransportFailure,
+    IdentityRejected,
+    Cancelled,
+}
+
+impl fmt::Display for PortError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for PortError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapturePermission {
+    NotRequested,
+    Granted,
+    Denied,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CaptureHandle(u64);
+
+impl CaptureHandle {
+    pub const fn from_adapter(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn adapter_value(self) -> u64 {
+        self.0
+    }
+}
+
+pub trait ClockPort: Send + Sync {
+    fn monotonic_millis(&self) -> u64;
+}
+
+pub trait DiscoveryPort: Send + Sync {
+    fn discover(&self) -> Result<Vec<Device>, PortError>;
+    fn stop(&self) -> Result<(), PortError>;
+}
+
+pub trait CapturePort: Send {
+    fn request_permission(&mut self) -> Result<CapturePermission, PortError>;
+    fn start(&mut self, config: &CaptureConfig) -> Result<CaptureHandle, PortError>;
+    fn stop(&mut self, handle: CaptureHandle) -> Result<(), PortError>;
+}
+
+pub trait CodecPort: Send {
+    fn available_video_codecs(&self) -> Result<Vec<VideoCodec>, PortError>;
+    fn configure(&mut self, capabilities: NegotiatedCapabilities) -> Result<(), PortError>;
+    fn stop(&mut self) -> Result<(), PortError>;
+}
+
+pub trait TransportPort: Send {
+    fn start(&mut self, session_id: SessionId, peer_id: DeviceId) -> Result<(), PortError>;
+    fn send_control(&mut self, message: &Envelope<Vec<u8>>) -> Result<(), PortError>;
+    fn close(&mut self, session_id: SessionId) -> Result<(), PortError>;
+}
+
+pub type WebRtcFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, PortError>> + Send + 'a>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebRtcEngineEvent {
+    LocalIceCandidate(IceCandidate),
+    ConnectionStateChanged(RtcConnectionState),
+    RemoteVideoTrackReady { track_id: String },
+}
+
+/// Control and metadata boundary for a native/browser WebRTC engine.
+/// Video pixels remain in the engine's native renderer and never enter Dart FFI events.
+pub trait WebRtcEngineEventSink: Send + Sync {
+    fn on_event(&self, event: WebRtcEngineEvent);
+}
+
+/// Async WebRTC operations shared by platform adapters.
+/// Adapters must use verified DTLS-SRTP, emit bounded trickle ICE metadata, and close all
+/// native tracks/renderers before returning from `close`.
+pub trait WebRtcEnginePort: Send + Sync {
+    fn set_event_sink(&self, sink: Arc<dyn WebRtcEngineEventSink>) -> Result<(), PortError>;
+
+    fn create_offer(&self) -> WebRtcFuture<'_, String>;
+    fn create_answer(&self) -> WebRtcFuture<'_, String>;
+    fn set_local_description(&self, kind: SdpType, sdp: String) -> WebRtcFuture<'_, ()>;
+    fn set_remote_description(&self, kind: SdpType, sdp: String) -> WebRtcFuture<'_, ()>;
+    fn add_remote_ice_candidate(&self, candidate: IceCandidate) -> WebRtcFuture<'_, ()>;
+    fn connection_state(&self) -> RtcConnectionState;
+    fn close(&self) -> WebRtcFuture<'_, ()>;
+}
+
+pub trait PreferencesPort: Send + Sync {
+    fn get(&self, key: &str) -> Result<Option<String>, PortError>;
+    fn set(&self, key: &str, value: &str) -> Result<(), PortError>;
+    fn remove(&self, key: &str) -> Result<(), PortError>;
+}
+
+pub trait TrustedPeerPort: Send + Sync {
+    fn get_peer(&self, peer_id: DeviceId) -> Result<Option<TrustedPeer>, PortError>;
+
+    /// Persist a public peer record only after explicit user approval.
+    fn save_peer(&self, peer: &TrustedPeer) -> Result<(), PortError>;
+
+    /// Include revoked records so the UI can show and manage prior trust.
+    fn list_peers(&self) -> Result<Vec<TrustedPeer>, PortError>;
+
+    /// Record UTC Unix milliseconds and retain the peer row for audit/review.
+    fn revoke(&self, peer_id: DeviceId, revoked_at_unix_ms: u64) -> Result<(), PortError>;
+
+    fn is_trusted(&self, peer_id: DeviceId) -> Result<bool, PortError> {
+        self.get_peer(peer_id)
+            .map(|peer| peer.is_some_and(|peer| peer.is_active()))
+    }
+}
+
+/// Cryptographic identity boundary for the first-time pairing proof.
+///
+/// Implementations must compute SHA-256 over the agreed canonical public-key
+/// encoding and verify the signature over the coordinator's domain-separated
+/// pairing message. No software fallback or accept-all verifier is provided.
+pub trait PairingIdentityPort: Send + Sync {
+    fn fingerprint_public_key(
+        &self,
+        public_key: &PeerPublicKey,
+    ) -> Result<PeerFingerprint, PortError>;
+
+    fn verify_signature(
+        &self,
+        public_key: &PeerPublicKey,
+        message: &[u8],
+        signature: &[u8],
+    ) -> Result<(), PortError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use mm_domain::{CaptureConfig, CaptureSource};
+
+    use super::{CaptureHandle, CapturePermission, CapturePort, ClockPort, PortError};
+
+    #[derive(Default)]
+    struct FakeClock(AtomicU64);
+
+    impl FakeClock {
+        fn advance(&self, milliseconds: u64) {
+            self.0.fetch_add(milliseconds, Ordering::SeqCst);
+        }
+    }
+
+    impl ClockPort for FakeClock {
+        fn monotonic_millis(&self) -> u64 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct SyntheticFrame {
+        sequence: u64,
+        captured_at_ms: u64,
+    }
+
+    struct FakeCapture {
+        clock: Arc<FakeClock>,
+        permission: CapturePermission,
+        next_sequence: u64,
+        active_handle: Option<CaptureHandle>,
+    }
+
+    impl FakeCapture {
+        fn new(clock: Arc<FakeClock>, permission: CapturePermission) -> Self {
+            Self {
+                clock,
+                permission,
+                next_sequence: 1,
+                active_handle: None,
+            }
+        }
+
+        fn next_frame(&mut self) -> Result<SyntheticFrame, PortError> {
+            if self.active_handle.is_none() {
+                return Err(PortError::Unavailable);
+            }
+            let frame = SyntheticFrame {
+                sequence: self.next_sequence,
+                captured_at_ms: self.clock.monotonic_millis(),
+            };
+            self.next_sequence += 1;
+            Ok(frame)
+        }
+    }
+
+    impl CapturePort for FakeCapture {
+        fn request_permission(&mut self) -> Result<CapturePermission, PortError> {
+            Ok(self.permission)
+        }
+
+        fn start(&mut self, _config: &CaptureConfig) -> Result<CaptureHandle, PortError> {
+            if self.permission != CapturePermission::Granted {
+                return Err(PortError::PermissionDenied);
+            }
+            if self.active_handle.is_some() {
+                return Err(PortError::Unavailable);
+            }
+            let handle = CaptureHandle::from_adapter(1);
+            self.active_handle = Some(handle);
+            Ok(handle)
+        }
+
+        fn stop(&mut self, handle: CaptureHandle) -> Result<(), PortError> {
+            if self.active_handle == Some(handle) {
+                self.active_handle = None;
+                Ok(())
+            } else {
+                Err(PortError::Unavailable)
+            }
+        }
+    }
+
+    fn test_config() -> CaptureConfig {
+        CaptureConfig::new(CaptureSource::Display(0), 1280, 720, 30, 4_000, false).unwrap()
+    }
+
+    #[test]
+    fn fake_capture_requires_explicit_permission_and_tracks_monotonic_frames() {
+        let clock = Arc::new(FakeClock::default());
+        let mut denied = FakeCapture::new(Arc::clone(&clock), CapturePermission::Denied);
+        assert_eq!(denied.request_permission(), Ok(CapturePermission::Denied));
+        assert_eq!(
+            denied.start(&test_config()),
+            Err(PortError::PermissionDenied)
+        );
+        assert_eq!(denied.next_frame(), Err(PortError::Unavailable));
+
+        let mut allowed = FakeCapture::new(Arc::clone(&clock), CapturePermission::Granted);
+        assert_eq!(allowed.request_permission(), Ok(CapturePermission::Granted));
+        let handle = allowed.start(&test_config()).unwrap();
+        assert_eq!(
+            allowed.next_frame(),
+            Ok(SyntheticFrame {
+                sequence: 1,
+                captured_at_ms: 0,
+            })
+        );
+        clock.advance(17);
+        assert_eq!(
+            allowed.next_frame(),
+            Ok(SyntheticFrame {
+                sequence: 2,
+                captured_at_ms: 17,
+            })
+        );
+        allowed.stop(handle).unwrap();
+        assert_eq!(allowed.next_frame(), Err(PortError::Unavailable));
+    }
+}

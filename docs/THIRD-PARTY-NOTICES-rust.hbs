@@ -1,0 +1,17 @@
+MirrorMesh Rust third-party license notices
+
+This file contains license text for Rust crates in the Cargo dependency graph.
+It does not cover Flutter, Android Gradle, Apple, or other platform dependencies.
+
+{{#each licenses}}
+==============================================================================
+{{name}} ({{id}})
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

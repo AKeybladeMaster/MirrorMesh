@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible issue in the current prototype.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private keys, real screen recordings, or third-party binaries.
+  - type: input
+    id: requirement
+    attributes:
+      label: Requirement or workstream
+      placeholder: M-xx / WIN / AND / TV / WEB
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps and environment
+      description: Include exact commands, OS/SDK versions, and whether this was a mock, build, or hardware run.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      description: Remove usernames, IP addresses, tokens, and personal data.
+    validations:
+      required: false

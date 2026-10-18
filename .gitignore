@@ -1,0 +1,42 @@
+# Rust build output
+/target/
+/fuzz/target/
+/fuzz/artifacts/
+
+# Flutter / Dart generated output
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+**/coverage/
+**/pubspec_overrides.yaml
+**/*.iml
+**/node_modules/
+/apps/tv-web/dist/
+
+# Native build output
+**/.gradle/
+**/local.properties
+**/DerivedData/
+**/Pods/
+**/xcuserdata/
+/apps/mirrormesh_flutter/android/app/src/main/jniLibs/arm64-v8a/libmm_ffi.so
+
+# Editors and operating systems
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+
+# Local secrets / signing material
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.mobileprovision

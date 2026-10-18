@@ -1,0 +1,10 @@
+[package]
+name = "mm-application"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+mm-domain.workspace = true
+mm-ports.workspace = true
+mm-security.workspace = true

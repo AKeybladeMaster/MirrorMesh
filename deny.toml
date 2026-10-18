@@ -1,0 +1,27 @@
+[advisories]
+ignore = []
+unmaintained = "workspace"
+unsound = "workspace"
+yanked = "deny"
+
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+include-dev = true
+confidence-threshold = 0.8
+unused-allowed-license = "warn"
+
+[licenses.private]
+ignore = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

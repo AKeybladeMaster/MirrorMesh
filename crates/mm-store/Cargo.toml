@@ -1,0 +1,9 @@
+[package]
+name = "mm-store"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+mm-ports.workspace = true
+

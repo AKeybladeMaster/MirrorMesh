@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">MirrorMesh TV</string>
+    <string name="session_standby">No active session</string>
+    <string name="session_request_pending">Request from Demo Sender (local)</string>
+    <string name="session_demo_connected">Connected to Demo Sender (local demo)</string>
+    <string name="session_request_rejected">Local request rejected</string>
+    <string name="local_demo_status">Local demonstration only. No network or video is connected.</string>
+    <string name="demo_standby_help">Use the remote to show a local demo request. Accept or Reject requires a separate button press. This does not discover a sender.</string>
+    <string name="demo_request_help">A local demo request is waiting. Choose Accept or Reject. No network connection or screen capture will start.</string>
+    <string name="demo_connected_help">This is a local UI demonstration only. Choose Disconnect to return to standby; no media is flowing.</string>
+    <string name="demo_rejected_help">The local demo request was rejected. You can show another local request.</string>
+    <string name="signaling_details">Authenticated signaling is not configured. Demo controls only change local UI state; no remote sender can connect and no media is rendered.</string>
+</resources>

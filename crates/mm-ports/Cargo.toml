@@ -1,0 +1,11 @@
+[package]
+name = "mm-ports"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+mm-domain.workspace = true
+mm-protocol.workspace = true
+mm-transport.workspace = true
+

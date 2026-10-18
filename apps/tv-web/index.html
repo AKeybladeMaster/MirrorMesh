@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#071017" />
+    <title>MirrorMesh TV Receiver</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="module" src="./dist/app.js"></script>
+  </head>
+  <body>
+    <main class="receiver-shell" aria-labelledby="page-title">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="MirrorMesh receiver home">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <span>MirrorMesh</span>
+        </a>
+        <p class="mode-label"><span class="status-dot" aria-hidden="true"></span> TV RECEIVER</p>
+      </header>
+
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">LOCAL SCREEN RECEIVER</p>
+          <h1 id="page-title">Ready when<br />you are.</h1>
+          <p class="intro">Pairing and live streaming are not connected in this preview. Check this browser before using a supported MirrorMesh receiver.</p>
+          <div class="actions">
+            <button class="button button-primary" id="connect-button" type="button" disabled aria-describedby="connection-note">Connect</button>
+            <button class="button button-secondary" id="fullscreen-button" type="button" aria-pressed="false" autofocus>Full screen</button>
+          </div>
+          <p id="connection-note" class="button-note" role="status" aria-live="polite">Authenticated signaling is not configured.</p>
+          <p class="remote-help" id="remote-help">Use the TV remote arrows to move focus and Select to activate a control. Back or Escape exits full screen.</p>
+        </div>
+
+        <div class="preview-card" aria-label="Receiver preview, no session connected">
+          <div class="preview-topline"><span>PREVIEW</span><span class="preview-live"><i aria-hidden="true"></i> STANDBY</span></div>
+          <div class="preview-screen">
+            <div class="screen-glow" aria-hidden="true"></div>
+            <div class="screen-content">
+              <span class="screen-icon" aria-hidden="true">
+                <svg viewBox="0 0 48 48" fill="none"><rect x="5" y="8" width="38" height="27" rx="4" stroke="currentColor" stroke-width="2.5"/><path d="M17 42h14M24 35v7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="m21 17 9 5-9 5v-10Z" fill="currentColor"/></svg>
+              </span>
+              <p>No session connected</p>
+              <span>Waiting for an approved sender</span>
+            </div>
+            <div class="screen-footer"><span>MirrorMesh</span><span>H.264 · WebRTC</span></div>
+          </div>
+          <p class="preview-caption">Receiver shell preview · no video is being captured or received</p>
+        </div>
+      </section>
+
+      <section class="diagnostics" aria-labelledby="diagnostics-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">COMPATIBILITY</p><h2 id="diagnostics-title">Browser readiness</h2></div>
+          <button class="refresh-button" id="refresh-button" type="button"><span aria-hidden="true">↻</span> Check again</button>
+        </div>
+        <div class="check-grid" id="check-grid" aria-live="polite">
+          <div class="check-row" data-check="secureOrigin"><span class="check-icon" aria-hidden="true"></span><span class="check-label">Secure origin</span><span class="check-value">Checking</span></div>
+          <div class="check-row" data-check="webrtc"><span class="check-icon" aria-hidden="true"></span><span class="check-label">WebRTC support</span><span class="check-value">Checking</span></div>
+          <div class="check-row" data-check="h264"><span class="check-icon" aria-hidden="true"></span><span class="check-label">H.264 receive</span><span class="check-value">Checking</span></div>
+          <div class="check-row" data-check="signaling"><span class="check-icon" aria-hidden="true"></span><span class="check-label">Authenticated signaling</span><span class="check-value">Unavailable</span></div>
+          <div class="check-row" data-check="autoplay"><span class="check-icon" aria-hidden="true"></span><span class="check-label">Media autoplay</span><span class="check-value">Not tested until media arrives</span></div>
+        </div>
+      </section>
+
+      <footer class="footer"><span>MirrorMesh · TV browser fallback</span><span>Native Android TV is the primary TV receiver</span></footer>
+    </main>
+  </body>
+</html>
