@@ -1,5 +1,6 @@
 use std::fmt;
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -56,6 +57,21 @@ pub trait ClockPort: Send + Sync {
 pub trait DiscoveryPort: Send + Sync {
     fn discover(&self) -> Result<Vec<Device>, PortError>;
     fn stop(&self) -> Result<(), PortError>;
+}
+
+/// A single unauthenticated device hint and the resolved network addresses associated with it.
+///
+/// The device identifier, metadata, and endpoints are attacker-controlled until pairing proves
+/// the peer identity. This value must never imply trust or authorization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryCandidate {
+    pub device: Device,
+    pub endpoints: Vec<SocketAddr>,
+}
+
+/// Endpoint-preserving discovery extension for use cases that need to initiate pairing.
+pub trait DiscoveryCandidatesPort: DiscoveryPort {
+    fn discover_candidates(&self) -> Result<Vec<DiscoveryCandidate>, PortError>;
 }
 
 pub trait CapturePort: Send {
@@ -128,6 +144,36 @@ pub trait TrustedPeerPort: Send + Sync {
         self.get_peer(peer_id)
             .map(|peer| peer.is_some_and(|peer| peer.is_active()))
     }
+}
+
+/// Local signing and lifecycle boundary for a device's pairing identity.
+///
+/// Implementations must keep private material inside the platform identity adapter,
+/// refuse to sign non-domain-separated pairing messages, and never export the private seed.
+pub trait LocalPairingIdentityPort: Send + Sync {
+    fn local_public_key(&self) -> Result<PeerPublicKey, PortError>;
+
+    /// Signs the canonical domain-separated message produced by the pairing application.
+    fn sign_pairing_message(&self, message: &[u8]) -> Result<Vec<u8>, PortError>;
+
+    /// Rotates the local key only after the replacement is durably protected by the OS.
+    fn rotate_identity(&self) -> Result<PeerPublicKey, PortError>;
+
+    /// Removes the persisted key and disables signing through this loaded identity.
+    fn delete_identity(&self) -> Result<(), PortError>;
+}
+
+/// TLS 1.3 server-authentication signing boundary for a local device identity.
+///
+/// Implementations keep private material inside the platform identity adapter and must never
+/// export a private key. They must reject inputs that do not contain the TLS 1.3 server
+/// CertificateVerify context and transcript hash; this operation must not sign pairing proofs or
+/// arbitrary application messages. The public key must be the same Ed25519 key whose SHA-256
+/// fingerprint is placed in the pairing QR.
+pub trait LocalTlsIdentityPort: Send + Sync {
+    fn tls_server_public_key(&self) -> Result<PeerPublicKey, PortError>;
+
+    fn sign_tls13_certificate_verify(&self, message: &[u8]) -> Result<Vec<u8>, PortError>;
 }
 
 /// Cryptographic identity boundary for the first-time pairing proof.

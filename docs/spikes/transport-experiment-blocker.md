@@ -11,16 +11,16 @@ These are compiled software controls, not a WebRTC engine. The I420 source is ra
 ## Current environment recheck
 
 - Rust/Cargo 1.99.1 is available at `C:\Users\Beasty\.rustup\toolchains\1.99.1-x86_64-pc-windows-msvc\bin`; it is not on the shell's default `PATH`.
-- Flutter is configured at `C:\Users\Beasty\AppData\Local\Programs\MirrorMeshFlutter\flutter`; `flutter_webrtc` is not in the local pub cache. The existing Flutter Windows build predates this dependency decision.
+- Flutter 3.47.7/Dart 3.13.5 is configured at `C:\Users\Beasty\AppData\Local\Programs\MirrorMeshFlutter\flutter`; `flutter_webrtc` 1.6.2+hotfix.4 is resolved and cached. Windows plugin builds stop before compilation because Flutter requires plugin symlink support, and Windows Developer Mode is disabled.
 - The user-provided ADB directory exists at `C:\Program Files\adb-tools` and contains `adb.exe`; it is not on `PATH`. Android SDK and Gradle executables were not found through the current shell/environment probe.
 - `ffmpeg`, `ffprobe`, GStreamer, and Linux SDK tools are not available through the current shell probe. The browser evidence is a desktop Edge 155 localhost capability-shell screenshot, not an authenticated peer or TV browser test.
-- The GitHub repository URL was queried read-only with permission after the sandbox denied network access; `git ls-remote` returned no refs. This is consistent with a new empty remote. The local workspace has no `.git` metadata.
+- The GitHub repository was empty at initialization. Current project state was pushed to `main` at `30cd5e2`; `task_2` was created/pushed as the active transport branch. `dev` is reserved for final task-branch integration.
 
 These checks record this Windows shell, not the user's entire machine inventory. User-deferred hardware tests may be run later from the provided ADB path; they are not required for code work.
 
 ## Candidate choice
 
-ADR-0002 selects the published `flutter_webrtc` package as the initial libwebrtc integration for Flutter targets, a native Kotlin libwebrtc adapter for Android TV, and browser-native WebRTC APIs for the web fallback. The Rust transport layer owns bounded control state and media metadata, not the codec or socket implementation. The package and Android artifact still need exact local dependency resolution, lockfile updates, notice review and target builds.
+ADR-0002 selects the published `flutter_webrtc` package as the initial libwebrtc integration for Flutter targets, a native Kotlin libwebrtc adapter for Android TV, and browser-native WebRTC APIs for the web fallback. The Rust transport layer owns bounded control state and media metadata, not the codec or socket implementation. The Flutter package is pinned in `pubspec.yaml`/`pubspec.lock`; the generated Flutter notice inventory includes the resolved runtime graph. The Android artifact source is recorded as a candidate, but the plugin native build and Android TV build remain unverified.
 
 The choice uses the current published target matrix and the requirement for native media surfaces across Windows, Linux, Android and iOS. `str0m` remains viable but requires MirrorMesh to provide I/O/event driving and separate codec adapters; upstream lists Android/iOS compiled but not tested. GStreamer remains viable but has extra plugin/bundle and license review costs across mobile and desktop. This decision is an implementation direction, not measured interoperability evidence.
 

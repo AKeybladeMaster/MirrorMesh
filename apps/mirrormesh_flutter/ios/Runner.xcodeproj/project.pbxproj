@@ -406,6 +406,8 @@
 					"$(inherited)",
 					"-force_load",
 					"$(PROJECT_DIR)/../../../target/aarch64-apple-ios/release/libmm_ffi.a",
+					"-L$(PROJECT_DIR)/../../../target/aarch64-apple-ios/release",
+					"-lmm_adapter_ios",
 				);
 				STRIP_STYLE = "non-global";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -594,6 +596,8 @@
 					"$(inherited)",
 					"-force_load",
 					"$(PROJECT_DIR)/../../../target/aarch64-apple-ios/release/libmm_ffi.a",
+					"-L$(PROJECT_DIR)/../../../target/aarch64-apple-ios/release",
+					"-lmm_adapter_ios",
 				);
 				STRIP_STYLE = "non-global";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -623,6 +627,8 @@
 					"$(inherited)",
 					"-force_load",
 					"$(PROJECT_DIR)/../../../target/aarch64-apple-ios/release/libmm_ffi.a",
+					"-L$(PROJECT_DIR)/../../../target/aarch64-apple-ios/release",
+					"-lmm_adapter_ios",
 				);
 				STRIP_STYLE = "non-global";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";

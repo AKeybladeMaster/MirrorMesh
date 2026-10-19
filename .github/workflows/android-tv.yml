@@ -3,7 +3,7 @@ name: Android TV checks
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'task_*']
 
 permissions:
   contents: read
@@ -42,11 +42,35 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
       - name: Install Android TV build SDK
-        run: sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
+        run: >-
+          sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
+          "ndk;28.2.13676358" "emulator"
+          "system-images;android-35;google_apis;x86_64"
+      - name: Install Rust Android target
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup target add aarch64-linux-android x86_64-linux-android --toolchain 1.99.1
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           gradle-version: '9.6.0'
           cache-provider: basic
+      - name: Run native synthetic H.264 receiver integration on emulator
+        run: |
+          echo "no" | avdmanager create avd --force --name mirrormesh-api35 \
+            --package "system-images;android-35;google_apis;x86_64" --device "pixel_2"
+          emulator -avd mirrormesh-api35 -no-window -no-audio -no-boot-anim \
+            -no-snapshot -gpu swiftshader_indirect &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          adb wait-for-device
+          for attempt in $(seq 1 60); do
+            booted=$(adb shell getprop sys.boot_completed | tr -d '\r')
+            if [ "$booted" = "1" ]; then break; fi
+            sleep 5
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell input keyevent 82
+          gradle :app:connectedDebugAndroidTest -PmmAndroidAbi=x86_64
       - name: Assemble native Android TV APK
         run: gradle :app:assembleDebug
 

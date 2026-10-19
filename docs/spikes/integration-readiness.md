@@ -5,9 +5,9 @@
 
 ## Gate result
 
-Task 07 requires a known sender and native Android TV receiver to exchange the candidate protocol before cross-platform end-to-end testing begins. That pair does not exist yet. ADR-0002 is deferred; no transport was built or selected. The Android TV app is a local-only approval UI with no signaling, WebRTC, decoder, or video surface. Its separate APK build workflow is authored but has not run. The Flutter sender/receiver surfaces remain local demos and do not capture, signal, or stream. Flutter's demo scan, pairing-start and end actions now mutate only safe Rust session states; native integration tests verify the path, documented in the [Flutter mock/domain-state spike](flutter-mock-domain-state.md) and [ADR-0008](../adr/0008-flutter-demo-session-ffi.md).
+Task 07 requires a known sender and native Android TV receiver to exchange the candidate protocol before cross-platform end-to-end testing begins. That pair does not exist yet. ADR-0002 selects WebRTC for Flutter sender targets and a native Android TV receiver integration path. The Flutter sender now has a metadata-only WebRTC adapter, but it has no signaling, capture, attached tracks, or media playback. The Android TV app remains a local-only approval UI with no signaling, WebRTC, decoder, or video surface. Its separate APK build workflow is authored but its hosted result has not been reviewed. Flutter's demo scan, pairing-start and end actions mutate only safe Rust session states; native integration tests verify the path, documented in the [Flutter mock/domain-state spike](flutter-mock-domain-state.md) and [ADR-0008](../adr/0008-flutter-demo-session-ffi.md).
 
-The protocol is a candidate, not frozen v1: Rust has one valid `session.offer` golden fixture and parser/state tests, but no cross-platform exchange or shared fixture review. No H.264 video fixture has been made because no common transport/codec path was selected. A desktop screenshot of the browser capability shell is available; it shows standby only and is not media evidence.
+The protocol is a candidate, not frozen v1: Rust has one valid `session.offer` golden fixture and parser/state tests, but no cross-platform exchange or shared fixture review. WebRTC is selected, but no H.264 video fixture or encoded stream has been produced because no native encoder path is integrated. A desktop screenshot of the browser capability shell is available; it shows standby only and is not media evidence.
 
 The native Flutter surface and snapshot boundary is also only a proposal: the protocol document has pseudocode, while the shared Rust ports and platform adapter crates do not provide a render surface or snapshot service. See the [surface/snapshot spike](flutter-surface-snapshot.md) for current source evidence and review gates.
 
@@ -31,7 +31,7 @@ The native Flutter surface and snapshot boundary is also only a proposal: the pr
 - Android TV Java state and XML/permission checks passed. They validate local approval transitions and source boundaries; the APK has not been built or installed.
 - TV web logic has seven passing Node tests; headless Edge 155 localhost confirms browser capability detection and the disabled Connect state. No HTTPS deployment, named TV browser, signaling, or media result exists.
 - The Windows Flutter release shell built and loaded `mm_ffi.dll` in a startup smoke check. It has no real capture or receive path.
-- No sender-to-receiver build hash, hardware test log, measured latency set, annotated screenshot, or video artifact exists. This workspace has no Git metadata from which to report a build commit SHA.
+- No sender-to-receiver build hash, hardware test log, measured latency set, annotated screenshot, or video artifact exists. Although the repository now has Git metadata, no interoperating sender/receiver build exists from which to report a validated end-to-end build SHA.
 
 See the [verification ledger](../verification.md) for command-level local evidence and limitations.
 

@@ -1,3 +1,11 @@
+mod mirrormesh;
+mod pairing;
+mod trusted_sessions;
+
+pub use mirrormesh::MirrorMeshRuntime;
+pub use pairing::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
+pub use trusted_sessions::{TrustedSessionError, TrustedSessionRuntime};
+
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
@@ -65,9 +73,10 @@ impl SessionManager {
             .ok_or(RuntimeError::UnknownSession)?;
         let next = try_transition(current, event)?;
         inner.sessions.insert(session_id, next);
-        if next != current
-            && let Some(subscribers) = inner.subscribers.get_mut(&session_id)
-        {
+        if next == current {
+            return Ok(next);
+        }
+        if let Some(subscribers) = inner.subscribers.get_mut(&session_id) {
             subscribers.retain(|subscriber| match subscriber.try_send(next) {
                 Ok(()) => true,
                 Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,

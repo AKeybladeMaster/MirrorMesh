@@ -37,7 +37,7 @@ Pin exact tested versions after initial CI: stable Rust toolchain/target triples
 
 ## Android
 
-- The Flutter 3.47.7 toolchain pins NDK `28.2.13676358` and Android platform 36. CI cross-compiles `mm-ffi` for `aarch64-linux-android` using the NDK clang linker for API 21, stages `libmm_ffi.so` at `android/app/src/main/jniLibs/arm64-v8a`, builds an ARM64 debug APK, and verifies the packaged library path. The app loads the packaged `.so` by soname. This proves packaging only; no phone runtime test has run.
+- The Flutter 3.47.7 toolchain pins NDK `28.2.13676358` and Android platform 36. CI cross-compiles `mm-ffi` for `aarch64-linux-android` using the NDK clang linker for API 21, stages `libmm_ffi.so` at `android/app/src/main/jniLibs/arm64-v8a`, builds an ARM64 debug APK, and verifies the packaged library path. `MainActivity` attempts to load the packaged library by soname and, when loaded, passes `applicationContext` to the JNI bootstrap before configuring Flutter. If the library is absent, the existing unavailable-state screen remains usable. This proves packaging configuration only; no phone runtime test has run.
 - `flutter build apk --release --target-platform android-arm64`, `flutter build appbundle --release` as baseline only after native integration configured.
 - Kotlin MediaProjection + MediaCodec adapters and Rust `aarch64-linux-android` packaged `.so`; proper ABI alignment and foreground service manifest; user-initiated capture only.
 - Separate Android TV manifest/launcher icons/remote control focus and TV Play distribution track.

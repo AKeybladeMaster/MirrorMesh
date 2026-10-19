@@ -1,8 +1,11 @@
+use std::fmt;
+use std::sync::Arc;
+
 use mm_domain::{
     DeviceId, MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, PeerFingerprint, PeerGrant, PeerPublicKey,
     TrustedPeer, TrustedPeerGrants,
 };
-use mm_ports::{PairingIdentityPort, TrustedPeerPort};
+use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
 use mm_security::{
     ManualEndpointError, NonceIssueError, PairingNonce, PendingPairingNonces, format_pairing_qr,
     parse_manual_ip_endpoint, parse_pairing_qr,
@@ -26,6 +29,25 @@ pub enum PairingCoordinatorError {
     GrantNotRequested,
     StoreFailure,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairingProofSigningError {
+    SelfPairing,
+    Identity(PortError),
+    InvalidProof(PairingCoordinatorError),
+}
+
+impl fmt::Display for PairingProofSigningError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SelfPairing => formatter.write_str("a device cannot pair with itself"),
+            Self::Identity(error) => write!(formatter, "pairing signer failed: {error}"),
+            Self::InvalidProof(error) => write!(formatter, "pairing proof is invalid: {error:?}"),
+        }
+    }
+}
+
+impl std::error::Error for PairingProofSigningError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairingInvitation {
@@ -91,6 +113,53 @@ impl PairingProof {
         })
     }
 
+    /// Creates a possession proof using a device's protected local signing identity.
+    ///
+    /// The caller must obtain the receiver ID and nonce from a validated invitation, verify the
+    /// receiver fingerprint through its connection policy, and supply the sender's local device
+    /// ID. This method only validates and signs the canonical proof; it does not validate QR
+    /// expiry or authenticate a transport connection.
+    pub fn create_signed(
+        receiver_id: DeviceId,
+        nonce: PairingNonce,
+        peer_id: DeviceId,
+        display_name: String,
+        requested_grants: TrustedPeerGrants,
+        identity: &impl LocalPairingIdentityPort,
+    ) -> Result<Self, PairingProofSigningError> {
+        if receiver_id == peer_id {
+            return Err(PairingProofSigningError::SelfPairing);
+        }
+
+        let public_key = identity
+            .local_public_key()
+            .map_err(PairingProofSigningError::Identity)?;
+        let unsigned = Self::new(
+            receiver_id,
+            nonce,
+            peer_id,
+            display_name.clone(),
+            public_key.clone(),
+            requested_grants,
+            vec![0],
+        )
+        .map_err(PairingProofSigningError::InvalidProof)?;
+        let signature = identity
+            .sign_pairing_message(&unsigned.signing_message())
+            .map_err(PairingProofSigningError::Identity)?;
+
+        Self::new(
+            receiver_id,
+            nonce,
+            peer_id,
+            display_name,
+            public_key,
+            requested_grants,
+            signature,
+        )
+        .map_err(PairingProofSigningError::InvalidProof)
+    }
+
     /// Canonical bytes the sender signs and the receiver verifies.
     pub fn signing_message(&self) -> Vec<u8> {
         let name_bytes = self.display_name.as_bytes();
@@ -111,6 +180,34 @@ impl PairingProof {
         message.extend_from_slice(name_bytes);
         message.push(grant_bits);
         message
+    }
+
+    pub const fn receiver_id(&self) -> DeviceId {
+        self.receiver_id
+    }
+
+    pub const fn nonce(&self) -> PairingNonce {
+        self.nonce
+    }
+
+    pub const fn peer_id(&self) -> DeviceId {
+        self.peer_id
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub fn public_key(&self) -> &PeerPublicKey {
+        &self.public_key
+    }
+
+    pub const fn requested_grants(&self) -> TrustedPeerGrants {
+        self.requested_grants
+    }
+
+    pub fn signature(&self) -> &[u8] {
+        &self.signature
     }
 }
 
@@ -147,21 +244,22 @@ impl PendingPairingApproval {
     }
 }
 
-pub struct PairingCoordinator<'a, P: TrustedPeerPort, I: PairingIdentityPort> {
+pub struct PairingCoordinator<P: TrustedPeerPort, I: PairingIdentityPort> {
     local_device_id: DeviceId,
     local_fingerprint: PeerFingerprint,
     nonces: PendingPairingNonces,
-    identity: &'a I,
-    peers: &'a P,
+    identity: Arc<I>,
+    peers: Arc<P>,
 }
 
-impl<'a, P: TrustedPeerPort, I: PairingIdentityPort> PairingCoordinator<'a, P, I> {
+impl<P: TrustedPeerPort, I: PairingIdentityPort> PairingCoordinator<P, I> {
+    /// Creates a coordinator that retains shared ownership of its identity and peer store.
     pub fn new(
         local_device_id: DeviceId,
         local_fingerprint: PeerFingerprint,
         nonces: PendingPairingNonces,
-        identity: &'a I,
-        peers: &'a P,
+        identity: Arc<I>,
+        peers: Arc<P>,
     ) -> Self {
         Self {
             local_device_id,
@@ -170,6 +268,11 @@ impl<'a, P: TrustedPeerPort, I: PairingIdentityPort> PairingCoordinator<'a, P, I
             identity,
             peers,
         }
+    }
+
+    /// Returns the public identity fingerprint captured when this coordinator was created.
+    pub const fn local_fingerprint(&self) -> PeerFingerprint {
+        self.local_fingerprint
     }
 
     /// Create a user-displayable QR URI for a previously approved numeric endpoint.

@@ -1,16 +1,17 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use mm_domain::{
     DeviceId, PeerFingerprint, PeerGrant, PeerPublicKey, TrustedPeer, TrustedPeerGrants,
 };
-use mm_ports::{PairingIdentityPort, PortError, TrustedPeerPort};
+use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
 use mm_security::{
     NonceSourceError, PairingNonce, PairingNonceSource, PendingPairingNonces, parse_pairing_qr,
 };
 
 use super::{
     MAX_PAIRING_SIGNATURE_BYTES, PairingCoordinator, PairingCoordinatorError, PairingProof,
+    PairingProofSigningError,
 };
 
 const RECEIVER_ID: DeviceId = DeviceId::from_bytes([1; 16]);
@@ -26,8 +27,8 @@ impl PairingNonceSource for FixedNonceSource {
     }
 }
 
-#[derive(Default)]
-struct MemoryPeers(Mutex<HashMap<DeviceId, TrustedPeer>>);
+#[derive(Clone, Default)]
+struct MemoryPeers(Arc<Mutex<HashMap<DeviceId, TrustedPeer>>>);
 
 impl TrustedPeerPort for MemoryPeers {
     fn get_peer(&self, peer_id: DeviceId) -> Result<Option<TrustedPeer>, PortError> {
@@ -66,9 +67,36 @@ impl TrustedPeerPort for MemoryPeers {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct FakeIdentity {
-    verified_messages: Mutex<Vec<Vec<u8>>>,
+    verified_messages: Arc<Mutex<Vec<Vec<u8>>>>,
+    signed_messages: Arc<Mutex<Vec<Vec<u8>>>>,
+    fail_signing: bool,
+}
+
+impl LocalPairingIdentityPort for FakeIdentity {
+    fn local_public_key(&self) -> Result<PeerPublicKey, PortError> {
+        PeerPublicKey::new(vec![9; 32]).map_err(|_| PortError::IdentityRejected)
+    }
+
+    fn sign_pairing_message(&self, message: &[u8]) -> Result<Vec<u8>, PortError> {
+        if self.fail_signing {
+            return Err(PortError::Unavailable);
+        }
+        self.signed_messages
+            .lock()
+            .map_err(|_| PortError::IdentityRejected)?
+            .push(message.to_vec());
+        Ok(b"valid-signature".to_vec())
+    }
+
+    fn rotate_identity(&self) -> Result<PeerPublicKey, PortError> {
+        self.local_public_key()
+    }
+
+    fn delete_identity(&self) -> Result<(), PortError> {
+        Ok(())
+    }
 }
 
 impl PairingIdentityPort for FakeIdentity {
@@ -100,20 +128,20 @@ impl PairingIdentityPort for FakeIdentity {
     }
 }
 
-fn coordinator<'a>(
-    peers: &'a MemoryPeers,
-    identity: &'a FakeIdentity,
-) -> PairingCoordinator<'a, MemoryPeers, FakeIdentity> {
+fn coordinator(
+    peers: &MemoryPeers,
+    identity: &FakeIdentity,
+) -> PairingCoordinator<MemoryPeers, FakeIdentity> {
     PairingCoordinator::new(
         RECEIVER_ID,
         PeerFingerprint::from_bytes([9; 32]),
         PendingPairingNonces::with_source(FixedNonceSource(7)),
-        identity,
-        peers,
+        Arc::new(identity.clone()),
+        Arc::new(peers.clone()),
     )
 }
 
-fn invitation(coordinator: &mut PairingCoordinator<'_, MemoryPeers, FakeIdentity>) -> String {
+fn invitation(coordinator: &mut PairingCoordinator<MemoryPeers, FakeIdentity>) -> String {
     coordinator
         .create_invitation("192.168.1.5:8765", &[8765], 100, 1_000)
         .unwrap()
@@ -133,6 +161,75 @@ fn proof(uri: &str, signature: &[u8], grants: TrustedPeerGrants) -> PairingProof
         signature.to_vec(),
     )
     .unwrap()
+}
+
+#[test]
+fn creates_sender_proof_from_the_canonical_message_using_local_identity() {
+    let identity = FakeIdentity::default();
+    let nonce = PairingNonce::from_bytes([7; 16]);
+    let grants = TrustedPeerGrants::new(true, false, true).unwrap();
+
+    let proof = PairingProof::create_signed(
+        RECEIVER_ID,
+        nonce,
+        SENDER_ID,
+        "Sender laptop".to_owned(),
+        grants,
+        &identity,
+    )
+    .unwrap();
+
+    assert_eq!(proof.receiver_id(), RECEIVER_ID);
+    assert_eq!(proof.peer_id(), SENDER_ID);
+    assert_eq!(proof.nonce(), nonce);
+    assert_eq!(proof.public_key().as_bytes(), &[9; 32]);
+    assert_eq!(proof.requested_grants(), grants);
+    assert_eq!(proof.signature(), b"valid-signature");
+    assert_eq!(
+        *identity.signed_messages.lock().unwrap(),
+        vec![proof.signing_message()]
+    );
+}
+
+#[test]
+fn refuses_self_pairing_before_calling_the_local_signer() {
+    let identity = FakeIdentity::default();
+
+    assert_eq!(
+        PairingProof::create_signed(
+            RECEIVER_ID,
+            PairingNonce::from_bytes([8; 16]),
+            RECEIVER_ID,
+            "Sender laptop".to_owned(),
+            TrustedPeerGrants::new(true, false, false).unwrap(),
+            &identity,
+        )
+        .unwrap_err(),
+        PairingProofSigningError::SelfPairing
+    );
+    assert!(identity.signed_messages.lock().unwrap().is_empty());
+}
+
+#[test]
+fn reports_local_signer_failure_without_returning_a_proof() {
+    let identity = FakeIdentity {
+        fail_signing: true,
+        ..FakeIdentity::default()
+    };
+
+    assert_eq!(
+        PairingProof::create_signed(
+            RECEIVER_ID,
+            PairingNonce::from_bytes([9; 16]),
+            SENDER_ID,
+            "Sender laptop".to_owned(),
+            TrustedPeerGrants::new(true, false, false).unwrap(),
+            &identity,
+        )
+        .unwrap_err(),
+        PairingProofSigningError::Identity(PortError::Unavailable)
+    );
+    assert!(identity.signed_messages.lock().unwrap().is_empty());
 }
 
 fn requested_grants() -> TrustedPeerGrants {
@@ -223,8 +320,8 @@ fn pending_approval_cannot_be_persisted_by_a_different_receiver() {
         DeviceId::from_bytes([4; 16]),
         PeerFingerprint::from_bytes([8; 32]),
         PendingPairingNonces::with_source(FixedNonceSource(9)),
-        &identity,
-        &peers,
+        Arc::new(identity.clone()),
+        Arc::new(peers.clone()),
     );
 
     assert_eq!(

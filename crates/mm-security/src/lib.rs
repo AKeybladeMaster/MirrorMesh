@@ -3,6 +3,18 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
+mod attempt_limiter;
+
+pub use attempt_limiter::{
+    DEFAULT_MAX_TRACKED_PAIRING_SOURCES, DEFAULT_PAIRING_ATTEMPT_LIMIT,
+    DEFAULT_PAIRING_ATTEMPT_WINDOW_MS, DEFAULT_PAIRING_COOLDOWN_MS, PairingAttemptDecision,
+    PairingAttemptLimiter, PairingAttemptLimiterError, PairingAttemptPolicy,
+    PairingAttemptPolicyError,
+};
+
+#[cfg(test)]
+mod attempt_limiter_tests;
+
 pub const MAX_MANUAL_ENDPOINT_BYTES: usize = 512;
 pub const MAX_PAIRING_QR_BYTES: usize = 1024;
 pub const PAIRING_QR_TTL_SECONDS: u64 = 120;

@@ -1,0 +1,12 @@
+[package]
+name = "mm-adapter-identity"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+curve25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+mm-domain.workspace = true
+mm-ports.workspace = true
+sha2.workspace = true

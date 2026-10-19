@@ -1,9 +1,19 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'android_pairing_bootstrap.dart';
 import 'annotation_geometry.dart';
 import 'annotation_overlay.dart';
+import 'ios_pairing_bootstrap.dart';
+import 'linux_pairing_bootstrap.dart';
 import 'rust_session_status.dart';
+import 'synthetic_video_test_pattern.dart';
+import 'webrtc_engine.dart';
+import 'windows_pairing_bootstrap.dart';
+import 'windows_sender_session.dart';
 
 enum _DemoReceiverState { undiscovered, discovered, pairing }
 
@@ -66,6 +76,22 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   int _selectedIndex = 0;
   _DemoReceiverState _demoReceiverState = _DemoReceiverState.undiscovered;
   bool _annotationEnabled = false;
+  bool _pairingRuntimePreparing = false;
+  String? _pairingRuntimeDeviceId;
+  String? _pairingRuntimeError;
+  bool _senderPairingStarting = false;
+  bool _senderPairingPollInProgress = false;
+  int? _senderPairingRequestId;
+  Timer? _senderPairingPollTimer;
+  WindowsSenderPairingStatus? _senderPairingStatus;
+  String? _senderPairingError;
+  bool _senderSessionStarting = false;
+  WindowsSenderSessionController? _windowsSenderSession;
+  StreamSubscription<WindowsSenderSessionState>? _senderSessionSubscription;
+  StreamSubscription<WebRtcOutboundVideoStats>? _senderVideoStatsSubscription;
+  WindowsSenderSessionState? _senderSessionState;
+  WebRtcOutboundVideoStats? _senderVideoStats;
+  String? _senderSessionError;
   List<AnnotationStroke> _demoStrokes = [];
   Color _demoStrokeColor = const Color(0xFF61D7C5);
   double _demoStrokeWidth = 4;
@@ -122,6 +148,21 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
           2 => _DevicesPage(
             demoReceiverState: _demoReceiverState,
             onConnectDemo: _connectDemoReceiver,
+            pairingRuntimePreparing: _pairingRuntimePreparing,
+            localDeviceId: _pairingRuntimeDeviceId,
+            pairingRuntimeError: _pairingRuntimeError,
+            onPreparePairing: _preparePairingRuntime,
+            senderPairingStarting: _senderPairingStarting,
+            senderPairingStatus: _senderPairingStatus,
+            senderPairingError: _senderPairingError,
+            onBeginSenderPairing: _beginWindowsSenderPairing,
+            onCancelSenderPairing: _cancelWindowsSenderPairing,
+            senderSessionStarting: _senderSessionStarting,
+            senderSessionState: _senderSessionState,
+            senderSessionStats: _senderVideoStats,
+            senderSessionError: _senderSessionError,
+            onStartSenderSession: _startWindowsSenderSession,
+            onStopSenderSession: _stopWindowsSenderSession,
           ),
           _ => _SettingsPage(rustSessionStatus: widget.rustSessionStatus),
         };
@@ -225,6 +266,282 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       return;
     }
     setState(() => _demoReceiverState = _DemoReceiverState.pairing);
+  }
+
+  Future<void> _preparePairingRuntime() async {
+    if (_pairingRuntimePreparing || _pairingRuntimeDeviceId != null) return;
+    setState(() {
+      _pairingRuntimePreparing = true;
+      _pairingRuntimeError = null;
+    });
+    try {
+      final deviceId = switch (Platform.operatingSystem) {
+        'android' => await const AndroidPairingBootstrap().prepare(),
+        'ios' => await const IosPairingBootstrap().prepare(),
+        'linux' => await const LinuxPairingBootstrap().prepare(),
+        'windows' => await const WindowsPairingBootstrap().prepare(),
+        _ => throw PlatformException(
+          code: 'pairing_runtime_unsupported',
+          message: 'This platform cannot prepare local pairing support.',
+        ),
+      };
+      if (!mounted) return;
+      setState(() => _pairingRuntimeDeviceId = deviceId);
+    } on PlatformException {
+      if (!mounted) return;
+      setState(
+        () => _pairingRuntimeError =
+            '${Platform.operatingSystem} could not prepare local pairing support. Try again later.',
+      );
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(
+        () => _pairingRuntimeError =
+            'The ${Platform.operatingSystem} pairing service is unavailable in this build.',
+      );
+    } finally {
+      if (mounted) setState(() => _pairingRuntimePreparing = false);
+    }
+  }
+
+  Future<void> _beginWindowsSenderPairing(String invitationUri) async {
+    if (!Platform.isWindows ||
+        _pairingRuntimeDeviceId == null ||
+        _senderPairingStarting ||
+        _senderPairingStatus?.state.isActive == true) {
+      return;
+    }
+
+    setState(() {
+      _senderPairingStarting = true;
+      _senderPairingError = null;
+      _senderPairingStatus = null;
+    });
+    try {
+      final requestId = await const WindowsPairingBootstrap()
+          .beginSenderPairing(invitationUri);
+      if (!mounted) return;
+      _senderPairingRequestId = requestId;
+      setState(() {
+        _senderPairingStatus = const WindowsSenderPairingStatus(
+          state: WindowsSenderPairingState.connecting,
+          errorCode: 0,
+          receiverFingerprint: '',
+        );
+      });
+      _senderPairingPollTimer?.cancel();
+      _senderPairingPollTimer = Timer.periodic(
+        const Duration(milliseconds: 300),
+        (_) => unawaited(_pollWindowsSenderPairing(requestId)),
+      );
+      await _pollWindowsSenderPairing(requestId);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(() => _senderPairingError = _senderPairingErrorMessage(error));
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(
+        () => _senderPairingError =
+            'The Windows sender pairing service is unavailable in this build.',
+      );
+    } finally {
+      if (mounted) setState(() => _senderPairingStarting = false);
+    }
+  }
+
+  Future<void> _pollWindowsSenderPairing(int requestId) async {
+    if (!mounted ||
+        requestId != _senderPairingRequestId ||
+        _senderPairingPollInProgress) {
+      return;
+    }
+    _senderPairingPollInProgress = true;
+    try {
+      final status = await const WindowsPairingBootstrap().pollSenderPairing(
+        requestId,
+      );
+      if (!mounted || requestId != _senderPairingRequestId) return;
+      setState(() => _senderPairingStatus = status);
+      if (!status.state.isActive) _senderPairingPollTimer?.cancel();
+    } on PlatformException catch (error) {
+      if (!mounted || requestId != _senderPairingRequestId) return;
+      _senderPairingPollTimer?.cancel();
+      setState(() => _senderPairingError = _senderPairingErrorMessage(error));
+    } on MissingPluginException {
+      if (!mounted || requestId != _senderPairingRequestId) return;
+      _senderPairingPollTimer?.cancel();
+      setState(
+        () => _senderPairingError =
+            'The Windows sender pairing service is unavailable in this build.',
+      );
+    } finally {
+      _senderPairingPollInProgress = false;
+    }
+  }
+
+  Future<void> _cancelWindowsSenderPairing() async {
+    final requestId = _senderPairingRequestId;
+    if (requestId == null) return;
+    try {
+      await _stopWindowsSenderSession();
+      await const WindowsPairingBootstrap().cancelSenderPairing(requestId);
+      if (mounted) await _pollWindowsSenderPairing(requestId);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(() => _senderPairingError = _senderPairingErrorMessage(error));
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(
+        () => _senderPairingError =
+            'The Windows sender pairing service is unavailable in this build.',
+      );
+    }
+  }
+
+  Future<void> _startWindowsSenderSession() async {
+    final requestId = _senderPairingRequestId;
+    if (!Platform.isWindows ||
+        requestId == null ||
+        _senderPairingStatus?.state != WindowsSenderPairingState.approved ||
+        _senderSessionStarting ||
+        _windowsSenderSession != null) {
+      return;
+    }
+
+    setState(() {
+      _senderSessionStarting = true;
+      _senderSessionError = null;
+    });
+    try {
+      final sources = await const FlutterWebRtcPeerConnectionFactory()
+          .listDesktopCaptureSources();
+      if (!mounted) return;
+      if (sources.isEmpty) {
+        setState(
+          () => _senderSessionError =
+              'Windows did not report an available screen or window source.',
+        );
+        return;
+      }
+
+      final source = await showDialog<WebRtcDesktopCaptureSource>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Choose a screen or window'),
+          content: SizedBox(
+            width: 480,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'The selected source will be captured and sent to the approved Android TV. Capture starts only after you choose a source.',
+                  ),
+                ),
+                for (final source in sources)
+                  ListTile(
+                    leading: Icon(
+                      source.type == WebRtcDesktopCaptureSourceType.screen
+                          ? Icons.desktop_windows_outlined
+                          : Icons.web_asset_outlined,
+                    ),
+                    title: Text(source.name),
+                    subtitle: Text(
+                      source.type == WebRtcDesktopCaptureSourceType.screen
+                          ? 'Screen'
+                          : 'Window',
+                    ),
+                    onTap: () => Navigator.of(context).pop(source),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || source == null) return;
+
+      final controller = WindowsSenderSessionController(
+        pairing: const WindowsPairingBootstrap(),
+      );
+      _windowsSenderSession = controller;
+      _senderVideoStats = null;
+      _senderSessionSubscription = controller.states.listen((state) {
+        if (mounted) setState(() => _senderSessionState = state);
+      });
+      _senderVideoStatsSubscription = controller.videoStats.listen((stats) {
+        if (mounted) setState(() => _senderVideoStats = stats);
+      });
+      await controller.start(requestId: requestId, sourceId: source.id);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _senderSessionError =
+            error.message ??
+            'Windows could not start the selected video source.',
+      );
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(
+        () => _senderSessionError =
+            'The Windows WebRTC capture service is unavailable in this build.',
+      );
+    } on Object {
+      if (!mounted) return;
+      setState(
+        () => _senderSessionError =
+            'The screen share could not start. No video is being sent.',
+      );
+    } finally {
+      if (mounted) setState(() => _senderSessionStarting = false);
+    }
+  }
+
+  Future<void> _stopWindowsSenderSession() async {
+    final subscription = _senderSessionSubscription;
+    _senderSessionSubscription = null;
+    await subscription?.cancel();
+    final statsSubscription = _senderVideoStatsSubscription;
+    _senderVideoStatsSubscription = null;
+    await statsSubscription?.cancel();
+    final controller = _windowsSenderSession;
+    _windowsSenderSession = null;
+    if (controller != null) await controller.dispose();
+    if (mounted) {
+      setState(() {
+        _senderSessionState = null;
+        _senderVideoStats = null;
+        _senderSessionStarting = false;
+      });
+    }
+  }
+
+  String _senderPairingErrorMessage(PlatformException error) =>
+      switch (error.code) {
+        'pairing_busy' => 'A sender pairing attempt is already active.',
+        'invalid_argument' =>
+          'Paste the invitation text exactly as shown on the TV.',
+        'pairing_status_invalid' => 'Windows returned invalid pairing status.',
+        _ => error.message ?? 'Windows could not complete sender pairing.',
+      };
+
+  @override
+  void dispose() {
+    _senderPairingPollTimer?.cancel();
+    unawaited(_senderSessionSubscription?.cancel());
+    unawaited(_senderVideoStatsSubscription?.cancel());
+    unawaited(_windowsSenderSession?.dispose());
+    final requestId = _senderPairingRequestId;
+    if (requestId != null && _senderPairingStatus?.state.isActive == true) {
+      unawaited(const WindowsPairingBootstrap().cancelSenderPairing(requestId));
+    }
+    super.dispose();
   }
 
   void _disconnectDemoReceiver() {
@@ -675,19 +992,65 @@ class _DemoPreviewBackgroundPainter extends CustomPainter {
       false;
 }
 
-class _DevicesPage extends StatelessWidget {
+class _DevicesPage extends StatefulWidget {
   const _DevicesPage({
     required this.demoReceiverState,
     required this.onConnectDemo,
+    required this.pairingRuntimePreparing,
+    required this.localDeviceId,
+    required this.pairingRuntimeError,
+    required this.onPreparePairing,
+    required this.senderPairingStarting,
+    required this.senderPairingStatus,
+    required this.senderPairingError,
+    required this.onBeginSenderPairing,
+    required this.onCancelSenderPairing,
+    required this.senderSessionStarting,
+    required this.senderSessionState,
+    required this.senderSessionStats,
+    required this.senderSessionError,
+    required this.onStartSenderSession,
+    required this.onStopSenderSession,
   });
 
   final _DemoReceiverState demoReceiverState;
   final VoidCallback onConnectDemo;
+  final bool pairingRuntimePreparing;
+  final String? localDeviceId;
+  final String? pairingRuntimeError;
+  final VoidCallback onPreparePairing;
+  final bool senderPairingStarting;
+  final WindowsSenderPairingStatus? senderPairingStatus;
+  final String? senderPairingError;
+  final ValueChanged<String> onBeginSenderPairing;
+  final VoidCallback onCancelSenderPairing;
+  final bool senderSessionStarting;
+  final WindowsSenderSessionState? senderSessionState;
+  final WebRtcOutboundVideoStats? senderSessionStats;
+  final String? senderSessionError;
+  final VoidCallback onStartSenderSession;
+  final VoidCallback onStopSenderSession;
+
+  @override
+  State<_DevicesPage> createState() => _DevicesPageState();
+}
+
+class _DevicesPageState extends State<_DevicesPage> {
+  final _invitationController = TextEditingController();
+
+  @override
+  void dispose() {
+    _invitationController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final demoDiscovered = demoReceiverState != _DemoReceiverState.undiscovered;
-    final demoPairing = demoReceiverState == _DemoReceiverState.pairing;
+    final demoDiscovered =
+        widget.demoReceiverState != _DemoReceiverState.undiscovered;
+    final demoPairing = widget.demoReceiverState == _DemoReceiverState.pairing;
+    final senderStatus = widget.senderPairingStatus;
+    final senderPairingActive = senderStatus?.state.isActive == true;
 
     return ListView(
       padding: const EdgeInsets.all(28),
@@ -724,7 +1087,7 @@ class _DevicesPage extends StatelessWidget {
                     alignment: Alignment.centerRight,
                     child: FilledButton.icon(
                       key: const Key('connect-demo-button'),
-                      onPressed: demoPairing ? null : onConnectDemo,
+                      onPressed: demoPairing ? null : widget.onConnectDemo,
                       icon: Icon(
                         demoPairing ? Icons.hourglass_top : Icons.link_outlined,
                       ),
@@ -741,14 +1104,327 @@ class _DevicesPage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
         ],
-        const _StatusCard(
-          icon: Icons.devices_other_outlined,
-          title: 'Live pairing is not available yet',
-          message: 'Network discovery, identity verification, trusted-device storage, and revocation are not implemented in this shell.',
-        ),
+        if (!Platform.isWindows || widget.localDeviceId == null)
+          const _StatusCard(
+            icon: Icons.devices_other_outlined,
+            title: 'Live pairing is not available yet',
+            message: 'Network discovery, identity verification, trusted-device storage, and revocation are not implemented in this shell.',
+          ),
+        if (Platform.isLinux ||
+            Platform.isWindows ||
+            Platform.isAndroid ||
+            Platform.isIOS) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Prepare this device for pairing',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'This opens the local ${Platform.isLinux
+                        ? 'Linux'
+                        : Platform.isWindows
+                        ? 'Windows'
+                        : Platform.isIOS
+                        ? 'iOS'
+                        : 'Android'} identity and trusted-peer database. It does not contact another device, grant trust, or start screen capture.',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    key: Key(
+                      Platform.isLinux
+                          ? 'prepare-linux-pairing-button'
+                          : Platform.isWindows
+                          ? 'prepare-windows-pairing-button'
+                          : Platform.isIOS
+                          ? 'prepare-ios-pairing-button'
+                          : 'prepare-android-pairing-button',
+                    ),
+                    onPressed:
+                        widget.pairingRuntimePreparing ||
+                            widget.localDeviceId != null
+                        ? null
+                        : widget.onPreparePairing,
+                    icon: widget.pairingRuntimePreparing
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.shield_outlined),
+                    label: Text(
+                      widget.localDeviceId != null
+                          ? 'Pairing support ready'
+                          : widget.pairingRuntimePreparing
+                          ? 'Preparing…'
+                          : 'Prepare pairing support',
+                    ),
+                  ),
+                  if (widget.localDeviceId != null) ...[
+                    const SizedBox(height: 8),
+                    SelectableText('Local device ID: ${widget.localDeviceId}'),
+                  ],
+                  if (widget.pairingRuntimeError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.pairingRuntimeError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+                  if (Platform.isWindows && widget.localDeviceId != null) ...[
+                    const Divider(height: 28),
+                    const Text(
+                      'Pair with Android TV',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Paste the TV invitation text. Windows verifies its QR fingerprint and asks only for view access. Approve the request on the TV.',
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      key: const Key('windows-pairing-invitation-field'),
+                      controller: _invitationController,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Android TV invitation',
+                        hintText: 'mirrormesh://pair?...',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        FilledButton.icon(
+                          key: const Key('begin-windows-sender-pairing-button'),
+                          onPressed:
+                              widget.senderPairingStarting ||
+                                  senderPairingActive
+                              ? null
+                              : () => widget.onBeginSenderPairing(
+                                  _invitationController.text,
+                                ),
+                          icon: widget.senderPairingStarting
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.link_outlined),
+                          label: const Text('Pair with TV'),
+                        ),
+                        if (senderPairingActive) ...[
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            key: const Key(
+                              'cancel-windows-sender-pairing-button',
+                            ),
+                            onPressed:
+                                senderStatus?.state ==
+                                    WindowsSenderPairingState.cancelling
+                                ? null
+                                : widget.onCancelSenderPairing,
+                            icon: const Icon(Icons.link_off_outlined),
+                            label: Text(
+                              senderStatus?.state ==
+                                      WindowsSenderPairingState.approved
+                                  ? 'Disconnect'
+                                  : 'Cancel',
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (senderStatus != null) ...[
+                      const SizedBox(height: 10),
+                      Text(_senderPairingStatusText(senderStatus)),
+                      if (senderStatus.state ==
+                              WindowsSenderPairingState.approved &&
+                          senderStatus.receiverFingerprint.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        SelectableText(
+                          'Verified TV fingerprint: ${senderStatus.receiverFingerprint}',
+                        ),
+                      ],
+                    ],
+                    if (senderStatus?.state ==
+                        WindowsSenderPairingState.approved) ...[
+                      const SizedBox(height: 16),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Synthetic media test target',
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 8),
+                              const AspectRatio(
+                                aspectRatio: 16 / 9,
+                                child: SyntheticVideoTestPattern(
+                                  child: Center(
+                                    child: Text(
+                                      'MirrorMesh test pattern',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                        shadows: [
+                                          Shadow(
+                                            color: Colors.black,
+                                            blurRadius: 8,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Choose the MirrorMesh app window to send this animated test pattern through native desktop capture and the H.264 WebRTC track. This capture adapter is not Windows Graphics Capture.',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        key: const Key('start-windows-screen-share-button'),
+                        onPressed:
+                            widget.senderSessionStarting ||
+                                widget.senderSessionState != null
+                            ? null
+                            : widget.onStartSenderSession,
+                        icon: widget.senderSessionStarting
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.screen_share_outlined),
+                        label: Text(
+                          widget.senderSessionStarting
+                              ? 'Starting screen share'
+                              : 'Choose screen or window to share',
+                        ),
+                      ),
+                      if (widget.senderSessionState != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _senderSessionStatusText(widget.senderSessionState!),
+                        ),
+                        if (widget.senderSessionStats case final stats?) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            stats.framesEncoded == null
+                                ? 'The WebRTC stack did not report an encoded-frame count.'
+                                : stats.hasEncodedVideo
+                                ? 'Sender reports ${stats.framesEncoded} encoded video frames; ${stats.bytesSent ?? 'byte count not reported'} bytes sent.'
+                                : 'WebRTC reports 0 encoded video frames so far.',
+                          ),
+                          Text(
+                            'Codec: ${stats.codecMimeType ?? 'not reported'} · Encoder implementation: ${stats.encoderImplementation ?? 'not reported'}',
+                          ),
+                        ] else if (widget.senderSessionState ==
+                            WindowsSenderSessionState.transportConnected) ...[
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Waiting for outbound video statistics. TV decoding is not confirmed.',
+                          ),
+                        ],
+                        if (widget.senderSessionState !=
+                                WindowsSenderSessionState.stopped &&
+                            widget.senderSessionState !=
+                                WindowsSenderSessionState.revoked) ...[
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            key: const Key('stop-windows-screen-share-button'),
+                            onPressed: widget.onStopSenderSession,
+                            icon: const Icon(Icons.stop_circle_outlined),
+                            label: const Text('Stop screen share'),
+                          ),
+                        ],
+                      ],
+                      if (widget.senderSessionError != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          widget.senderSessionError!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
+                    if (widget.senderPairingError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.senderPairingError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
+
+  String _senderPairingStatusText(WindowsSenderPairingStatus status) =>
+      switch (status.state) {
+        WindowsSenderPairingState.connecting =>
+          'Connecting securely to the TV. The request can take a few seconds.',
+        WindowsSenderPairingState.awaitingApproval =>
+          'Waiting for explicit approval on the Android TV.',
+        WindowsSenderPairingState.approved => 'Pairing approved. The authenticated control channel is retained; video is not streaming.',
+        WindowsSenderPairingState.rejected =>
+          'The TV rejected this pairing request.',
+        WindowsSenderPairingState.failed => switch (status.errorCode) {
+          1 => 'Windows could not open its local pairing identity.',
+          4 => 'The TV closed the pairing control channel.',
+          5 => 'The TV returned an invalid approval or grant.',
+          _ => 'Pairing failed. Check the invitation, TV listener, and network connection.',
+        },
+        WindowsSenderPairingState.cancelling =>
+          'Cancelling the pairing attempt and closing its control channel.',
+        WindowsSenderPairingState.cancelled =>
+          'Pairing was cancelled and the control channel was closed.',
+      };
+
+  String _senderSessionStatusText(
+    WindowsSenderSessionState state,
+  ) => switch (state) {
+    WindowsSenderSessionState.idle => 'Media session is idle.',
+    WindowsSenderSessionState.negotiating =>
+      'Negotiating the authenticated media peer.',
+    WindowsSenderSessionState.transportConnected =>
+      'WebRTC transport connected; waiting for an encoded video frame.',
+    WindowsSenderSessionState.streaming =>
+      'The sender has encoded video. TV frame receipt is still unconfirmed.',
+    WindowsSenderSessionState.reconnecting =>
+      'WebRTC transport was interrupted; attempting to reconnect.',
+    WindowsSenderSessionState.stopped => 'Screen share stopped.',
+    WindowsSenderSessionState.revoked =>
+      'Pairing was revoked. The screen share is stopped.',
+    WindowsSenderSessionState.failed =>
+      'The media session failed and its local peer was closed.',
+  };
 }
 
 class _SettingsPage extends StatelessWidget {

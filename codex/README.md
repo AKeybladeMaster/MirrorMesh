@@ -64,3 +64,14 @@ Update device-matrix.md and verification.md with truthful statuses only.
 - Each agent posts `RESULT: PASS | FAIL | BLOCKED`, paths, changed APIs, commands/exit codes, fixture, security/permission proof, measurements, and device matrix row.
 - If no Mac/iOS27 device, mark iOS capture hardware gate `BLOCKED`, **continue** Swift bindings and native receiver work. Do not claim iOS mirroring is released.
 - Release only passing targets. Priority does not override objective validation.
+
+## Recent functional integration tasks
+
+| Task | Scope | Brief |
+|---|---|---|
+| 49 | Android TV synthetic H.264 loopback | [49-tv-synthetic-h264-loopback.md](49-tv-synthetic-h264-loopback.md) |
+| 50 | Windows first-encoded-frame gate | [50-windows-first-encoded-frame-gate.md](50-windows-first-encoded-frame-gate.md) |
+| 51 | Windows peer reconnect | [51-windows-peer-reconnect.md](51-windows-peer-reconnect.md) |
+| 52 | Android TV production signaling adapter loopback | [52-android-tv-production-signaling-loopback.md](52-android-tv-production-signaling-loopback.md) |
+| 53 | Android TV signaling lifecycle tests | [53-android-tv-signaling-lifecycle-tests.md](53-android-tv-signaling-lifecycle-tests.md) |
+| 54 | Android TV bounded reconnect | [54-android-tv-bounded-reconnect.md](54-android-tv-bounded-reconnect.md) |
