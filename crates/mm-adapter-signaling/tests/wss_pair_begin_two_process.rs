@@ -68,11 +68,22 @@ fn expired_wss_pairing_approval_is_rejected_and_drops_connection() {
     run_client_parent(TestDecision::Expire);
 }
 
+#[test]
+fn wss_sender_can_cancel_while_waiting_for_receiver_approval() {
+    if std::env::var_os(CHILD_MODE).is_some() {
+        run_server_child();
+        return;
+    }
+
+    run_client_parent(TestDecision::Cancel);
+}
+
 #[derive(Clone, Copy)]
 enum TestDecision {
     Approve,
     Reject,
     Expire,
+    Cancel,
 }
 
 struct TestIdentity(SigningKey);
@@ -253,6 +264,13 @@ fn run_server_child() {
                 .flush()
                 .expect("flush rejected approval result");
         }
+        "cancel" => {
+            drop(pending);
+            println!("CANCELLED=untrusted");
+            std::io::stdout()
+                .flush()
+                .expect("flush cancelled approval result");
+        }
         other => panic!("unexpected test approval decision: {other}"),
     }
 }
@@ -268,6 +286,10 @@ fn run_client_parent(decision: TestDecision) {
             "expired_wss_pairing_approval_is_rejected_and_drops_connection",
             "expire",
         ),
+        TestDecision::Cancel => (
+            "wss_sender_can_cancel_while_waiting_for_receiver_approval",
+            "cancel",
+        ),
     };
     let mut child = spawn_server_child(test_name);
     let stdout = child.stdout.take().expect("capture server stdout");
@@ -282,7 +304,7 @@ fn run_client_parent(decision: TestDecision) {
     assert_eq!(qr.endpoint().socket_addr().port(), port);
 
     let sender = TestIdentity::new(SENDER_SEED);
-    let client = mm_adapter_signaling::WssPairingClient::begin_pairing(
+    let mut client = mm_adapter_signaling::WssPairingClient::begin_pairing(
         &invitation,
         NOW_UNIX_SECONDS,
         &[port],
@@ -296,6 +318,13 @@ fn run_client_parent(decision: TestDecision) {
 
     let pending_line = read_prefixed_line(&mut output, &mut transcript, "PENDING=");
     assert!(pending_line.ends_with("|untrusted"), "{pending_line}");
+    assert!(
+        client
+            .try_wait_for_decision()
+            .expect("poll while receiver approval is pending")
+            .is_none(),
+        "no approval or rejection has been sent yet"
+    );
     let mut child_stdin = child.stdin.take().expect("open approval channel to child");
     child_stdin
         .write_all(format!("{decision_text}\n").as_bytes())
@@ -328,8 +357,9 @@ fn run_client_parent(decision: TestDecision) {
             let approved_line = read_prefixed_line(&mut output, &mut transcript, "APPROVED=");
             assert!(approved_line.ends_with("|view"), "{approved_line}");
             let mut approved = client
-                .wait_for_decision()
-                .expect("receive approval from the QR-pinned receiver");
+                .try_wait_for_decision()
+                .expect("poll for approval from the QR-pinned receiver")
+                .expect("receiver approved the pairing request");
             assert_eq!(
                 approved.accepted_grants,
                 TrustedPeerGrants::new(true, false, false).expect("view grant scope")
@@ -350,6 +380,16 @@ fn run_client_parent(decision: TestDecision) {
             let exchanged_line =
                 read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
             assert_eq!(exchanged_line, "session.offer/session.answer");
+        }
+        TestDecision::Cancel => {
+            client.cancel();
+            client.cancel();
+            assert!(matches!(
+                client.try_wait_for_decision(),
+                Err(mm_adapter_signaling::WssClientError::Closed)
+            ));
+            let cancelled_line = read_prefixed_line(&mut output, &mut transcript, "CANCELLED=");
+            assert_eq!(cancelled_line, "untrusted");
         }
     }
     drop(child_stdin);

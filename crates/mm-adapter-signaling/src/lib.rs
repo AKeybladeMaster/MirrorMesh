@@ -548,7 +548,7 @@ impl WssPairingClient {
             .map_err(WssClientError::WebSocket)?;
 
         Ok(PendingWssPairingClient {
-            socket: Box::new(websocket),
+            socket: Some(Box::new(websocket)),
             receiver_id: invitation.device_id(),
             peer_fingerprint: invitation.fingerprint(),
             requested_grants,
@@ -558,7 +558,7 @@ impl WssPairingClient {
 
 /// A sender connection waiting for an explicit TV/receiver approval or rejection.
 pub struct PendingWssPairingClient {
-    socket: Box<dyn WssSocket>,
+    socket: Option<Box<dyn WssSocket>>,
     receiver_id: DeviceId,
     peer_fingerprint: PeerFingerprint,
     requested_grants: TrustedPeerGrants,
@@ -568,62 +568,82 @@ impl PendingWssPairingClient {
     /// Waits for one authenticated `pair.approve` or `pair.reject` response.
     pub fn wait_for_decision(mut self) -> Result<WssClientApprovedPairing, WssClientError> {
         loop {
-            let frame = match self.socket.read_message() {
-                Ok(Some(Message::Text(text))) => text,
-                Ok(Some(Message::Ping(_))) => {
-                    self.socket
-                        .flush_socket()
-                        .map_err(WssClientError::WebSocket)?;
-                    continue;
-                }
-                Ok(Some(Message::Pong(_))) | Ok(None) => continue,
-                Ok(Some(Message::Binary(_))) => {
-                    return Err(WssClientError::UnexpectedBinaryMessage);
-                }
-                Ok(Some(Message::Close(_))) => return Err(WssClientError::Closed),
-                Ok(Some(Message::Frame(_))) => {
-                    unreachable!("tungstenite does not expose raw frames")
-                }
-                Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
-                    return Err(WssClientError::Closed);
-                }
-                Err(WebSocketError::Io(error))
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::UnexpectedEof
-                            | io::ErrorKind::ConnectionReset
-                            | io::ErrorKind::BrokenPipe
-                    ) =>
-                {
-                    return Err(WssClientError::Closed);
-                }
-                Err(error) => return Err(WssClientError::WebSocket(error)),
-            };
-            let message =
-                parse_message(frame.as_str().as_bytes()).map_err(WssClientError::Protocol)?;
-            if message.header.sequence != 1 {
-                return Err(WssClientError::Protocol(ProtocolError::InvalidSequence));
-            }
-            match message.payload {
-                mm_protocol::MessagePayload::PairApprove(approval) => {
-                    let accepted_grants = validate_pair_approval(
-                        &approval,
-                        self.peer_fingerprint,
-                        self.requested_grants,
-                    )?;
-                    let connection = PairingConnection::new_client(self.receiver_id, self.socket);
-                    return Ok(WssClientApprovedPairing {
-                        accepted_grants,
-                        peer_fingerprint: self.peer_fingerprint,
-                        connection,
-                    });
-                }
-                mm_protocol::MessagePayload::PairReject(rejection) => {
-                    return Err(WssClientError::Rejected(rejection.reason));
-                }
-                _ => return Err(WssClientError::UnexpectedMessageKind),
+            if let Some(approved) = self.try_wait_for_decision()? {
+                return Ok(approved);
             }
         }
+    }
+
+    /// Polls for an authenticated `pair.approve` or `pair.reject` response.
+    ///
+    /// Returns `Ok(None)` when no complete decision is available during the bounded socket
+    /// read interval. The pending connection remains owned by this value and can be polled
+    /// again or explicitly cancelled.
+    pub fn try_wait_for_decision(
+        &mut self,
+    ) -> Result<Option<WssClientApprovedPairing>, WssClientError> {
+        let socket = self.socket.as_mut().ok_or(WssClientError::Closed)?;
+        let frame = match socket.read_message() {
+            Ok(Some(Message::Text(text))) => text,
+            Ok(Some(Message::Ping(_))) => {
+                socket.flush_socket().map_err(WssClientError::WebSocket)?;
+                return Ok(None);
+            }
+            Ok(Some(Message::Pong(_))) | Ok(None) => return Ok(None),
+            Ok(Some(Message::Binary(_))) => {
+                return Err(WssClientError::UnexpectedBinaryMessage);
+            }
+            Ok(Some(Message::Close(_))) => return Err(WssClientError::Closed),
+            Ok(Some(Message::Frame(_))) => {
+                unreachable!("tungstenite does not expose raw frames")
+            }
+            Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
+                return Err(WssClientError::Closed);
+            }
+            Err(WebSocketError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::UnexpectedEof
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::BrokenPipe
+                ) =>
+            {
+                return Err(WssClientError::Closed);
+            }
+            Err(error) => return Err(WssClientError::WebSocket(error)),
+        };
+        let message = parse_message(frame.as_str().as_bytes()).map_err(WssClientError::Protocol)?;
+        if message.header.sequence != 1 {
+            return Err(WssClientError::Protocol(ProtocolError::InvalidSequence));
+        }
+        match message.payload {
+            mm_protocol::MessagePayload::PairApprove(approval) => {
+                let accepted_grants = validate_pair_approval(
+                    &approval,
+                    self.peer_fingerprint,
+                    self.requested_grants,
+                )?;
+                let socket = self.socket.take().ok_or(WssClientError::Closed)?;
+                let connection = PairingConnection::new_client(self.receiver_id, socket);
+                Ok(Some(WssClientApprovedPairing {
+                    accepted_grants,
+                    peer_fingerprint: self.peer_fingerprint,
+                    connection,
+                }))
+            }
+            mm_protocol::MessagePayload::PairReject(rejection) => {
+                drop(self.socket.take());
+                Err(WssClientError::Rejected(rejection.reason))
+            }
+            _ => Err(WssClientError::UnexpectedMessageKind),
+        }
+    }
+
+    /// Closes the pending pairing socket and makes this value terminal.
+    ///
+    /// Calling this more than once is safe. A subsequent poll returns `Closed`.
+    pub fn cancel(&mut self) {
+        drop(self.socket.take());
     }
 }
 

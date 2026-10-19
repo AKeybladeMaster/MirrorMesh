@@ -1,5 +1,9 @@
 # Implementation roadmap — concurrent platform program (MM-PLAN-001)
 
+## Task 39 — pollable sender pairing decision
+
+The shared WSS sender client now supports bounded approval polling and explicit cancellation while preserving its blocking API. Separate-process loopback coverage exercises idle polling, approval transfer, rejection, expiry, and cancellation. Proposed [ADR-0040](adr/0040-cancellable-wss-sender-decision.md) records the lifecycle. This is host Rust control-plane evidence only; the Windows app does not invoke the API and no WebRTC or media path is connected.
+
 ## Task 25 Android explicit-action runtime assembly (2026-10-19)
 
 The Android phone app now opens `AndroidPairingIdentity` and `SqliteTrustedPeers` only after the user presses **Prepare pairing support**. JNI creates one process-owned `PairingRuntime`, stored beneath `noBackupFilesDir`, and returns a stable local UUIDv8 derived from the public-key fingerprint. The action opens local state only: it does not discover or contact peers, grant trust, request capture, or stream. Proposed [ADR-0030](adr/0030-android-pairing-runtime-assembly.md) records the assembly and its limits. Host Rust and Flutter gates pass; Android ARM64 compilation stops in `dart-sys` because NDK clang is unavailable, so no APK or device behavior is verified.
