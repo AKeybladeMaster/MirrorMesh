@@ -164,6 +164,17 @@ The Task 47 API/FFI changes use the existing v1 message vocabulary and require c
 
 Task 48 changes only the existing v1 `session.stop` message handling, with no schema or protocol-version change. Proposed [ADR-0048](adr/0048-windows-tv-session-stop.md) records the API and teardown contract and awaits CORE/Windows/TV review. Rust Windows-target build evidence does not cover the Flutter runner or Android APK. Media and physical-device verification remain pending.
 
+## Task 49 verification — Android native H.264 loopback
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `gradle :app:connectedDebugAndroidTest -PmmAndroidAbi=x86_64` | not run | Gradle, Android SDK, and emulator are absent on this workstation. GitHub Actions is configured to run this command on an API 35 x86_64 emulator. |
+| Android ARM64 APK build | not run locally | The existing workflow builds the ARM64 APK after the x86_64 instrumentation run. No artifact or hosted workflow result is available in this workspace. |
+| Instrumentation source | authored only | The test creates synthetic I420 frames in native `VideoSource`, negotiates H.264 between two libwebrtc peers using in-process fake signaling, and asserts connection, decoded-frame delivery, and explicit JPEG capture through `TvWebRtcReceiver`. |
+| Production / hardware path | pending | Software decoding is injected only through a package-private test seam. No Windows peer, production Rust WSS authentication, MediaCodec hardware, physical TV, or hardware encoder was tested. |
+
+Task 49 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED` and `AUTOMATED_INTEGRATION_VERIFIED` remain pending until the Android workflow passes. The emulator test uses exact-pinned AndroidX Test runner/JUnit artifacts (Apache-2.0), and it makes no protocol or production signaling changes. See the [Task 49 brief](../codex/49-tv-synthetic-h264-loopback.md).
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

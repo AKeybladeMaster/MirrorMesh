@@ -139,6 +139,43 @@ if ($appGradle -notmatch 'io\.github\.webrtc-sdk:android:150\.7871\.01') {
 if ($appGradle -notmatch 'com\.google\.zxing:core:3\.5\.4') {
     throw 'The Android TV QR encoder dependency must use the reviewed pinned ZXing core version.'
 }
+if ($appGradle -notmatch 'androidx\.test:runner:1\.7\.0' -or
+    $appGradle -notmatch 'androidx\.test\.ext:junit:1\.3\.0' -or
+    $appGradle -notmatch 'testInstrumentationRunner' -or
+    $appGradle -notmatch 'x86_64-linux-android' -or
+    $appGradle -notmatch 'mmAndroidAbi') {
+    throw 'The Android TV native WebRTC instrumentation runner and pinned emulator ABI build must remain configured.'
+}
+$loopbackTestPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/TvWebRtcLoopbackIntegrationTest.java'
+$syntheticCapturerPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/SyntheticVideoCapturer.java'
+$loopbackSignalPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/LoopbackApprovedSignalingChannel.java'
+foreach ($testFile in @($loopbackTestPath, $syntheticCapturerPath, $loopbackSignalPath)) {
+    if (!(Test-Path -LiteralPath $testFile)) {
+        throw "The Android native WebRTC loopback test source is missing: $testFile."
+    }
+}
+$loopbackTest = Get-Content -LiteralPath $loopbackTestPath -Raw
+if ($loopbackTest -notmatch 'createWithDecoderFactoryForTest' -or
+    $loopbackTest -notmatch 'SoftwareVideoEncoderFactory' -or
+    $loopbackTest -notmatch 'SoftwareVideoDecoderFactory' -or
+    $loopbackTest -notmatch 'PlatformSoftwareVideoDecoderFactory' -or
+    $loopbackTest -notmatch 'Assume\.assumeTrue' -or
+    $loopbackTest -notmatch 'requestScreenshotCapture\(' -or
+    $loopbackTest -notmatch 'frameReceived\.await\(') {
+    throw 'The Android instrumentation test must exercise H.264, a decoded receiver frame, and explicit screenshot capture.'
+}
+$syntheticCapturer = Get-Content -LiteralPath $syntheticCapturerPath -Raw
+if ($syntheticCapturer -notmatch 'JavaI420Buffer\.allocate\(' -or
+    $syntheticCapturer -notmatch 'onFrameCaptured\(') {
+    throw 'The test video source must feed generated I420 frames through the native VideoCapturer observer.'
+}
+$androidWorkflowPath = Join-Path $repoRoot '.github/workflows/android-tv.yml'
+$androidWorkflow = Get-Content -LiteralPath $androidWorkflowPath -Raw
+if ($androidWorkflow -notmatch 'connectedDebugAndroidTest' -or
+    $androidWorkflow -notmatch 'mmAndroidAbi=x86_64' -or
+    $androidWorkflow -notmatch 'system-images;android-35;google_apis;x86_64') {
+    throw 'Android TV CI must run the synthetic WebRTC loopback on an x86_64 emulator.'
+}
 $bridge = Get-Content -LiteralPath $nativeBridgePath -Raw
 foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'refreshPairingInvitation', 'cancelPairingWait', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'pollControlMessage', 'sendSessionAnswer', 'sendSessionIce', 'closeControlChannel')) {
     $methodPattern = "native\s+\w+\s+$([regex]::Escape($method))\s*\("

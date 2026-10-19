@@ -30,6 +30,7 @@ import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceViewRenderer;
 import org.webrtc.VideoCodecInfo;
+import org.webrtc.VideoDecoderFactory;
 import org.webrtc.VideoFrame;
 import org.webrtc.VideoSink;
 import org.webrtc.VideoTrack;
@@ -120,7 +121,7 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
     private final EglBase eglBase;
     private final PeerConnectionFactory factory;
-    private final HardwareVideoDecoderFactory decoderFactory;
+    private final VideoDecoderFactory decoderFactory;
     private final SurfaceViewRenderer renderer;
     private final Listener listener;
     private final TvReceiverState state;
@@ -151,25 +152,21 @@ public final class TvWebRtcReceiver implements AutoCloseable {
             Context context,
             SurfaceViewRenderer renderer,
             Listener listener,
-            TvReceiverState state) {
+            TvReceiverState state,
+            VideoDecoderFactory testDecoderFactory) {
         this.renderer = renderer;
         this.listener = listener;
         this.state = state;
         Context applicationContext = context.getApplicationContext();
 
-        synchronized (FACTORY_LOCK) {
-            if (!factoryInitialized) {
-                PeerConnectionFactory.initialize(
-                        PeerConnectionFactory.InitializationOptions
-                                .builder(applicationContext)
-                                .createInitializationOptions());
-                factoryInitialized = true;
-            }
-        }
+        initializeFactory(applicationContext);
 
         eglBase = EglBase.create();
-        decoderFactory = new HardwareVideoDecoderFactory(eglBase.getEglBaseContext());
-        if (!supportsHardwareH264(decoderFactory.getSupportedCodecs())) {
+        decoderFactory = testDecoderFactory == null
+                ? new HardwareVideoDecoderFactory(eglBase.getEglBaseContext())
+                : testDecoderFactory;
+        if (testDecoderFactory == null
+                && !supportsHardwareH264(decoderFactory.getSupportedCodecs())) {
             eglBase.release();
             throw new IllegalStateException("No hardware H.264 decoder is available.");
         }
@@ -215,6 +212,18 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         factory = createdFactory;
     }
 
+    static void initializeFactory(Context context) {
+        synchronized (FACTORY_LOCK) {
+            if (!factoryInitialized) {
+                PeerConnectionFactory.initialize(
+                        PeerConnectionFactory.InitializationOptions
+                                .builder(context.getApplicationContext())
+                                .createInitializationOptions());
+                factoryInitialized = true;
+            }
+        }
+    }
+
     public static TvWebRtcReceiver create(
             Context context,
             SurfaceViewRenderer renderer,
@@ -223,7 +232,20 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         if (context == null || renderer == null || listener == null || state == null) {
             throw new IllegalArgumentException("TV receiver dependencies are required.");
         }
-        return new TvWebRtcReceiver(context, renderer, listener, state);
+        return new TvWebRtcReceiver(context, renderer, listener, state, null);
+    }
+
+    static TvWebRtcReceiver createWithDecoderFactoryForTest(
+            Context context,
+            SurfaceViewRenderer renderer,
+            Listener listener,
+            TvReceiverState state,
+            VideoDecoderFactory decoderFactory) {
+        if (context == null || renderer == null || listener == null || state == null
+                || decoderFactory == null) {
+            throw new IllegalArgumentException("TV receiver test dependencies are required.");
+        }
+        return new TvWebRtcReceiver(context, renderer, listener, state, decoderFactory);
     }
 
     public void start(ApprovedSignalingChannel approvedSignaling, String remoteOfferSdp) {

@@ -6,7 +6,12 @@ plugins {
 }
 
 val androidNdkVersion = "28.2.13676358"
-val rustTarget = "aarch64-linux-android"
+val androidAbi = providers.gradleProperty("mmAndroidAbi").orElse("arm64-v8a").get()
+val rustTarget = when (androidAbi) {
+    "arm64-v8a" -> "aarch64-linux-android"
+    "x86_64" -> "x86_64-linux-android"
+    else -> throw GradleException("Unsupported MirrorMesh Android ABI: $androidAbi")
+}
 val repositoryRoot = rootProject.projectDir.resolve("../..").canonicalFile
 val generatedJniLibs = layout.buildDirectory.dir("generated/jniLibs")
 
@@ -21,7 +26,8 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
-        ndk { abiFilters += "arm64-v8a" }
+        ndk { abiFilters += androidAbi }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -43,29 +49,32 @@ val buildRustAndroid by tasks.registering(Exec::class) {
         "linux-x86_64"
     }
     val linkerName = if (hostTag.startsWith("windows")) {
-        "aarch64-linux-android21-clang.cmd"
+        "$rustTarget".replace("-linux-android", "-linux-android21-clang") + ".cmd"
     } else {
-        "aarch64-linux-android21-clang"
+        "$rustTarget".replace("-linux-android", "-linux-android21-clang")
     }
     val ndkBin = file("$sdkDirectory/ndk/$androidNdkVersion/toolchains/llvm/prebuilt/$hostTag/bin")
     val linker = ndkBin.resolve(linkerName)
     val rustLibrary = repositoryRoot.resolve("target/$rustTarget/release/libmm_ffi.so")
+    val linkerEnvironment = "CARGO_TARGET_${rustTarget.uppercase().replace('-', '_')}_LINKER"
+    val ccEnvironment = "CC_$rustTarget"
+    val ccUnderscoreEnvironment = "CC_${rustTarget.replace('-', '_')}"
 
     workingDir(repositoryRoot)
-    environment("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", linker.absolutePath)
-    environment("CC_aarch64-linux-android", linker.absolutePath)
-    environment("CC_aarch64_linux_android", linker.absolutePath)
+    environment(linkerEnvironment, linker.absolutePath)
+    environment(ccEnvironment, linker.absolutePath)
+    environment(ccUnderscoreEnvironment, linker.absolutePath)
     environment("PATH", "${ndkBin.absolutePath}${File.pathSeparator}${System.getenv("PATH")}")
     commandLine("cargo", "build", "--manifest-path", "Cargo.toml", "--package", "mm-ffi",
         "--target", rustTarget, "--release", "--locked")
     inputs.file(repositoryRoot.resolve("Cargo.lock"))
     inputs.dir(repositoryRoot.resolve("crates"))
-    outputs.file(generatedJniLibs.map { it.file("arm64-v8a/libmm_ffi.so") })
+    outputs.file(generatedJniLibs.map { it.file("$androidAbi/libmm_ffi.so") })
     doLast {
         require(rustLibrary.isFile) { "Rust Android library was not produced: $rustLibrary" }
         project.copy {
             from(rustLibrary)
-            into(generatedJniLibs.get().dir("arm64-v8a"))
+            into(generatedJniLibs.get().dir(androidAbi))
         }
     }
 }
@@ -77,4 +86,6 @@ tasks.named("preBuild").configure {
 dependencies {
     implementation("io.github.webrtc-sdk:android:150.7871.01")
     implementation("com.google.zxing:core:3.5.4")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
