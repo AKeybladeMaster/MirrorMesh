@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ed25519_dalek::SigningKey;
 use mm_adapter_identity::Ed25519PairingIdentity;
 use mm_domain::PeerPublicKey;
-use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError};
+use mm_ports::{LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError};
 use zeroize::Zeroizing;
 
 use super::identity::{CredentialStore, IdentityCore};
@@ -30,6 +30,10 @@ impl FakeCredentialStore {
 
     fn fail_writes(&self) {
         *self.fail_write.lock().unwrap() = true;
+    }
+
+    fn fail_reads(&self) {
+        *self.fail_read.lock().unwrap() = true;
     }
 
     fn fail_deletes(&self) {
@@ -83,6 +87,13 @@ fn pairing_message(name: &str) -> Vec<u8> {
     message.extend_from_slice(&(name.len() as u32).to_be_bytes());
     message.extend_from_slice(name);
     message.push(1);
+    message
+}
+
+fn tls13_certificate_verify_message(transcript_hash_bytes: usize) -> Vec<u8> {
+    let mut message = vec![0x20; 64];
+    message.extend_from_slice(b"TLS 1.3, server CertificateVerify\0");
+    message.resize(message.len() + transcript_hash_bytes, 0x5a);
     message
 }
 
@@ -283,5 +294,91 @@ fn known_seed_produces_the_expected_ed25519_public_key() {
             .local_public_key()
             .unwrap(),
         expected
+    );
+}
+
+#[test]
+fn signs_valid_tls13_server_certificate_verify_inputs() {
+    let identity = IdentityCore::open_or_create(FakeCredentialStore::default()).unwrap();
+
+    for transcript_hash_bytes in [32, 48] {
+        let message = tls13_certificate_verify_message(transcript_hash_bytes);
+        let public_key = identity.tls_server_public_key().unwrap();
+        let signature = identity.sign_tls13_certificate_verify(&message).unwrap();
+
+        Ed25519PairingIdentity
+            .verify_signature(&public_key, &message, &signature)
+            .unwrap();
+    }
+}
+
+#[test]
+fn refuses_non_certificate_verify_messages() {
+    let identity = IdentityCore::open_or_create(FakeCredentialStore::default()).unwrap();
+    let mut wrong_context = tls13_certificate_verify_message(32);
+    wrong_context[64] = b'X';
+
+    for message in [
+        b"application message".as_slice(),
+        &tls13_certificate_verify_message(31),
+        &tls13_certificate_verify_message(64),
+        &wrong_context,
+    ] {
+        assert_eq!(
+            identity.sign_tls13_certificate_verify(message),
+            Err(PortError::InvalidConfiguration)
+        );
+    }
+}
+
+#[test]
+fn tls_signer_uses_the_current_credential_after_rotation() {
+    let identity = IdentityCore::open_or_create(FakeCredentialStore::default()).unwrap();
+    let old_public_key = identity.tls_server_public_key().unwrap();
+    let message = tls13_certificate_verify_message(32);
+    let old_signature = identity.sign_tls13_certificate_verify(&message).unwrap();
+
+    let new_public_key = identity.rotate_identity().unwrap();
+    let new_signature = identity.sign_tls13_certificate_verify(&message).unwrap();
+
+    assert_ne!(old_public_key, new_public_key);
+    Ed25519PairingIdentity
+        .verify_signature(&old_public_key, &message, &old_signature)
+        .unwrap();
+    assert_eq!(
+        Ed25519PairingIdentity.verify_signature(&old_public_key, &message, &new_signature),
+        Err(PortError::IdentityRejected)
+    );
+    Ed25519PairingIdentity
+        .verify_signature(&new_public_key, &message, &new_signature)
+        .unwrap();
+}
+
+#[test]
+fn tls_signer_fails_closed_when_credential_reads_fail_or_identity_is_deleted() {
+    let store = FakeCredentialStore::default();
+    let identity = IdentityCore::open_or_create(store.clone()).unwrap();
+    let message = tls13_certificate_verify_message(32);
+    store.fail_reads();
+
+    assert_eq!(
+        identity.tls_server_public_key(),
+        Err(PortError::StorageFailure)
+    );
+    assert_eq!(
+        identity.sign_tls13_certificate_verify(&message),
+        Err(PortError::StorageFailure)
+    );
+
+    let store = FakeCredentialStore::default();
+    let identity = IdentityCore::open_or_create(store).unwrap();
+    identity.delete_identity().unwrap();
+    assert_eq!(
+        identity.tls_server_public_key(),
+        Err(PortError::Unavailable)
+    );
+    assert_eq!(
+        identity.sign_tls13_certificate_verify(&message),
+        Err(PortError::Unavailable)
     );
 }

@@ -3,13 +3,14 @@ use std::ptr::{NonNull, null, null_mut};
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
 use mm_domain::{MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, PeerFingerprint, PeerPublicKey};
-use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError};
+use mm_ports::{LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError};
 use zeroize::{Zeroize, Zeroizing};
 
 const ED25519_SEED_BYTES: usize = 32;
 const CREDENTIAL_TARGET: &str = "MirrorMesh/Identity/Ed25519/v1";
 const IDENTITY_MUTEX_NAME: &str = "Local\\MirrorMesh.Identity.Ed25519.v1";
 const PAIRING_PROOF_DOMAIN: &[u8] = b"MirrorMesh.PairingProof.v1\0";
+const TLS13_SERVER_CERT_VERIFY_CONTEXT: &[u8; 34] = b"TLS 1.3, server CertificateVerify\0";
 
 pub(super) trait CredentialStore: Send + Sync {
     fn read_seed(&self) -> Result<Option<Zeroizing<Vec<u8>>>, PortError>;
@@ -88,6 +89,20 @@ impl<S: CredentialStore> LocalPairingIdentityPort for IdentityCore<S> {
     }
 }
 
+impl<S: CredentialStore> LocalTlsIdentityPort for IdentityCore<S> {
+    fn tls_server_public_key(&self) -> Result<PeerPublicKey, PortError> {
+        self.local_public_key()
+    }
+
+    fn sign_tls13_certificate_verify(&self, message: &[u8]) -> Result<Vec<u8>, PortError> {
+        if !is_tls13_server_certificate_verify_input(message) {
+            return Err(PortError::InvalidConfiguration);
+        }
+        let signing_key = self.read_signing_key()?;
+        Ok(signing_key.sign(message).to_bytes().to_vec())
+    }
+}
+
 impl<S: CredentialStore> PairingIdentityPort for IdentityCore<S> {
     fn fingerprint_public_key(
         &self,
@@ -139,6 +154,18 @@ impl LocalPairingIdentityPort for WindowsPairingIdentity {
     fn delete_identity(&self) -> Result<(), PortError> {
         let _identity_lock = IdentityMutex::acquire()?;
         self.inner.delete_identity()
+    }
+}
+
+impl LocalTlsIdentityPort for WindowsPairingIdentity {
+    fn tls_server_public_key(&self) -> Result<PeerPublicKey, PortError> {
+        let _identity_lock = IdentityMutex::acquire()?;
+        self.inner.tls_server_public_key()
+    }
+
+    fn sign_tls13_certificate_verify(&self, message: &[u8]) -> Result<Vec<u8>, PortError> {
+        let _identity_lock = IdentityMutex::acquire()?;
+        self.inner.sign_tls13_certificate_verify(message)
     }
 }
 
@@ -333,6 +360,17 @@ fn is_canonical_pairing_message(message: &[u8]) -> bool {
 
     let grants = body[expected_length - 1];
     grants != 0 && grants & !0b111 == 0
+}
+
+fn is_tls13_server_certificate_verify_input(message: &[u8]) -> bool {
+    const TLS13_SIGNATURE_INPUT_PREFIX_BYTES: usize = 64 + TLS13_SERVER_CERT_VERIFY_CONTEXT.len();
+    const SHA256_TRANSCRIPT_HASH_BYTES: usize = 32;
+    const SHA384_TRANSCRIPT_HASH_BYTES: usize = 48;
+
+    (message.len() == TLS13_SIGNATURE_INPUT_PREFIX_BYTES + SHA256_TRANSCRIPT_HASH_BYTES
+        || message.len() == TLS13_SIGNATURE_INPUT_PREFIX_BYTES + SHA384_TRANSCRIPT_HASH_BYTES)
+        && message[..64].iter().all(|byte| *byte == 0x20)
+        && message[64..TLS13_SIGNATURE_INPUT_PREFIX_BYTES] == TLS13_SERVER_CERT_VERIFY_CONTEXT[..]
 }
 
 fn wide_string(value: &str) -> Vec<u16> {
