@@ -7,6 +7,7 @@ members = [
     "crates/mm-security",
     "crates/mm-adapter-identity",
     "crates/mm-adapter-tls",
+    "crates/mm-adapter-signaling",
     "crates/mm-adapter-discovery",
     "crates/mm-adapter-win",
     "crates/mm-adapter-linux",
@@ -32,6 +33,7 @@ mm-security = { path = "crates/mm-security" }
 mm-adapter-identity = { path = "crates/mm-adapter-identity" }
 mm-adapter-win = { path = "crates/mm-adapter-win" }
 mm-adapter-linux = { path = "crates/mm-adapter-linux" }
+mm-adapter-tls = { path = "crates/mm-adapter-tls" }
 mm-store = { path = "crates/mm-store" }
 mm-runtime = { path = "crates/mm-runtime" }
 mm-transport = { path = "crates/mm-transport" }
@@ -48,5 +50,6 @@ curve25519-dalek = { version = "=5.0.0", default-features = false }
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
 sha2 = { version = "=0.11.0", default-features = false }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std"] }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 rusqlite = { version = "=0.39.0", default-features = false, features = ["bundled"] }
 
