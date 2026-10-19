@@ -86,7 +86,7 @@ Proposed [ADR-0031](adr/0031-ios-keychain-pairing-identity-candidate.md) stores 
 
 ## External data / user controls
 
-Default: offline/local, no analytics, no auto-upload and no crash dumps unless opted in. Private identity candidates use Windows Credential Manager, Linux Secret Service, the Android Keystore-wrapped seed store, and the iOS Keychain generic-password item. The Android and iOS app candidates use explicit actions, but their OS stores have not been exercised on devices. Linux currently fails closed if Secret Service, its session bus, authorization, or a safe runtime lock location is unavailable; no passphrase fallback is implemented. No keys in `trusted_peers` aside from public keys.
+Default: offline/local, no analytics, no auto-upload and no crash dumps unless opted in. Private identity candidates use Windows Credential Manager, Linux Secret Service, the Android Keystore-wrapped seed store, and the iOS Keychain generic-password item. Windows, Android, and iOS pairing-runtime bootstrap candidates run only after an explicit Devices action; Windows and mobile OS stores have not been exercised on devices. Windows stores its public trusted-peer database under `%LOCALAPPDATA%\MirrorMesh`; Linux currently fails closed if Secret Service, its session bus, authorization, or a safe runtime lock location is unavailable; no passphrase fallback is implemented. No keys in `trusted_peers` aside from public keys.
 
 Exports user initiated, locally saved, and deletable. UI must show **active capture indicator**, session recipient, permission state and immediate Stop/Disconnect. Recording/casting remote screens requires permission from content owners; protected/DRM windows may be blanked by OS—do not circumvent.
 

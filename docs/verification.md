@@ -4,6 +4,8 @@
 
 **Task 27 verification update:** the status paragraph above records the Task 26 checkpoint (185 unit tests and 27 integration tests). After Task 27, `cargo test --workspace --all-features --locked --offline --quiet` passes with 185 unit tests and 28 integration tests plus doc tests. The focused signaling/runtime suite passes 5 listener unit tests, 2 two-process loopback approval tests, 18 runtime unit tests, and 7 runtime SQLite integration tests. The new expired-approval case verifies no peer is stored and the client connection closes. No benchmark applies to this caller-path change.
 
+**Task 28 verification update:** this is the latest workspace snapshot: 190 Rust unit tests and 28 integration tests, plus doc tests, pass under `cargo test --workspace --all-features --locked --offline --quiet`. Workspace formatting, strict Clippy, Windows-target `cargo check`, and a release `mm_ffi.dll` build pass. `dumpbin /exports` confirms the Windows bootstrap C ABI is exported. The Windows runner translation unit compiles directly with MSVC `/W4 /WX`. Dart formatting passes; `flutter analyze --no-pub lib test` reports no issues; the full Flutter suite passes 26 tests with one existing golden skipped. The full `flutter build windows --release --no-pub` attempt exits 1 at CMake generation because the writable validation mirror has no `flutter_webrtc` and `jni` plugin symlink directories; it never reaches app compilation. Direct runner compilation is not an app bundle or runtime test. No Windows Credential Manager call, pairing operation, WSS connection, LAN, capture, or device test ran. No benchmark applies.
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |
