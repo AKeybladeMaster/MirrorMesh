@@ -1231,6 +1231,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
  "mm-adapter-identity",
+ "mm-adapter-signaling",
  "mm-domain",
  "mm-ports",
  "mm-runtime",

@@ -8,6 +8,7 @@ publish.workspace = true
 ed25519-dalek.workspace = true
 getrandom.workspace = true
 mm-adapter-identity.workspace = true
+mm-adapter-signaling.workspace = true
 mm-domain.workspace = true
 mm-ports.workspace = true
 mm-runtime.workspace = true

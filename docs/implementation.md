@@ -2,7 +2,11 @@
 
 ## Task 39 — pollable sender pairing decision
 
-The shared WSS sender client now supports bounded approval polling and explicit cancellation while preserving its blocking API. Separate-process loopback coverage exercises idle polling, approval transfer, rejection, expiry, and cancellation. Proposed [ADR-0040](adr/0040-cancellable-wss-sender-decision.md) records the lifecycle. This is host Rust control-plane evidence only; the Windows app does not invoke the API and no WebRTC or media path is connected.
+At the Task 39 checkpoint, the shared WSS sender client gained bounded approval polling and explicit cancellation while preserving its blocking API. Separate-process loopback coverage exercises idle polling, approval transfer, rejection, expiry, and cancellation. Proposed [ADR-0040](adr/0040-cancellable-wss-sender-decision.md) records the lifecycle. Task 40 wires the API into the Windows Devices source; this remains control-plane evidence only, with no app-to-app WebRTC or media path connected.
+
+## Task 40 — Windows sender pairing UI and worker
+
+The Windows adapter now runs the existing QR-pinned WSS sender client on a worker, asks only for `view`, reports bounded status/fingerprint snapshots, and retains the approved control connection until explicit disconnect or runner shutdown. The Devices page accepts pasted Android TV invitation text and requires approval on the TV. Proposed [ADR-0041](adr/0041-windows-sender-pairing-bridge.md) records the C ABI and method-channel boundary. Rust workspace checks and mocked Flutter analysis/tests pass. The Windows Flutter build stops at the platform plugin symlink requirement before producing an executable; no app-to-app WSS or WebRTC/media path has been verified.
 
 ## Task 25 Android explicit-action runtime assembly (2026-10-19)
 
