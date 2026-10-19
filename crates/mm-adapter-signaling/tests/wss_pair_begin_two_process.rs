@@ -29,9 +29,23 @@ const RECEIVER_SEED: [u8; 32] = [0x11; 32];
 const SENDER_SEED: [u8; 32] = [0x42; 32];
 const NOW_MONOTONIC_MS: u64 = 500;
 const NOW_UNIX_SECONDS: u64 = 1_000_000;
+const VALID_SESSION_OFFER: &str =
+    include_str!("../../../tests/protocol-golden/session-offer-v1.json");
+const VALID_SESSION_ANSWER: &str = r#"{
+  "v": 1,
+  "type": "session.answer",
+  "message_id": "3182f5b4-a037-4f19-b2f7-c686ed10bd82",
+  "session_id": "8b3d8788-1476-4aae-a287-334a428b5b6f",
+  "seq": 1,
+  "sent_at_ms": 1792316000001,
+  "payload": {
+    "sdp": "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=MirrorMesh test answer\r\nt=0 0\r\n",
+    "selected_codec": "H264"
+  }
+}"#;
 
 #[test]
-fn wss_pair_begin_is_pinned_and_waits_for_approval() {
+fn wss_pair_begin_requires_approval_and_exchanges_control_messages() {
     if std::env::var_os(CHILD_MODE).is_some() {
         run_server_child();
         return;
@@ -165,7 +179,7 @@ fn run_server_child() {
     let requested = TrustedPeerGrants::new(true, false, false).expect("view grant scope");
     match approval_command.trim() {
         "approve" => {
-            let (approved, websocket) = pending
+            let (approved, mut connection) = pending
                 .approve(
                     &runtime,
                     requested,
@@ -179,9 +193,20 @@ fn run_server_child() {
                     .expect("read trusted peer after approval"),
                 Some(approved.clone())
             );
-            drop(websocket);
+            assert_eq!(connection.peer_id(), SENDER_ID);
             println!("APPROVED={}|view", approved.id());
             std::io::stdout().flush().expect("flush approved peer");
+            let offer = connection
+                .receive_control_message()
+                .expect("receive a typed session offer after approval");
+            assert_eq!(offer.header.kind, mm_protocol::MessageKind::SessionOffer);
+            connection
+                .send_control_message(VALID_SESSION_ANSWER.as_bytes())
+                .expect("send a typed session answer after approval");
+            println!("CONTROL_EXCHANGED=session.offer/session.answer");
+            std::io::stdout()
+                .flush()
+                .expect("flush control exchange result");
         }
         "expire" => {
             let expires_at = pending.admitted().approval().expires_at_monotonic_ms();
@@ -210,7 +235,7 @@ fn run_client_parent(expire_approval: bool) {
     let test_name = if expire_approval {
         "expired_wss_pairing_approval_is_rejected_and_drops_connection"
     } else {
-        "wss_pair_begin_is_pinned_and_waits_for_approval"
+        "wss_pair_begin_requires_approval_and_exchanges_control_messages"
     };
     let mut child = spawn_server_child(test_name);
     let stdout = child.stdout.take().expect("capture server stdout");
@@ -278,7 +303,27 @@ fn run_client_parent(expire_approval: bool) {
     } else {
         let approved_line = read_prefixed_line(&mut output, &mut transcript, "APPROVED=");
         assert!(approved_line.ends_with("|view"), "{approved_line}");
-        drop(websocket);
+        websocket
+            .send(Message::text(VALID_SESSION_OFFER))
+            .expect("send a session offer over the approved WSS channel");
+        let answer = match websocket.read().expect("read session answer") {
+            Message::Text(text) => text,
+            other => panic!("expected text session answer, received {other:?}"),
+        };
+        let parsed_answer = mm_protocol::parse_message(answer.as_str().as_bytes())
+            .expect("server answer uses the shared v1 protocol");
+        let parsed_offer = mm_protocol::parse_message(VALID_SESSION_OFFER.as_bytes())
+            .expect("client offer uses the shared v1 protocol");
+        assert_eq!(
+            parsed_answer.header.kind,
+            mm_protocol::MessageKind::SessionAnswer
+        );
+        assert_eq!(
+            parsed_answer.header.session_id,
+            parsed_offer.header.session_id
+        );
+        let exchanged_line = read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
+        assert_eq!(exchanged_line, "session.offer/session.answer");
     }
     drop(child_stdin);
     let status = child.wait().expect("wait for WSS server child");

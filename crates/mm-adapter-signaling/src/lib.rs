@@ -5,9 +5,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use mm_domain::{TrustedPeer, TrustedPeerGrants};
+use mm_domain::{DeviceId, SessionId, TrustedPeer, TrustedPeerGrants};
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, TrustedPeerPort};
-use mm_protocol::MAX_ENVELOPE_BYTES;
+use mm_protocol::{
+    EnvelopeHeader, MAX_ENVELOPE_BYTES, MessageKind, ProtocolError, SequenceTracker,
+    ValidatedMessage, parse_message,
+};
 use mm_runtime::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use tungstenite::handshake::HandshakeError;
@@ -42,10 +45,6 @@ impl PendingPairingConnection {
         &self.admitted
     }
 
-    pub fn websocket_mut(&mut self) -> &mut PendingPairingWebSocket {
-        &mut self.connection.websocket
-    }
-
     /// Persists the explicitly approved grants only while the pending approval is valid.
     ///
     /// The live connection is returned only after runtime approval succeeds. If approval has
@@ -77,13 +76,208 @@ impl PendingPairingConnection {
 
 /// A live WSS connection that retains its listener capacity slot until dropped.
 pub struct PairingConnection {
+    peer_id: DeviceId,
     websocket: PendingPairingWebSocket,
+    inbound_sequences: ControlSequenceState,
+    outbound_sequences: ControlSequenceState,
     _slot: PendingConnectionSlot,
 }
 
 impl PairingConnection {
-    pub fn websocket_mut(&mut self) -> &mut PendingPairingWebSocket {
-        &mut self.websocket
+    fn new(
+        peer_id: DeviceId,
+        websocket: PendingPairingWebSocket,
+        slot: PendingConnectionSlot,
+    ) -> Self {
+        Self {
+            peer_id,
+            websocket,
+            inbound_sequences: ControlSequenceState::new(),
+            outbound_sequences: ControlSequenceState::new(),
+            _slot: slot,
+        }
+    }
+
+    /// Returns the peer identity established by the approved pairing proof.
+    pub const fn peer_id(&self) -> DeviceId {
+        self.peer_id
+    }
+
+    /// Sends one bounded v1 control message on the approved WSS connection.
+    ///
+    /// Pairing handshake messages and `device.hello` are rejected here. The caller remains
+    /// responsible for authorizing session operations and applying trusted-peer grants before
+    /// sending them.
+    pub fn send_control_message(
+        &mut self,
+        frame: &[u8],
+    ) -> Result<EnvelopeHeader, WssControlChannelError> {
+        let message = parse_post_approval_control_frame(frame)?;
+        self.outbound_sequences
+            .accept(self.peer_id, &message.header)?;
+        let header = message.header;
+        let text = std::str::from_utf8(frame)
+            .map_err(|_| WssControlChannelError::Protocol(ProtocolError::InvalidUtf8))?;
+        self.websocket
+            .send(Message::text(text))
+            .map_err(WssControlChannelError::WebSocket)?;
+        Ok(header)
+    }
+
+    /// Reads, validates, and replay-checks one control message from the approved peer.
+    ///
+    /// This is blocking I/O and belongs on a dedicated worker. Ping frames are answered by
+    /// flushing the WebSocket; binary frames are never accepted as protocol messages.
+    pub fn receive_control_message(&mut self) -> Result<ValidatedMessage, WssControlChannelError> {
+        loop {
+            let frame = match self.websocket.read() {
+                Ok(Message::Text(text)) => text,
+                Ok(Message::Ping(_)) => {
+                    self.websocket
+                        .flush()
+                        .map_err(WssControlChannelError::WebSocket)?;
+                    continue;
+                }
+                Ok(Message::Pong(_)) => continue,
+                Ok(Message::Binary(_)) => {
+                    return Err(WssControlChannelError::UnexpectedBinaryMessage);
+                }
+                Ok(Message::Close(_)) => return Err(WssControlChannelError::Closed),
+                Ok(Message::Frame(_)) => unreachable!("tungstenite does not expose raw frames"),
+                Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
+                    return Err(WssControlChannelError::Closed);
+                }
+                Err(error) => return Err(WssControlChannelError::WebSocket(error)),
+            };
+            let message = parse_post_approval_control_frame(frame.as_str().as_bytes())?;
+            self.inbound_sequences
+                .accept(self.peer_id, &message.header)?;
+            return Ok(message);
+        }
+    }
+
+    /// Releases sequence-tracker capacity after the caller has fully closed a session.
+    pub fn forget_session(&mut self, session_id: SessionId) {
+        self.inbound_sequences.forget_session(session_id);
+        self.outbound_sequences.forget_session(session_id);
+    }
+
+    /// Starts a WebSocket close handshake. Dropping this connection also releases its slot.
+    pub fn close(&mut self) -> Result<(), WssControlChannelError> {
+        self.websocket
+            .close(None)
+            .map_err(WssControlChannelError::WebSocket)
+    }
+}
+
+/// Errors from the authenticated, post-approval WSS control channel.
+#[derive(Debug)]
+pub enum WssControlChannelError {
+    Protocol(ProtocolError),
+    WebSocket(WebSocketError),
+    UnexpectedMessageKind,
+    UnexpectedBinaryMessage,
+    Closed,
+}
+
+impl fmt::Display for WssControlChannelError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Protocol(error) => write!(formatter, "invalid WSS control message: {error}"),
+            Self::WebSocket(error) => write!(formatter, "WSS control transport failed: {error}"),
+            Self::UnexpectedMessageKind => {
+                formatter.write_str("message kind is not allowed after pairing approval")
+            }
+            Self::UnexpectedBinaryMessage => {
+                formatter.write_str("binary WebSocket messages are not control messages")
+            }
+            Self::Closed => formatter.write_str("WSS control connection is closed"),
+        }
+    }
+}
+
+impl std::error::Error for WssControlChannelError {}
+
+impl From<ProtocolError> for WssControlChannelError {
+    fn from(error: ProtocolError) -> Self {
+        Self::Protocol(error)
+    }
+}
+
+/// Parses the shared protocol envelope and rejects pairing-only messages on an approved channel.
+fn parse_post_approval_control_frame(
+    frame: &[u8],
+) -> Result<ValidatedMessage, WssControlChannelError> {
+    let message = parse_message(frame)?;
+    if !matches!(
+        message.header.kind,
+        MessageKind::PairRevoke
+            | MessageKind::SessionOffer
+            | MessageKind::SessionAnswer
+            | MessageKind::SessionIce
+            | MessageKind::SessionStart
+            | MessageKind::SessionStop
+            | MessageKind::SessionPause
+            | MessageKind::SessionResume
+            | MessageKind::SessionQuality
+            | MessageKind::SessionStats
+            | MessageKind::SessionError
+            | MessageKind::AnnotationStrokeStart
+            | MessageKind::AnnotationStrokePoints
+            | MessageKind::AnnotationStrokeEnd
+            | MessageKind::AnnotationUndo
+            | MessageKind::AnnotationClear
+    ) {
+        return Err(WssControlChannelError::UnexpectedMessageKind);
+    }
+    Ok(message)
+}
+
+struct ControlSequenceState {
+    sessions: SequenceTracker,
+    last_pair_revoke_sequence: Option<u64>,
+}
+
+impl ControlSequenceState {
+    fn new() -> Self {
+        Self {
+            sessions: SequenceTracker::new(MAX_PENDING_PAIRING_CONNECTIONS),
+            last_pair_revoke_sequence: None,
+        }
+    }
+
+    fn accept(
+        &mut self,
+        peer_id: DeviceId,
+        header: &EnvelopeHeader,
+    ) -> Result<(), WssControlChannelError> {
+        match header.kind {
+            MessageKind::PairRevoke if header.session_id.is_none() => {
+                if self
+                    .last_pair_revoke_sequence
+                    .is_some_and(|previous| header.sequence <= previous)
+                {
+                    return Err(ProtocolError::SequenceReplay.into());
+                }
+                self.last_pair_revoke_sequence = Some(header.sequence);
+                Ok(())
+            }
+            MessageKind::PairRevoke => Err(ProtocolError::InvalidEnvelope.into()),
+            MessageKind::DeviceHello
+            | MessageKind::PairBegin
+            | MessageKind::PairApprove
+            | MessageKind::PairReject => Err(WssControlChannelError::UnexpectedMessageKind),
+            _ => {
+                let session_id = header.session_id.ok_or(ProtocolError::InvalidEnvelope)?;
+                self.sessions
+                    .accept(session_id, peer_id, header.sequence)
+                    .map_err(Into::into)
+            }
+        }
+    }
+
+    fn forget_session(&mut self, session_id: SessionId) {
+        self.sessions.forget_session(session_id);
     }
 }
 
@@ -256,13 +450,11 @@ impl WssPairingListener {
             .sock
             .clear_deadline()
             .map_err(WssListenerError::Io)?;
+        let peer_id = admitted.approval().peer_id();
 
         Ok(PendingPairingConnection {
             admitted,
-            connection: PairingConnection {
-                websocket,
-                _slot: slot,
-            },
+            connection: PairingConnection::new(peer_id, websocket, slot),
         })
     }
 }
