@@ -13,6 +13,7 @@ enum WindowsSenderSessionState {
   idle,
   negotiating,
   transportConnected,
+  streaming,
   stopped,
   revoked,
   failed,
@@ -27,12 +28,15 @@ final class WindowsSenderSessionController {
     required this.pairing,
     WebRtcPeerConnectionFactory? factory,
     this.statsPollInterval = const Duration(seconds: 1),
+    this.firstEncodedFrameTimeout = const Duration(seconds: 15),
   }) : _engineFactory = factory ?? const FlutterWebRtcPeerConnectionFactory(),
-       assert(statsPollInterval.inMicroseconds > 0);
+       assert(statsPollInterval.inMicroseconds > 0),
+       assert(firstEncodedFrameTimeout.inMicroseconds > 0);
 
   final WindowsPairingBootstrap pairing;
   final WebRtcPeerConnectionFactory _engineFactory;
   final Duration statsPollInterval;
+  final Duration firstEncodedFrameTimeout;
   final StreamController<WindowsSenderSessionState> _states =
       StreamController<WindowsSenderSessionState>.broadcast();
   final StreamController<WebRtcOutboundVideoStats> _videoStats =
@@ -47,6 +51,7 @@ final class WindowsSenderSessionController {
   StreamSubscription<WebRtcEngineEvent>? _engineEvents;
   Timer? _pollTimer;
   Timer? _statsTimer;
+  Timer? _firstEncodedFrameTimer;
   Completer<void>? _localIceDrainComplete;
   Future<void>? _stopOperation;
   String? _sessionId;
@@ -59,6 +64,7 @@ final class WindowsSenderSessionController {
   bool _sessionStartInFlight = false;
   bool _sessionStartQueued = false;
   bool _transportReady = false;
+  bool _hasEncodedVideo = false;
   bool _starting = false;
   bool _stopping = false;
   bool _closed = false;
@@ -95,6 +101,9 @@ final class WindowsSenderSessionController {
     _sessionStartInFlight = false;
     _sessionStartQueued = false;
     _transportReady = false;
+    _hasEncodedVideo = false;
+    _firstEncodedFrameTimer?.cancel();
+    _firstEncodedFrameTimer = null;
     _stopOperation = null;
     _lastError = null;
     _setState(WindowsSenderSessionState.negotiating);
@@ -124,7 +133,6 @@ final class WindowsSenderSessionController {
         sdp: offer,
       );
       await _drainLocalIce();
-      if (_transportReady) await _sendSessionStart();
       _pollTimer = Timer.periodic(
         const Duration(milliseconds: 100),
         (_) => unawaited(_pollSessionEvent()),
@@ -133,6 +141,10 @@ final class WindowsSenderSessionController {
         statsPollInterval,
         (_) => unawaited(_pollOutboundVideoStats()),
       );
+      if (_transportReady) {
+        _startFirstEncodedFrameWait();
+        if (_hasEncodedVideo) await _sendSessionStart();
+      }
       return _sessionId!;
     } catch (error) {
       await _closePeer();
@@ -202,6 +214,7 @@ final class WindowsSenderSessionController {
           identical(_engine, engine) &&
           !_videoStats.isClosed) {
         _videoStats.add(stats);
+        if (stats.hasEncodedVideo) _markVideoEncoded();
       }
     } on Object {
       // Stats are diagnostic only; a native stats failure must not stop video.
@@ -219,8 +232,16 @@ final class WindowsSenderSessionController {
       switch (event.state) {
         case WebRtcConnectionState.connected:
           _transportReady = true;
-          _setState(WindowsSenderSessionState.transportConnected);
-          unawaited(_sendSessionStart());
+          _setState(
+            _hasEncodedVideo
+                ? WindowsSenderSessionState.streaming
+                : WindowsSenderSessionState.transportConnected,
+          );
+          if (_hasEncodedVideo) {
+            unawaited(_sendSessionStart());
+          } else {
+            _startFirstEncodedFrameWait();
+          }
         case WebRtcConnectionState.failed:
         case WebRtcConnectionState.closed:
           unawaited(_fail(StateError('The WebRTC peer connection failed.')));
@@ -234,6 +255,7 @@ final class WindowsSenderSessionController {
 
   Future<void> _sendSessionStart() async {
     if (!_transportReady ||
+        !_hasEncodedVideo ||
         _closed ||
         _sessionStartQueued ||
         _sessionStartInFlight ||
@@ -253,6 +275,39 @@ final class WindowsSenderSessionController {
       await _fail(error);
     } finally {
       _sessionStartInFlight = false;
+    }
+  }
+
+  void _startFirstEncodedFrameWait() {
+    if (!_transportReady ||
+        _sessionId == null ||
+        _hasEncodedVideo ||
+        _firstEncodedFrameTimer != null) {
+      return;
+    }
+    _firstEncodedFrameTimer = Timer(firstEncodedFrameTimeout, () {
+      _firstEncodedFrameTimer = null;
+      if (_transportReady && !_hasEncodedVideo) {
+        unawaited(
+          _fail(
+            StateError(
+              'No outbound video frame was encoded before the media startup timeout.',
+            ),
+          ),
+        );
+      }
+    });
+    unawaited(_pollOutboundVideoStats());
+  }
+
+  void _markVideoEncoded() {
+    if (_hasEncodedVideo) return;
+    _hasEncodedVideo = true;
+    _firstEncodedFrameTimer?.cancel();
+    _firstEncodedFrameTimer = null;
+    if (_transportReady) {
+      _setState(WindowsSenderSessionState.streaming);
+      unawaited(_sendSessionStart());
     }
   }
 
@@ -399,6 +454,8 @@ final class WindowsSenderSessionController {
     _pollTimer = null;
     _statsTimer?.cancel();
     _statsTimer = null;
+    _firstEncodedFrameTimer?.cancel();
+    _firstEncodedFrameTimer = null;
     await _engineEvents?.cancel();
     _engineEvents = null;
     final engine = _engine;
@@ -409,6 +466,8 @@ final class WindowsSenderSessionController {
     _pendingLocalIceBytes = 0;
     _pendingRemoteIceBytes = 0;
     _remoteDescriptionSet = false;
+    _transportReady = false;
+    _hasEncodedVideo = false;
     if (engine != null) await engine.close();
   }
 

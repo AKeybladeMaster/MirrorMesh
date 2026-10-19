@@ -3,7 +3,7 @@ name: Flutter app
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'task_*']
 
 permissions:
   contents: read
