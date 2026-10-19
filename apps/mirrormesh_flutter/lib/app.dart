@@ -10,6 +10,7 @@ import 'annotation_overlay.dart';
 import 'ios_pairing_bootstrap.dart';
 import 'linux_pairing_bootstrap.dart';
 import 'rust_session_status.dart';
+import 'synthetic_video_test_pattern.dart';
 import 'webrtc_engine.dart';
 import 'windows_pairing_bootstrap.dart';
 import 'windows_sender_session.dart';
@@ -1270,8 +1271,7 @@ class _DevicesPageState extends State<_DevicesPage> {
                               const SizedBox(height: 8),
                               const AspectRatio(
                                 aspectRatio: 16 / 9,
-                                child: CustomPaint(
-                                  painter: _SyntheticVideoTestPatternPainter(),
+                                child: SyntheticVideoTestPattern(
                                   child: Center(
                                     child: Text(
                                       'MirrorMesh test pattern',
@@ -1292,7 +1292,7 @@ class _DevicesPageState extends State<_DevicesPage> {
                               ),
                               const SizedBox(height: 8),
                               const Text(
-                                'Select the MirrorMesh window to send this known color pattern. It is a visual test target, not a native synthetic frame source.',
+                                'Choose the MirrorMesh app window to send this animated test pattern through native desktop capture and the H.264 WebRTC track. This capture adapter is not Windows Graphics Capture.',
                               ),
                             ],
                           ),
@@ -1421,43 +1421,6 @@ class _DevicesPageState extends State<_DevicesPage> {
     WindowsSenderSessionState.failed =>
       'The media session failed and its local peer was closed.',
   };
-}
-
-class _SyntheticVideoTestPatternPainter extends CustomPainter {
-  const _SyntheticVideoTestPatternPainter();
-
-  static const _bars = <Color>[
-    Color(0xFFFFFFFF),
-    Color(0xFFFFFF00),
-    Color(0xFF00FFFF),
-    Color(0xFF00FF00),
-    Color(0xFFFF00FF),
-    Color(0xFFFF0000),
-    Color(0xFF0000FF),
-    Color(0xFF000000),
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final barWidth = size.width / _bars.length;
-    for (var index = 0; index < _bars.length; index++) {
-      canvas.drawRect(
-        Rect.fromLTWH(index * barWidth, 0, barWidth, size.height),
-        Paint()..color = _bars[index],
-      );
-    }
-    final center = Offset(size.width / 2, size.height / 2);
-    canvas.drawCircle(center, size.height * 0.16, Paint()..color = Colors.grey);
-    canvas.drawCircle(
-      center,
-      size.height * 0.13,
-      Paint()..color = Colors.white,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _SyntheticVideoTestPatternPainter oldDelegate) =>
-      false;
 }
 
 class _SettingsPage extends StatelessWidget {

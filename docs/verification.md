@@ -119,6 +119,8 @@ Task 44 is **SOURCE_IMPLEMENTED** for the user-triggered snapshot path. The JDK 
 
 Task 45 is **SOURCE_IMPLEMENTED** for sender-side diagnostics, not media delivery. Dart analysis and formatting pass, but the Flutter tests and Windows build remain unverified because their processes stalled. A reported encoded frame does not prove RTP reached the Android TV, that Android decoded or displayed it, or that hardware encoding was used. The next coding task is a native synthetic H.264 sender source and an automated path to a decoded TV frame; WGC integration remains separate.
 
+**Task 46 source update:** The MirrorMesh test pattern now animates a vertical marker across the color bars. The pattern is rendered by Flutter into the app window; if the user selects that window, the existing plugin's native desktop capturer supplies the changing content to the H.264-constrained WebRTC track. Dart format and analysis pass. The focused widget test produced no output for 50 seconds and was interrupted (exit 1); the Windows release build produced no output for 30 seconds and was interrupted (exit 1). No test/build pass is claimed. This pattern is not WGC or a direct native video track, and there is no evidence yet for native capture, encoding, RTP delivery, or TV decode.
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

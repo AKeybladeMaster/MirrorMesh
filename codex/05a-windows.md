@@ -10,6 +10,8 @@ Task 39 makes the shared QR-pinned sender client's approval wait pollable and ca
 
 Task 45 adds best-effort outbound video diagnostics through the pinned WebRTC sender stats API. The UI displays video frame/byte counters and optional codec/encoder implementation metadata; stats failures do not stop a session. These are sender-side reports only. The focused Flutter tests and Windows build stalled without output in this environment, so this task has source and analyzer evidence only. See proposed [ADR-0046](../docs/adr/0046-windows-outbound-video-diagnostics.md).
 
+Task 46 animates the existing color-bar pattern inside the MirrorMesh Flutter window. Selecting that window sends changing desktop content through the pinned plugin capture and the already H.264-constrained sender track. The pattern is not a direct native frame feed, WGC capture, hardware-encoder proof, or evidence that a frame reached the TV. Dart format and analysis pass; the focused widget test and Windows build both stalled without output and were interrupted, so neither is verified.
+
 1. Create conditional adapter crate, CI compile target `x86_64-pc-windows-msvc`; explicitly state supported Windows version/SDK.
 2. Source selection and consent with Windows Graphics Capture (WGC). Implement window/display lifecycle and device-loss/restart test harness.
 3. Send hardware H.264 via Media Foundation and Direct3D native textures with bounded queue and no frame bytes over Dart; test fallback codec errors.
