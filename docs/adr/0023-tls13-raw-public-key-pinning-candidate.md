@@ -23,7 +23,7 @@ The signaling endpoint is specified as `wss://<receiver-host>:8765/v1/control`. 
 - The TLS identity and pairing identity share one key and one QR fingerprint, avoiding a second public-key field in the invitation.
 - The TLS handshake proves possession of the private key while the client’s QR pin authenticates the peer. The server does not use TLS client authentication; the receiver verifies the sender’s signed `pair.begin` at the application layer before approval.
 - `CertifiedKey::keys_match()` parses an X.509 certificate and cannot validate the raw SPKI representation. The adapter constructs the advertised SPKI and signer from the same port-provided public key; a successful TLS handshake additionally proves that the signer controls that key. The in-memory handshake tests cover both matching and mismatching signer behavior.
-- OS identity adapters do not yet implement `LocalTlsIdentityPort`; the adapter cannot be assembled into a real listener until each platform supplies the operation and validates its protected-key API.
+- At this decision point no OS identity adapter implemented `LocalTlsIdentityPort`. Task 20 adds a Windows Credential Manager candidate with fake-store tests; it has not accessed a live credential. Other platform signers and app assembly remain open.
 - RFC 7250 support is native-client-only for this design. The TV browser fallback remains on the hosted/publicly trusted WSS path and is not enabled by this adapter.
 
 ## Dependency and source review

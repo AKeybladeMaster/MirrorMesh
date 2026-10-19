@@ -22,7 +22,7 @@
 
 The pairing runtime reserves a per-source attempt before parsing/verifying the completed `pair.begin` payload and keeps the source address attached through explicit approval. Task 19 adds a bounded native WSS listener candidate and a two-process loopback exchange, but no platform app or user approval UI assembles it yet.
 
-A native Rustls TLS 1.3 raw-public-key pinning candidate binds the receiver’s presented Ed25519 key to the pairing QR fingerprint. Task 19 uses it in a local WSS listener test, but no OS identity adapter implements its TLS signing port and no app startup uses the listener. Browser WSS still requires a normally trusted HTTPS endpoint.
+A native Rustls TLS 1.3 raw-public-key pinning candidate binds the receiver’s presented Ed25519 key to the pairing QR fingerprint. Task 19 uses it in a local WSS listener test, and Task 20 adds a Windows TLS signing adapter with fake-store tests. No live Credential Manager entry or app startup uses it yet. Browser WSS still requires a normally trusted HTTPS endpoint.
 
 ## Vision
 

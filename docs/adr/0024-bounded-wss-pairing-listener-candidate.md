@@ -32,4 +32,4 @@ The adapter pins `tungstenite 0.30.0` with its handshake feature. Its documented
 
 ## Consequences
 
-This candidate joins the TLS identity and pairing runtime at a testable native socket boundary. It remains unassembled into Windows/Linux/Android/iOS or Android TV startup, has no operating-system TLS signer, and has no approval UI. Protocol v1, the RPK profile, attempt policy, and this public adapter boundary remain candidates pending their required reviews.
+This candidate joins the TLS identity and pairing runtime at a testable native socket boundary. It remains unassembled into Windows/Linux/Android/iOS or Android TV startup and has no approval UI. Task 20 adds a fake-store Windows `LocalTlsIdentityPort` implementation; it has not accessed a real Credential Manager entry. Protocol v1, the RPK profile, attempt policy, and this public adapter boundary remain candidates pending their required reviews.
