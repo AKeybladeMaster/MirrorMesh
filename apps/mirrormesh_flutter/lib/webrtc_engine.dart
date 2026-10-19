@@ -89,6 +89,16 @@ abstract interface class WebRtcPeerConnectionFactory {
 
 enum WebRtcDesktopCaptureSourceType { screen, window }
 
+/// Keeps every locally supported H.264 profile while excluding other codecs.
+List<RTCRtpCodecCapability> h264VideoCodecPreferences(
+  Iterable<RTCRtpCodecCapability> codecs,
+) => [
+  for (final codec in codecs)
+    if (codec.mimeType.toLowerCase() == 'video/h264' &&
+        codec.clockRate == 90000)
+      codec,
+];
+
 final class WebRtcDesktopCaptureSource {
   const WebRtcDesktopCaptureSource({
     required this.id,
@@ -357,6 +367,16 @@ final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
         'Desktop capture is already active or the peer is closed.',
       );
     }
+    final codecCapabilities = await getRtpSenderCapabilities('video');
+    final h264Codecs = h264VideoCodecPreferences(
+      codecCapabilities.codecs ?? const <RTCRtpCodecCapability>[],
+    );
+    if (h264Codecs.isEmpty) {
+      throw UnsupportedError(
+        'This Windows WebRTC build does not advertise H.264 video encoding.',
+      );
+    }
+
     final stream = await navigator.mediaDevices.getDisplayMedia(
       <String, dynamic>{
         'audio': false,
@@ -374,7 +394,18 @@ final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
           'The selected source must provide one silent video track.',
         );
       }
-      await _peer.addTrack(videoTracks.single, stream);
+      final sender = await _peer.addTrack(videoTracks.single, stream);
+      RTCRtpTransceiver? senderTransceiver;
+      for (final transceiver in await _peer.getTransceivers()) {
+        if (transceiver.sender.senderId == sender.senderId) {
+          senderTransceiver = transceiver;
+          break;
+        }
+      }
+      if (senderTransceiver == null) {
+        throw StateError('The native WebRTC video sender has no transceiver.');
+      }
+      await senderTransceiver.setCodecPreferences(h264Codecs);
       _localDesktopStream = stream;
     } catch (_) {
       await _stopStream(stream);

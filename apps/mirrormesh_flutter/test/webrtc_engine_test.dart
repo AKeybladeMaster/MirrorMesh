@@ -1,9 +1,37 @@
 import 'dart:async';
 
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mirrormesh_flutter/webrtc_engine.dart';
 
 void main() {
+  test('H.264 preference contains only supported 90 kHz video codecs', () {
+    final codecs = h264VideoCodecPreferences([
+      RTCRtpCodecCapability(
+        mimeType: 'video/H264',
+        clockRate: 90000,
+        sdpFmtpLine: 'level-asymmetry-allowed=1;packetization-mode=1',
+      ),
+      RTCRtpCodecCapability(mimeType: 'video/VP8', clockRate: 90000),
+      RTCRtpCodecCapability(mimeType: 'video/H264', clockRate: 8000),
+      RTCRtpCodecCapability(mimeType: 'audio/H264', clockRate: 90000),
+      RTCRtpCodecCapability(
+        mimeType: 'video/h264',
+        clockRate: 90000,
+        sdpFmtpLine: 'profile-level-id=42e01f',
+      ),
+    ]);
+
+    expect(codecs.map((codec) => codec.mimeType), ['video/H264', 'video/h264']);
+    expect(codecs.map((codec) => codec.clockRate), [90000, 90000]);
+    expect(
+      h264VideoCodecPreferences([
+        RTCRtpCodecCapability(mimeType: 'video/VP8', clockRate: 90000),
+      ]),
+      isEmpty,
+    );
+  });
+
   test(
     'engine creates a peer only when initialized and forwards metadata',
     () async {

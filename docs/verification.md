@@ -65,7 +65,7 @@ The shared WSS client still has its Task 39 two-process loopback coverage, and T
 | App-to-app WebRTC / ICE / media | not run | The Rust WSS test is process integration of the shared control client only. The Dart test injects a fake peer engine and mocked method channel. No app RTCPeerConnection, ICE path, DTLS-SRTP, RTP video or decoder ran. |
 | `HARDWARE_VERIFIED` | pending | No Windows capture, Android TV decode, screenshot or physical-device test ran. |
 
-The transceiver has no media track attached. The controller therefore cannot send RTP video yet. The next implementation slice is a native synthetic H.264 source connected to this sender and the existing Android TV decoder path. Proposed [ADR-0042](adr/0042-windows-sender-session-signaling.md) records the ownership and verification limits.
+At the Task 41 checkpoint, the transceiver had no media track. Task 42 now attaches the user's selected native desktop track, and Task 43 constrains its sender transceiver to H.264 preferences. Neither task establishes that RTP reached the Android TV or that a frame was decoded. Proposed [ADR-0042](adr/0042-windows-sender-session-signaling.md) records the signaling ownership and verification limits.
 
 **Task 42 verification update:** The Windows sender now enumerates desktop capture source metadata from the pinned Flutter WebRTC plugin, asks the user to select a source in the app, rechecks that Android TV pairing was approved, starts one video-only desktop track, and attaches it to the existing peer before creating the offer. Stop, peer disposal, and error paths stop local tracks. The app also contains a static color-bar card that can be selected as a window; it is a visual target and does not generate a native synthetic media track. The plugin capture path is not verified as Windows Graphics Capture (WGC) or the OS-owned capture picker, so neither WGC integration nor the required Windows capture UX is accepted by this task.
 
@@ -74,12 +74,24 @@ The transceiver has no media track attached. The controller therefore cannot sen
 | `dart format --output=none --set-exit-if-changed` on the five changed Dart files | 0 | Dart 3.13.5 format check passes. |
 | `dart analyze` on the five changed Dart files | 0 | Dart 3.13.5 reports no issues. |
 | `flutter test --no-pub test/webrtc_engine_test.dart test/windows_sender_session_test.dart` | not verified | The Flutter CLI produced no output and did not complete in the available runner; it was interrupted. Added tests cover capture source listing, track lifecycle, pairing recheck, and track attachment through injected fakes, but they have not run. |
-| `git diff --check` | pending final check | Run against the Task 42 patch before commit. |
+| `git diff --check` | 0 | Task 42 source and documentation patch is whitespace-clean. |
 | Windows Flutter bundle / Android TV APK | unavailable | No completed bundle build; the Windows runner previously stopped at the plugin symlink-support gate. Android SDK/Gradle is unavailable on this host. |
 | WebRTC/ICE/RTP/H.264 / Android decode / screenshot / reconnect | not verified | No app-to-app peer or media path ran. The track attachment code is source-only evidence; it does not establish a connected remote peer or received frame. |
 | `HARDWARE_VERIFIED` | pending | Physical testing remains deferred to final user testing. |
 
 Task 42 is **SOURCE_IMPLEMENTED** for plugin-backed desktop track attachment only. WGC, OS-mediated capture selection, native synthetic H.264 generation, hardware-accelerated Windows encoding, the Android TV receiver build, decoded frame presentation, screenshot export, and app-to-app media integration remain incomplete. The source list and in-app selection UX do not substitute for those functions.
+
+**Task 43 verification update:** The native Flutter WebRTC adapter checks `getRtpSenderCapabilities('video')` before it calls `getDisplayMedia`; absence of an H.264/90 kHz capability fails before the selected source is opened. After `addTrack`, it finds that sender's transceiver and sets preferences to the advertised H.264 variants before the sender session creates its offer. This matches the TV receiver's H.264-only policy at source level, but does not prove the plugin uses hardware encoding.
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `dart format --output=none --set-exit-if-changed lib/webrtc_engine.dart test/webrtc_engine_test.dart` | 0 | Dart 3.13.5 reports no files needing formatting. |
+| `dart analyze lib/webrtc_engine.dart test/webrtc_engine_test.dart` | 0 | Dart 3.13.5 reports no issues. |
+| `flutter test --no-pub test/webrtc_engine_test.dart` | 1; interrupted | The Flutter CLI produced no output for 30 seconds and was interrupted. The H.264 capability-selection test is authored but not verified. |
+| `git diff --check` | 0 | Task 43 source and documentation patch is whitespace-clean. |
+| Windows build / generated SDP / encoder choice / app-to-TV RTP | not verified | No Windows Flutter bundle, actual peer negotiation, hardware encoder evidence, RTP flow, or Android TV decode ran. |
+
+Task 43 is **SOURCE_IMPLEMENTED** for H.264 sender preferences only. It does not prove hardware H.264 encoding, synthetic media generation, WGC capture, Android TV build/decode, or app-to-app operation. Keep those work items open.
 
 ## Current CORE kickoff evidence
 
