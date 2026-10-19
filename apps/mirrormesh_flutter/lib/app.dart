@@ -8,6 +8,7 @@ import 'annotation_geometry.dart';
 import 'annotation_overlay.dart';
 import 'ios_pairing_bootstrap.dart';
 import 'rust_session_status.dart';
+import 'windows_pairing_bootstrap.dart';
 
 enum _DemoReceiverState { undiscovered, discovered, pairing }
 
@@ -248,6 +249,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       final deviceId = switch (Platform.operatingSystem) {
         'android' => await const AndroidPairingBootstrap().prepare(),
         'ios' => await const IosPairingBootstrap().prepare(),
+        'windows' => await const WindowsPairingBootstrap().prepare(),
         _ => throw PlatformException(
           code: 'pairing_runtime_unsupported',
           message: 'This platform cannot prepare local pairing support.',
@@ -799,7 +801,7 @@ class _DevicesPage extends StatelessWidget {
           title: 'Live pairing is not available yet',
           message: 'Network discovery, identity verification, trusted-device storage, and revocation are not implemented in this shell.',
         ),
-        if (Platform.isAndroid || Platform.isIOS) ...[
+        if (Platform.isWindows || Platform.isAndroid || Platform.isIOS) ...[
           const SizedBox(height: 16),
           Card(
             child: Padding(
@@ -813,12 +815,18 @@ class _DevicesPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'This opens the local ${Platform.isIOS ? 'iOS' : 'Android'} identity and trusted-peer database. It does not contact another device, grant trust, or start screen capture.',
+                    'This opens the local ${Platform.isWindows
+                        ? 'Windows'
+                        : Platform.isIOS
+                        ? 'iOS'
+                        : 'Android'} identity and trusted-peer database. It does not contact another device, grant trust, or start screen capture.',
                   ),
                   const SizedBox(height: 12),
                   FilledButton.icon(
                     key: Key(
-                      Platform.isIOS
+                      Platform.isWindows
+                          ? 'prepare-windows-pairing-button'
+                          : Platform.isIOS
                           ? 'prepare-ios-pairing-button'
                           : 'prepare-android-pairing-button',
                     ),

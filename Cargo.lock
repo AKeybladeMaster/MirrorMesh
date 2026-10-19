@@ -1226,6 +1226,8 @@ dependencies = [
  "mm-adapter-identity",
  "mm-domain",
  "mm-ports",
+ "mm-runtime",
+ "mm-store",
  "windows-sys 0.61.2",
  "zeroize",
 ]
@@ -1250,6 +1252,7 @@ dependencies = [
  "flutter_rust_bridge",
  "jni",
  "mm-adapter-android",
+ "mm-adapter-win",
  "mm-domain",
  "mm-runtime",
  "ndk-context",

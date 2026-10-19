@@ -6,6 +6,9 @@ mod frb_generated;
 #[cfg(target_os = "android")]
 mod android_context;
 
+#[cfg(target_os = "windows")]
+mod windows_pairing;
+
 pub mod bridge_api;
 
 use mm_domain::{DomainError, SessionEvent, SessionId, SessionState};

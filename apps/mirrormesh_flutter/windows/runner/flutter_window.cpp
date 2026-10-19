@@ -1,8 +1,49 @@
 #include "flutter_window.h"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <string>
+
+#include <windows.h>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+constexpr char kWindowsPairingChannel[] = "com.mirrormesh/windows_pairing";
+constexpr char kPreparePairingRuntimeMethod[] = "preparePairingRuntime";
+constexpr char kPreparePairingRuntimeSymbol[] =
+    "mirrormesh_windows_prepare_pairing_runtime";
+
+std::string FormatDeviceId(const std::array<uint8_t, 16>& bytes) {
+  constexpr char kHex[] = "0123456789abcdef";
+  std::string formatted;
+  formatted.reserve(36);
+  for (size_t index = 0; index < bytes.size(); ++index) {
+    if (index == 4 || index == 6 || index == 8 || index == 10) {
+      formatted.push_back('-');
+    }
+    formatted.push_back(kHex[bytes[index] >> 4]);
+    formatted.push_back(kHex[bytes[index] & 0x0f]);
+  }
+  return formatted;
+}
+
+bool PreparePairingRuntime(std::array<uint8_t, 16>* device_id) {
+  HMODULE rust_bridge = ::GetModuleHandleW(L"mm_ffi.dll");
+  if (rust_bridge == nullptr) {
+    return false;
+  }
+  using PrepareRuntime = int32_t (*)(uint8_t*, size_t);
+  auto prepare_runtime = reinterpret_cast<PrepareRuntime>(
+      ::GetProcAddress(rust_bridge, kPreparePairingRuntimeSymbol));
+  return prepare_runtime != nullptr &&
+         prepare_runtime(device_id->data(), device_id->size()) == 0;
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +66,26 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  windows_pairing_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), kWindowsPairingChannel,
+          &flutter::StandardMethodCodec::GetInstance());
+  windows_pairing_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        if (call.method_name() != kPreparePairingRuntimeMethod) {
+          result->NotImplemented();
+          return;
+        }
+        std::array<uint8_t, 16> device_id{};
+        if (!PreparePairingRuntime(&device_id)) {
+          result->Error("pairing_runtime_unavailable",
+                        "Windows could not prepare local pairing support.");
+          return;
+        }
+        result->Success(flutter::EncodableValue(FormatDeviceId(device_id)));
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +101,10 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (windows_pairing_channel_) {
+    windows_pairing_channel_->SetMethodCallHandler(nullptr);
+    windows_pairing_channel_.reset();
+  }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
