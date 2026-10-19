@@ -42,6 +42,9 @@ Reviewed online **2026-10-19**. Websites and API availability evolve; Codex must
 
 ## Pairing identity provider research
 
+- `ndk_context::initialize_android_context` 0.1.1: https://docs.rs/ndk-context/0.1.1/ndk_context/fn.initialize_android_context.html — valid pointer and exactly-once initialization contract.
+- Android NDK JNI tips: https://developer.android.com/ndk/guides/jni-tips — native library loading and JNI class-loader guidance.
+
 - [RFC 8032 — EdDSA](https://www.rfc-editor.org/rfc/rfc8032.html) — Ed25519 key/signature specification; candidate encoding is proposed in [ADR-0007](adr/0007-ed25519-identity-candidate.md).
 - [ed25519-compact docs.rs latest manifest](https://docs.rs/crate/ed25519-compact/latest/source/Cargo.toml.orig) and [crates.io package page](https://crates.io/crates/ed25519-compact) — the exact proposed 2.6.0 version could not be confirmed in this session; accessible docs.rs views were inconsistent and Cargo could not reach the registry. See [identity-provider spike](spikes/identity-provider.md).
 - [ed25519-dalek 3.0.0 manifest](https://docs.rs/crate/ed25519-dalek/latest/source/Cargo.toml.orig) — declares BSD-3-Clause, outside the current allow-list.

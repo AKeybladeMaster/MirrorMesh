@@ -24,7 +24,7 @@ The pairing runtime reserves a per-source attempt before parsing/verifying the c
 
 A native Rustls TLS 1.3 raw-public-key pinning candidate binds the receiver’s presented Ed25519 key to the pairing QR fingerprint. Task 19 uses it in a local WSS listener test; Tasks 20 and 21 add Windows Credential Manager and Linux Secret Service TLS signing adapters with fake-store tests. Neither real OS key store nor app startup uses these adapters yet. Browser WSS still requires a normally trusted HTTPS endpoint.
 
-Task 22 adds an Android Keystore-wrapped Ed25519 identity and TLS signer candidate in `crates/mm-adapter-android/`, described by proposed [ADR-0027](docs/adr/0027-android-keystore-identity-candidate.md). Ten host tests and an Android ARM64 adapter compile check pass. The Flutter Rust bridge does not assemble the adapter yet; the actual Android Keystore, APK, and device flows remain unverified.
+Task 22 adds an Android Keystore-wrapped Ed25519 identity and TLS signer candidate in `crates/mm-adapter-android/`, described by proposed [ADR-0027](docs/adr/0027-android-keystore-identity-candidate.md). Task 23 adds an Android-only JNI bootstrap that attempts to load the packaged Rust library and, when present, hands `applicationContext` to `ndk-context` before Flutter starts, under proposed [ADR-0028](docs/adr/0028-android-ndk-context-bootstrap.md). When the library is absent, the shell keeps its Rust-unavailable state. The pairing runtime still does not assemble this identity or open the trusted-peer store; identity creation remains deferred to an explicit pairing action. Android SDK/NDK compilation, APK startup, Keystore operations, and device flows remain unverified.
 
 ## Vision
 
