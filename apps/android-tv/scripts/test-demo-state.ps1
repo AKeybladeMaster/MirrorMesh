@@ -6,9 +6,11 @@ $testPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/PairingDemoS
 $h264PolicyPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/H264SdpPolicy.java'
 $h264PolicyTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/H264SdpPolicyTest.java'
 $receiverStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvReceiverState.java'
+$reconnectWatchdogPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvReconnectWatchdog.java'
 $pairingStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvPairingState.java'
 $nativeBridgePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/NativePairingBridge.java'
 $receiverStateTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvReceiverStateTest.java'
+$reconnectWatchdogTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvReconnectWatchdogTest.java'
 $pairingStateTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvPairingStateTest.java'
 $screenshotFramePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvScreenshotFrame.java'
 $screenshotFrameTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvScreenshotFrameTest.java'
@@ -29,6 +31,8 @@ $requiredPaths = @(
     $h264PolicyTestPath,
     $receiverStatePath,
     $receiverStateTestPath,
+    $reconnectWatchdogPath,
+    $reconnectWatchdogTestPath,
     $pairingStatePath,
     $pairingStateTestPath,
     $nativeBridgePath,
@@ -51,6 +55,8 @@ $javacInputs = @(
     $h264PolicyTestPath,
     $receiverStatePath,
     $receiverStateTestPath,
+    $reconnectWatchdogPath,
+    $reconnectWatchdogTestPath,
     $pairingStatePath,
     $pairingStateTestPath,
     $nativeBridgePath,
@@ -68,6 +74,7 @@ foreach ($testClass in @(
     'PairingDemoStateTest',
     'H264SdpPolicyTest',
     'TvReceiverStateTest',
+    'TvReconnectWatchdogTest',
     'TvPairingStateTest',
     'TvScreenshotFrameTest',
     'SessionStartNoticeTest'

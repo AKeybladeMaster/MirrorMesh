@@ -20,6 +20,7 @@
     <string name="pairing_accessibility_qr">Short-lived MirrorMesh pairing QR code. No screen video is currently streaming.</string>
     <string name="video_receiving">Receiving H.264 video</string>
     <string name="video_session_failed">The approved video session could not start. Return to pairing and try again.</string>
+    <string name="video_reconnect_failed">The connection could not recover in time. The session was closed.</string>
     <string name="video_session_revoked">Access was revoked. The video session has ended.</string>
     <string name="video_screenshot_button">Save screenshot</string>
     <string name="video_screenshot_waiting">Saving the next received frame...</string>

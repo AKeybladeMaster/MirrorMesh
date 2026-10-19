@@ -25,6 +25,8 @@ Task 52 keeps the same native synthetic media and receiver, but routes test sign
 
 Task 53 adds instrumentation tests for remote `session.stop`, pairing revocation, and malformed-control fail-closed cleanup through the same production Java channel. The test-only bridge verifies listener notification, one native close, and that the closed adapter no longer reports an approved connection. It does not verify Rust WSS authentication or Windows interoperability; Gradle/SDK/emulator evidence is pending.
 
+Task 54 bounds receiver-side ICE recovery to ten seconds, cancels the watchdog when the same peer reconnects, restores the connection state only after a decoded frame arrives, and ignores callbacks from replaced peers. Deterministic JDK tests cover timeout and cleanup. This is receiver lifecycle source; it does not establish real network recovery or Windows-to-TV media delivery.
+
 ## Next implementation slice
 
-Run the Task 52–53 emulator tests and fix any adapter, lifecycle, H.264, screenshot, or ABI build failures. Then use the same native media fixture with real Rust WSS between the Windows sender and TV receiver; continue with Windows Graphics Capture and hardware encoder integration. Keep physical MediaCodec validation for final user testing.
+Run the Task 49/52/53 emulator tests and build the ARM64 APK. Then integrate the existing synthetic H.264 fixture with real Rust WSS between the Windows sender and TV receiver; continue with Windows Graphics Capture and hardware encoder integration. Keep physical MediaCodec validation for final user testing.

@@ -229,6 +229,22 @@ Task 52 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFI
 
 Task 53 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` remain pending. See the [Task 53 brief](../codex/53-android-tv-signaling-lifecycle-tests.md).
 
+## Task 54 verification — Android TV bounded reconnect
+
+`TvReconnectWatchdog` owns one cancellable 10-second deadline. The receiver arms it on the first ICE interruption, cancels it when ICE reconnects, and closes it during peer/session cleanup. A timed-out session reports `reconnect_timeout`, disables screenshot capture, and releases its signaling, peer, renderer, decoder factory, EGL, and screenshot-worker resources. Callbacks emitted by a peer replaced during renegotiation are ignored. Receiver state returns to `CONNECTING` after transport recovery and to `STREAMING` after a decoded frame.
+
+| Command / toolchain | Exit | Result |
+|---|---:|---|
+| Direct `javac --release 17` compile of seven JDK TV test classes | 0 | Pairing, state, H.264 policy, watchdog deadline/cancel/close, and screenshot frame checks pass. |
+| `cargo fmt --all -- --check` | 0 | Rust workspace formatting passes; this task changes Java/XML only. |
+| `powershell.exe -File .\apps\android-tv\scripts\test-demo-state.ps1` | 1 | System PowerShell execution policy blocks `.ps1` execution. The same JDK sources/tests were compiled and run directly without changing policy. |
+| `powershell.exe -File .\apps\android-tv\scripts\verify-shell.ps1` | 1 | System PowerShell execution policy blocks `.ps1` execution. |
+| `gradle :app:assembleDebug` | 1 | Gradle is not installed or available on `PATH`; the Android app build was not run. |
+| `gradle :app:connectedDebugAndroidTest -PmmAndroidAbi=x86_64` | 1 | Gradle is not installed or available on `PATH`; Android instrumentation was not run. |
+| `git diff --check` | 0 | No whitespace errors; Git reports configured LF-to-CRLF normalization notices. |
+
+Task 54 is `CODE_COMPLETE` for its source scope; the pure Java policy/watchdog behavior is locally tested, but the Android source integration has not been compiled here. `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` remain pending. No actual WebRTC reconnection, emulator, Android TV, Windows sender, WSS, decoded Windows frame, or hardware run is claimed. See the [Task 54 brief](../codex/54-android-tv-bounded-reconnect.md).
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

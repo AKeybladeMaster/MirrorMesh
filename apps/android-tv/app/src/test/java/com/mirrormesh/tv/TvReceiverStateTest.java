@@ -21,6 +21,12 @@ public final class TvReceiverStateTest {
         expect(true, state.onFirstFramePresented(), "stream after a presented frame");
         expect(TvReceiverState.Phase.STREAMING, state.phase(), "streaming state");
         expect(true, state.onConnectionInterrupted(), "recoverable disconnect");
+        expect(TvReceiverState.Phase.RECONNECTING, state.phase(), "interrupted state");
+        expect(true, state.onConnectionRestored(), "same peer recovers");
+        expect(TvReceiverState.Phase.CONNECTING, state.phase(), "recovered peer awaits video");
+        expect(true, state.onDecodedFrame(), "decoded frame resumes stream");
+        expect(TvReceiverState.Phase.STREAMING, state.phase(), "recovered stream state");
+        expect(true, state.onConnectionInterrupted(), "second recoverable disconnect");
         expect(true, state.beginReconnect(), "explicit reconnect attempt");
         expect(true, state.onFirstFramePresented(), "resume after a presented frame");
         expect(true, state.revoke(), "revocation closes the active session");
@@ -43,6 +49,14 @@ public final class TvReceiverStateTest {
         expect(true, senderStoppedStream.disconnect(), "sender stop ends the active session");
         expect(TvReceiverState.Phase.STOPPED, senderStoppedStream.phase(), "sender stop state");
         expect(false, senderStoppedStream.beginReconnect(), "stopped session cannot reconnect");
+
+        TvReceiverState reconnectExpired = new TvReceiverState();
+        reconnectExpired.showAuthenticatedRequest();
+        reconnectExpired.approve();
+        reconnectExpired.beginConnecting();
+        expect(true, reconnectExpired.onConnectionInterrupted(), "initial connection can retry");
+        expect(true, reconnectExpired.fail(), "expired reconnect enters failed state");
+        expect(TvReceiverState.Phase.FAILED, reconnectExpired.phase(), "reconnect timeout state");
         System.out.println("Android TV receiver lifecycle checks passed.");
     }
 

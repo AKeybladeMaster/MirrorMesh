@@ -139,7 +139,13 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
     public void onFailure(String code) {
         runOnUiThread(() -> {
             if (diagnosticsText != null && !ended) {
-                diagnosticsText.setText(getString(R.string.video_session_failed));
+                if (screenshotButton != null) {
+                    screenshotButton.setEnabled(false);
+                }
+                int status = "reconnect_timeout".equals(code)
+                        ? R.string.video_reconnect_failed
+                        : R.string.video_session_failed;
+                diagnosticsText.setText(getString(status));
             }
         });
     }

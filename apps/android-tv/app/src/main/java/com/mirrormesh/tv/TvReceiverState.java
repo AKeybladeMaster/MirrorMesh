@@ -49,6 +49,14 @@ public final class TvReceiverState {
         return true;
     }
 
+    public synchronized boolean onDecodedFrame() {
+        if (phase != Phase.CONNECTING && phase != Phase.RECONNECTING) {
+            return false;
+        }
+        phase = Phase.STREAMING;
+        return true;
+    }
+
     public synchronized boolean onConnectionInterrupted() {
         if (phase != Phase.CONNECTING && phase != Phase.STREAMING) {
             return false;
@@ -58,6 +66,10 @@ public final class TvReceiverState {
     }
 
     public synchronized boolean beginReconnect() {
+        return transition(Phase.RECONNECTING, Phase.CONNECTING);
+    }
+
+    public synchronized boolean onConnectionRestored() {
         return transition(Phase.RECONNECTING, Phase.CONNECTING);
     }
 

@@ -12,6 +12,7 @@ $repoRoot = Split-Path (Split-Path $appRoot -Parent) -Parent
 $nativePairingPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_tv_pairing.rs'
 $nativeContextPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_context.rs'
 $approvedChannelPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/RustApprovedSignalingChannel.java'
+$receiverPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvWebRtcReceiver.java'
 $sessionStartNoticePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/SessionStartNotice.java'
 $pairingStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvPairingState.java'
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
@@ -97,7 +98,6 @@ if ($null -eq $helpText -or
     throw 'Dynamic TV approval help text must announce politely to accessibility services.'
 }
 
-$receiverPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvWebRtcReceiver.java'
 $receiverSource = Get-Content -LiteralPath $receiverPath -Raw
 if ($receiverSource -notmatch 'HardwareVideoDecoderFactory' -or
     $receiverSource -notmatch 'SurfaceViewRenderer' -or
@@ -121,8 +121,21 @@ if ($receiverSource -notmatch 'setRemoteStopListener\(this::stopByRemoteSender\)
     $receiverSource -notmatch 'Sender disconnected') {
     throw 'A remote sender stop must end the TV session normally and release its receiver resources.'
 }
+if ($receiverSource -notmatch 'TvReconnectWatchdog\.DEFAULT_TIMEOUT_MILLIS' -or
+    $receiverSource -notmatch 'reconnectWatchdog\.arm\(' -or
+    $receiverSource -notmatch 'reconnectWatchdog\.cancel\(' -or
+    $receiverSource -notmatch 'reconnectWatchdog\.close\(' -or
+    $receiverSource -notmatch 'state\.onDecodedFrame\(' -or
+    $receiverSource -notmatch 'isCurrentPeer\(') {
+    throw 'The TV receiver must bound reconnects, restore state on decoded frames, and ignore stale peer callbacks.'
+}
 $videoActivityPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvVideoActivity.java'
 $videoActivitySource = Get-Content -LiteralPath $videoActivityPath -Raw
+if ($videoActivitySource -notmatch 'reconnect_timeout' -or
+    $videoActivitySource -notmatch 'video_reconnect_failed' -or
+    ([xml](Get-Content -LiteralPath $stringsPath -Raw)).SelectSingleNode("//*[local-name()='string' and @name='video_reconnect_failed']") -eq $null) {
+    throw 'An expired TV reconnect must show a terminal status and stop screenshot requests.'
+}
 if ($videoActivitySource -notmatch 'onScreenshotCaptured\(' -or
     $videoActivitySource -notmatch 'MediaStore\.Images\.Media\.EXTERNAL_CONTENT_URI' -or
     $videoActivitySource -notmatch 'getExternalFilesDir\(' -or
@@ -148,12 +161,29 @@ if ($appGradle -notmatch 'androidx\.test:runner:1\.7\.0' -or
 }
 $loopbackTestPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/TvWebRtcLoopbackIntegrationTest.java'
 $lifecycleTestPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/RustApprovedSignalingChannelLifecycleTest.java'
+$reconnectWatchdogPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvReconnectWatchdog.java'
+$reconnectWatchdogTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvReconnectWatchdogTest.java'
 $syntheticCapturerPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/SyntheticVideoCapturer.java'
 $loopbackBridgePath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/LoopbackNativeApprovedControlBridge.java'
-foreach ($testFile in @($loopbackTestPath, $lifecycleTestPath, $syntheticCapturerPath, $loopbackBridgePath)) {
+foreach ($testFile in @($loopbackTestPath, $lifecycleTestPath, $syntheticCapturerPath, $loopbackBridgePath, $reconnectWatchdogPath, $reconnectWatchdogTestPath)) {
     if (!(Test-Path -LiteralPath $testFile)) {
         throw "The Android native WebRTC loopback test source is missing: $testFile."
     }
+}
+$reconnectWatchdogTest = Get-Content -LiteralPath $reconnectWatchdogTestPath -Raw
+if ($reconnectWatchdogTest -notmatch 'timeoutRunsOnce' -or
+    $reconnectWatchdogTest -notmatch 'recoveryCancelsTimeoutAndAllowsAnotherAttempt' -or
+    $reconnectWatchdogTest -notmatch 'closeCancelsTimeoutAndRejectsFutureAttempts') {
+    throw 'The TV reconnect watchdog tests must cover deadline, recovery, and cleanup behavior.'
+}
+$receiver = Get-Content -LiteralPath $receiverPath -Raw
+if ($receiver -notmatch 'TvReconnectWatchdog\.DEFAULT_TIMEOUT_MILLIS' -or
+    $receiver -notmatch 'reconnectWatchdog\.arm\(' -or
+    $receiver -notmatch 'reconnectWatchdog\.cancel\(' -or
+    $receiver -notmatch 'reconnectWatchdog\.close\(' -or
+    $receiver -notmatch 'state\.onDecodedFrame\(' -or
+    $receiver -notmatch 'isCurrentPeer\(') {
+    throw 'The TV receiver must bound reconnects, restore state on decoded frames, and ignore stale peer callbacks.'
 }
 $loopbackTest = Get-Content -LiteralPath $loopbackTestPath -Raw
 if ($loopbackTest -notmatch 'createWithDecoderFactoryForTest' -or

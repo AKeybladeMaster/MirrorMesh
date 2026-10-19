@@ -74,3 +74,4 @@ Update device-matrix.md and verification.md with truthful statuses only.
 | 51 | Windows peer reconnect | [51-windows-peer-reconnect.md](51-windows-peer-reconnect.md) |
 | 52 | Android TV production signaling adapter loopback | [52-android-tv-production-signaling-loopback.md](52-android-tv-production-signaling-loopback.md) |
 | 53 | Android TV signaling lifecycle tests | [53-android-tv-signaling-lifecycle-tests.md](53-android-tv-signaling-lifecycle-tests.md) |
+| 54 | Android TV bounded reconnect | [54-android-tv-bounded-reconnect.md](54-android-tv-bounded-reconnect.md) |

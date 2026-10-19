@@ -125,6 +125,8 @@ public final class TvWebRtcReceiver implements AutoCloseable {
     private final SurfaceViewRenderer renderer;
     private final Listener listener;
     private final TvReceiverState state;
+    private final TvReconnectWatchdog reconnectWatchdog =
+            new TvReconnectWatchdog(TvReconnectWatchdog.DEFAULT_TIMEOUT_MILLIS);
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Object candidateLock = new Object();
     private final Queue<RemoteCandidate> pendingRemoteCandidates = new ArrayDeque<>();
@@ -351,12 +353,15 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
         PeerConnection.RTCConfiguration configuration =
                 new PeerConnection.RTCConfiguration(new ArrayList<>(configuredIceServers));
-        PeerConnection connection = factory.createPeerConnection(configuration, new ReceiverObserver());
+        ReceiverObserver observer = new ReceiverObserver();
+        PeerConnection connection = factory.createPeerConnection(configuration, observer);
         if (connection == null) {
             fail("peer_connection_unavailable");
             return;
         }
         peerConnection = connection;
+        connectionState = PeerConnection.PeerConnectionState.NEW;
+        observer.bind(connection);
         if (!configureReceiveOnlyH264(connection)) {
             fail("hardware_h264_unavailable");
             return;
@@ -586,7 +591,7 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         }
 
         VideoSink sink = frame -> {
-            if (closed.get()) {
+            if (closed.get() || remoteVideoTrack != videoTrack) {
                 return;
             }
             int width = frame.getBuffer().getWidth();
@@ -594,6 +599,9 @@ public final class TvWebRtcReceiver implements AutoCloseable {
             lastFrameWidth = width;
             lastFrameHeight = height;
             long count = ++receivedFrameCount;
+            if (state.onDecodedFrame()) {
+                reconnectWatchdog.cancel();
+            }
             listener.onFrameReceived(width, height, count);
             renderer.onFrame(frame);
             if (screenshotRequested.compareAndSet(true, false)) {
@@ -721,22 +729,43 @@ public final class TvWebRtcReceiver implements AutoCloseable {
     }
 
     private final class ReceiverObserver implements PeerConnection.Observer {
+        private volatile PeerConnection observedConnection;
+
+        private void bind(PeerConnection connection) {
+            observedConnection = connection;
+        }
+
+        private boolean isCurrentPeer() {
+            return !closed.get() && observedConnection != null
+                    && peerConnection == observedConnection;
+        }
+
+        private void onConnectionInterrupted() {
+            if (state.onConnectionInterrupted()) {
+                reconnectWatchdog.arm(() -> fail("reconnect_timeout"));
+            }
+        }
+
         @Override
         public void onSignalingChange(PeerConnection.SignalingState state) {}
 
         @Override
         public void onIceConnectionChange(PeerConnection.IceConnectionState iceState) {
-            if (closed.get()) {
+            if (!isCurrentPeer()) {
                 return;
             }
             switch (iceState) {
-                case CONNECTED, COMPLETED -> listener.onStatus("Connected; waiting for video");
+                case CONNECTED, COMPLETED -> {
+                    reconnectWatchdog.cancel();
+                    TvWebRtcReceiver.this.state.onConnectionRestored();
+                    listener.onStatus("Connected; waiting for video");
+                }
                 case DISCONNECTED -> {
-                    TvWebRtcReceiver.this.state.onConnectionInterrupted();
+                    onConnectionInterrupted();
                     listener.onStatus("Connection interrupted; waiting to reconnect");
                 }
                 case FAILED -> {
-                    TvWebRtcReceiver.this.state.onConnectionInterrupted();
+                    onConnectionInterrupted();
                     listener.onStatus("Connection failed; waiting for reconnection");
                 }
                 case CLOSED -> listener.onStatus("Connection closed");
@@ -746,7 +775,9 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
         @Override
         public void onConnectionChange(PeerConnection.PeerConnectionState newState) {
-            connectionState = newState;
+            if (isCurrentPeer()) {
+                connectionState = newState;
+            }
         }
 
         @Override
@@ -757,7 +788,9 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
         @Override
         public void onIceCandidate(IceCandidate candidate) {
-            sendOrQueueLocalCandidate(candidate);
+            if (isCurrentPeer()) {
+                sendOrQueueLocalCandidate(candidate);
+            }
         }
 
         @Override
@@ -765,6 +798,9 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
         @Override
         public void onAddStream(MediaStream stream) {
+            if (!isCurrentPeer()) {
+                return;
+            }
             for (VideoTrack track : stream.videoTracks) {
                 attachRemoteVideoTrack(track);
             }
@@ -772,6 +808,9 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
         @Override
         public void onRemoveStream(MediaStream stream) {
+            if (!isCurrentPeer()) {
+                return;
+            }
             VideoTrack track = remoteVideoTrack;
             VideoSink sink = videoSink;
             if (track != null && sink != null && stream.videoTracks.contains(track)) {
@@ -792,6 +831,9 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
         @Override
         public void onTrack(RtpTransceiver transceiver) {
+            if (!isCurrentPeer()) {
+                return;
+            }
             RtpReceiver receiver = transceiver.getReceiver();
             attachRemoteVideoTrack(receiver.track());
         }
@@ -804,6 +846,7 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         }
         ApprovedSignalingChannel channel = signaling;
         signaling = null;
+        reconnectWatchdog.close();
         if (channel != null) {
             channel.clearListeners();
             channel.close();
