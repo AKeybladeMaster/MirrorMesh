@@ -178,77 +178,80 @@ void main() {
     await controller.dispose();
   });
 
-  test('sends session start only after an encoded video frame exists', () async {
-    final calls = <MethodCall>[];
-    final startRequested = Completer<void>();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) async {
-          calls.add(call);
-          if (call.method == 'startSenderSession' &&
-              !startRequested.isCompleted) {
-            startRequested.complete();
-          }
-          return switch (call.method) {
-            'beginSenderSession' => sessionId,
-            'startSenderSession' => true,
-            'stopSenderSession' => true,
-            'sendSenderSessionIce' => true,
-            'pollSenderPairing' => <String, Object?>{
-              'state': WindowsSenderPairingState.approved.nativeValue,
-              'errorCode': 0,
-              'receiverFingerprint': 'a' * 64,
-            },
-            'pollSenderSessionEvent' =>
-              jsonEncode(<String, Object?>{'pending': true}),
-            'cancelSenderPairing' => true,
-            _ => null,
-          };
-        });
+  test(
+    'sends session start only after an encoded video frame exists',
+    () async {
+      final calls = <MethodCall>[];
+      final startRequested = Completer<void>();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            if (call.method == 'startSenderSession' &&
+                !startRequested.isCompleted) {
+              startRequested.complete();
+            }
+            return switch (call.method) {
+              'beginSenderSession' => sessionId,
+              'startSenderSession' => true,
+              'stopSenderSession' => true,
+              'sendSenderSessionIce' => true,
+              'pollSenderPairing' => <String, Object?>{
+                'state': WindowsSenderPairingState.approved.nativeValue,
+                'errorCode': 0,
+                'receiverFingerprint': 'a' * 64,
+              },
+              'pollSenderSessionEvent' =>
+                jsonEncode(<String, Object?>{'pending': true}),
+              'cancelSenderPairing' => true,
+              _ => null,
+            };
+          });
 
-    final peer = _FakePeer();
-    peer.outboundVideoStats = const WebRtcOutboundVideoStats(
-      framesEncoded: 0,
-      bytesSent: 0,
-      codecMimeType: 'video/H264',
-    );
-    final controller = WindowsSenderSessionController(
-      pairing: const WindowsPairingBootstrap(),
-      factory: _FakeFactory(peer),
-      statsPollInterval: const Duration(milliseconds: 10),
-      firstEncodedFrameTimeout: const Duration(seconds: 1),
-    );
+      final peer = _FakePeer();
+      peer.outboundVideoStats = const WebRtcOutboundVideoStats(
+        framesEncoded: 0,
+        bytesSent: 0,
+        codecMimeType: 'video/H264',
+      );
+      final controller = WindowsSenderSessionController(
+        pairing: const WindowsPairingBootstrap(),
+        factory: _FakeFactory(peer),
+        statsPollInterval: const Duration(milliseconds: 10),
+        firstEncodedFrameTimeout: const Duration(seconds: 1),
+      );
 
-    await controller.start(requestId: 43, sourceId: 'window-2');
-    final transportConnected = controller.states.firstWhere(
-      (state) => state == WindowsSenderSessionState.transportConnected,
-    );
-    peer.emitState(WebRtcConnectionState.connected);
-    await transportConnected.timeout(const Duration(seconds: 1));
+      await controller.start(requestId: 43, sourceId: 'window-2');
+      final transportConnected = controller.states.firstWhere(
+        (state) => state == WindowsSenderSessionState.transportConnected,
+      );
+      peer.emitState(WebRtcConnectionState.connected);
+      await transportConnected.timeout(const Duration(seconds: 1));
 
-    expect(controller.state, WindowsSenderSessionState.transportConnected);
-    expect(
-      calls.where((call) => call.method == 'startSenderSession'),
-      isEmpty,
-    );
+      expect(controller.state, WindowsSenderSessionState.transportConnected);
+      expect(
+        calls.where((call) => call.method == 'startSenderSession'),
+        isEmpty,
+      );
 
-    peer.outboundVideoStats = const WebRtcOutboundVideoStats(
-      framesEncoded: 1,
-      bytesSent: 512,
-      codecMimeType: 'video/H264',
-    );
-    await controller.states
-        .firstWhere((state) => state == WindowsSenderSessionState.streaming)
-        .timeout(const Duration(seconds: 1));
-    await startRequested.future.timeout(const Duration(seconds: 1));
+      peer.outboundVideoStats = const WebRtcOutboundVideoStats(
+        framesEncoded: 1,
+        bytesSent: 512,
+        codecMimeType: 'video/H264',
+      );
+      await controller.states
+          .firstWhere((state) => state == WindowsSenderSessionState.streaming)
+          .timeout(const Duration(seconds: 1));
+      await startRequested.future.timeout(const Duration(seconds: 1));
 
-    expect(controller.state, WindowsSenderSessionState.streaming);
-    expect(
-      calls.where((call) => call.method == 'startSenderSession'),
-      hasLength(1),
-    );
-    await controller.stop();
-    await controller.dispose();
-  });
+      expect(controller.state, WindowsSenderSessionState.streaming);
+      expect(
+        calls.where((call) => call.method == 'startSenderSession'),
+        hasLength(1),
+      );
+      await controller.stop();
+      await controller.dispose();
+    },
+  );
 
   test(
     'fails and releases the session when no frame is encoded in time',
@@ -260,6 +263,7 @@ void main() {
             return switch (call.method) {
               'beginSenderSession' => sessionId,
               'sendSenderSessionIce' => true,
+              'stopSenderSession' => true,
               'pollSenderPairing' => <String, Object?>{
                 'state': WindowsSenderPairingState.approved.nativeValue,
                 'errorCode': 0,
@@ -304,6 +308,171 @@ void main() {
         calls.where((call) => call.method == 'cancelSenderPairing'),
         hasLength(1),
       );
+      final stopCallIndex = calls.indexWhere(
+        (call) => call.method == 'stopSenderSession',
+      );
+      final cancelCallIndex = calls.indexWhere(
+        (call) => call.method == 'cancelSenderPairing',
+      );
+      expect(stopCallIndex, greaterThanOrEqualTo(0));
+      expect(cancelCallIndex, greaterThan(stopCallIndex));
+      expect(calls[stopCallIndex].arguments, <String, Object?>{
+        'requestId': 44,
+        'reason': 'media-startup-failed',
+      });
+      await controller.dispose();
+    },
+  );
+
+  test('recovers the same peer without sending session start twice', () async {
+    final calls = <MethodCall>[];
+    final startRequested = Completer<void>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          if (call.method == 'startSenderSession' &&
+              !startRequested.isCompleted) {
+            startRequested.complete();
+          }
+          return switch (call.method) {
+            'beginSenderSession' => sessionId,
+            'startSenderSession' => true,
+            'stopSenderSession' => true,
+            'sendSenderSessionIce' => true,
+            'pollSenderPairing' => <String, Object?>{
+              'state': WindowsSenderPairingState.approved.nativeValue,
+              'errorCode': 0,
+              'receiverFingerprint': 'a' * 64,
+            },
+            'pollSenderSessionEvent' =>
+              jsonEncode(<String, Object?>{'pending': true}),
+            'cancelSenderPairing' => true,
+            _ => null,
+          };
+        });
+
+    final peer = _FakePeer()
+      ..outboundVideoStats = const WebRtcOutboundVideoStats(
+        framesEncoded: 1,
+        bytesSent: 512,
+        codecMimeType: 'video/H264',
+      );
+    final controller = WindowsSenderSessionController(
+      pairing: const WindowsPairingBootstrap(),
+      factory: _FakeFactory(peer),
+      statsPollInterval: const Duration(milliseconds: 5),
+      reconnectTimeout: const Duration(seconds: 1),
+    );
+
+    await controller.start(requestId: 45, sourceId: 'window-2');
+    final connected = controller.states.firstWhere(
+      (state) => state == WindowsSenderSessionState.streaming,
+    );
+    peer.emitState(WebRtcConnectionState.connected);
+    await connected.timeout(const Duration(seconds: 1));
+    await startRequested.future.timeout(const Duration(seconds: 1));
+    await Future<void>.delayed(Duration.zero);
+
+    final reconnecting = controller.states.firstWhere(
+      (state) => state == WindowsSenderSessionState.reconnecting,
+    );
+    peer.emitState(WebRtcConnectionState.disconnected);
+    await reconnecting.timeout(const Duration(seconds: 1));
+
+    final recovered = controller.states.firstWhere(
+      (state) => state == WindowsSenderSessionState.streaming,
+    );
+    peer.emitState(WebRtcConnectionState.connected);
+    await recovered.timeout(const Duration(seconds: 1));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.state, WindowsSenderSessionState.streaming);
+    expect(
+      calls.where((call) => call.method == 'startSenderSession'),
+      hasLength(1),
+    );
+    expect(peer.startedCaptureSourceId, 'window-2');
+    expect(peer.closeCalls, 0);
+    await controller.stop();
+    await controller.dispose();
+  });
+
+  test(
+    'fails and sends stop when the peer does not reconnect in time',
+    () async {
+      final calls = <MethodCall>[];
+      final startRequested = Completer<void>();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            if (call.method == 'startSenderSession' &&
+                !startRequested.isCompleted) {
+              startRequested.complete();
+            }
+            return switch (call.method) {
+              'beginSenderSession' => sessionId,
+              'startSenderSession' => true,
+              'stopSenderSession' => true,
+              'sendSenderSessionIce' => true,
+              'pollSenderPairing' => <String, Object?>{
+                'state': WindowsSenderPairingState.approved.nativeValue,
+                'errorCode': 0,
+                'receiverFingerprint': 'a' * 64,
+              },
+              'pollSenderSessionEvent' =>
+                jsonEncode(<String, Object?>{'pending': true}),
+              'cancelSenderPairing' => true,
+              _ => null,
+            };
+          });
+
+      final peer = _FakePeer()
+        ..outboundVideoStats = const WebRtcOutboundVideoStats(
+          framesEncoded: 1,
+          bytesSent: 512,
+          codecMimeType: 'video/H264',
+        );
+      final controller = WindowsSenderSessionController(
+        pairing: const WindowsPairingBootstrap(),
+        factory: _FakeFactory(peer),
+        statsPollInterval: const Duration(milliseconds: 5),
+        reconnectTimeout: const Duration(milliseconds: 50),
+      );
+
+      await controller.start(requestId: 46, sourceId: 'window-2');
+      final connected = controller.states.firstWhere(
+        (state) => state == WindowsSenderSessionState.streaming,
+      );
+      peer.emitState(WebRtcConnectionState.connected);
+      await connected.timeout(const Duration(seconds: 1));
+      await startRequested.future.timeout(const Duration(seconds: 1));
+      await Future<void>.delayed(Duration.zero);
+
+      final reconnecting = controller.states.firstWhere(
+        (state) => state == WindowsSenderSessionState.reconnecting,
+      );
+      final failed = controller.states.firstWhere(
+        (state) => state == WindowsSenderSessionState.failed,
+      );
+      peer.emitState(WebRtcConnectionState.disconnected);
+      await reconnecting.timeout(const Duration(seconds: 1));
+      await failed.timeout(const Duration(seconds: 1));
+
+      expect(controller.lastError, isA<StateError>());
+      expect(peer.stopDesktopCaptureCalls, 1);
+      expect(peer.closeCalls, 1);
+      final stopCallIndex = calls.indexWhere(
+        (call) => call.method == 'stopSenderSession',
+      );
+      final cancelCallIndex = calls.indexWhere(
+        (call) => call.method == 'cancelSenderPairing',
+      );
+      expect(stopCallIndex, greaterThanOrEqualTo(0));
+      expect(cancelCallIndex, greaterThan(stopCallIndex));
+      expect(calls[stopCallIndex].arguments, <String, Object?>{
+        'requestId': 46,
+        'reason': 'transport-failed',
+      });
       await controller.dispose();
     },
   );

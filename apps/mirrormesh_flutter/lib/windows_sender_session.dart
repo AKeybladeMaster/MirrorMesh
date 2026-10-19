@@ -14,6 +14,7 @@ enum WindowsSenderSessionState {
   negotiating,
   transportConnected,
   streaming,
+  reconnecting,
   stopped,
   revoked,
   failed,
@@ -29,14 +30,17 @@ final class WindowsSenderSessionController {
     WebRtcPeerConnectionFactory? factory,
     this.statsPollInterval = const Duration(seconds: 1),
     this.firstEncodedFrameTimeout = const Duration(seconds: 15),
+    this.reconnectTimeout = const Duration(seconds: 10),
   }) : _engineFactory = factory ?? const FlutterWebRtcPeerConnectionFactory(),
        assert(statsPollInterval.inMicroseconds > 0),
-       assert(firstEncodedFrameTimeout.inMicroseconds > 0);
+       assert(firstEncodedFrameTimeout.inMicroseconds > 0),
+       assert(reconnectTimeout.inMicroseconds > 0);
 
   final WindowsPairingBootstrap pairing;
   final WebRtcPeerConnectionFactory _engineFactory;
   final Duration statsPollInterval;
   final Duration firstEncodedFrameTimeout;
+  final Duration reconnectTimeout;
   final StreamController<WindowsSenderSessionState> _states =
       StreamController<WindowsSenderSessionState>.broadcast();
   final StreamController<WebRtcOutboundVideoStats> _videoStats =
@@ -52,8 +56,10 @@ final class WindowsSenderSessionController {
   Timer? _pollTimer;
   Timer? _statsTimer;
   Timer? _firstEncodedFrameTimer;
+  Timer? _reconnectTimer;
   Completer<void>? _localIceDrainComplete;
   Future<void>? _stopOperation;
+  Future<void>? _failureOperation;
   String? _sessionId;
   int? _requestId;
   int _pendingLocalIceBytes = 0;
@@ -64,6 +70,7 @@ final class WindowsSenderSessionController {
   bool _sessionStartInFlight = false;
   bool _sessionStartQueued = false;
   bool _transportReady = false;
+  bool _transportWasConnected = false;
   bool _hasEncodedVideo = false;
   bool _starting = false;
   bool _stopping = false;
@@ -101,10 +108,14 @@ final class WindowsSenderSessionController {
     _sessionStartInFlight = false;
     _sessionStartQueued = false;
     _transportReady = false;
+    _transportWasConnected = false;
     _hasEncodedVideo = false;
     _firstEncodedFrameTimer?.cancel();
     _firstEncodedFrameTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _stopOperation = null;
+    _failureOperation = null;
     _lastError = null;
     _setState(WindowsSenderSessionState.negotiating);
     final engine = FlutterWebRtcEngine(factory: _engineFactory);
@@ -147,10 +158,7 @@ final class WindowsSenderSessionController {
       }
       return _sessionId!;
     } catch (error) {
-      await _closePeer();
-      await _closePairingChannel();
-      _lastError = error;
-      _setState(WindowsSenderSessionState.failed);
+      await _fail(error);
       rethrow;
     } finally {
       _starting = false;
@@ -159,6 +167,8 @@ final class WindowsSenderSessionController {
 
   Future<void> stop() {
     if (_closed) return Future<void>.value();
+    final failure = _failureOperation;
+    if (failure != null) return failure;
     final stopping = _stopOperation;
     if (stopping != null) return stopping;
     _stopping = true;
@@ -231,7 +241,10 @@ final class WindowsSenderSessionController {
     } else if (event is WebRtcConnectionStateEvent) {
       switch (event.state) {
         case WebRtcConnectionState.connected:
+          _reconnectTimer?.cancel();
+          _reconnectTimer = null;
           _transportReady = true;
+          _transportWasConnected = true;
           _setState(
             _hasEncodedVideo
                 ? WindowsSenderSessionState.streaming
@@ -245,9 +258,16 @@ final class WindowsSenderSessionController {
         case WebRtcConnectionState.failed:
         case WebRtcConnectionState.closed:
           unawaited(_fail(StateError('The WebRTC peer connection failed.')));
+        case WebRtcConnectionState.disconnected:
+          if (_transportWasConnected && _transportReady) {
+            _transportReady = false;
+            _firstEncodedFrameTimer?.cancel();
+            _firstEncodedFrameTimer = null;
+            _setState(WindowsSenderSessionState.reconnecting);
+            _startReconnectWait();
+          }
         case WebRtcConnectionState.newConnection:
         case WebRtcConnectionState.connecting:
-        case WebRtcConnectionState.disconnected:
           break;
       }
     }
@@ -265,7 +285,12 @@ final class WindowsSenderSessionController {
     _sessionStartInFlight = true;
     try {
       await _drainLocalIce();
-      if (_closed || _sessionId == null || _sessionStartQueued) return;
+      if (_closed ||
+          !_transportReady ||
+          _sessionId == null ||
+          _sessionStartQueued) {
+        return;
+      }
       await pairing.startSenderSession(
         requestId: _requestId!,
         sourceId: 'desktop-capture',
@@ -293,6 +318,7 @@ final class WindowsSenderSessionController {
             StateError(
               'No outbound video frame was encoded before the media startup timeout.',
             ),
+            stopReason: 'media-startup-failed',
           ),
         );
       }
@@ -309,6 +335,26 @@ final class WindowsSenderSessionController {
       _setState(WindowsSenderSessionState.streaming);
       unawaited(_sendSessionStart());
     }
+  }
+
+  void _startReconnectWait() {
+    if (_reconnectTimer != null) return;
+    _reconnectTimer = Timer(reconnectTimeout, () {
+      _reconnectTimer = null;
+      if (!_stopping &&
+          _transportWasConnected &&
+          !_transportReady &&
+          _state == WindowsSenderSessionState.reconnecting) {
+        unawaited(
+          _fail(
+            StateError(
+              'The WebRTC peer connection did not recover before the reconnect timeout.',
+            ),
+            stopReason: 'transport-failed',
+          ),
+        );
+      }
+    });
   }
 
   void _queueLocalIce(WebRtcIceCandidate candidate) {
@@ -430,11 +476,37 @@ final class WindowsSenderSessionController {
     }
   }
 
-  Future<void> _fail(Object error) async {
-    if (_closed || _state == WindowsSenderSessionState.failed) return;
-    await _closePeer();
-    await _closePairingChannel();
+  Future<void> _fail(Object error, {String stopReason = 'sender-failed'}) {
+    if (_closed || _stopping || _state == WindowsSenderSessionState.failed) {
+      return Future<void>.value();
+    }
+    return _failureOperation ??= _failAndCleanup(error, stopReason);
+  }
+
+  Future<void> _failAndCleanup(Object error, String stopReason) async {
+    final requestId = _requestId;
+    final sessionActive = _sessionId != null;
     _lastError = error;
+    try {
+      await _closePeer();
+    } catch (_) {
+      // Continue by sending stop/cancel even if local media teardown failed.
+    }
+    if (requestId != null && sessionActive) {
+      try {
+        await pairing.stopSenderSession(
+          requestId: requestId,
+          reason: stopReason,
+        );
+      } catch (_) {
+        // The peer or approved channel may already be unavailable.
+      }
+    }
+    try {
+      await _closePairingChannel();
+    } catch (_) {
+      // Preserve the original session error while completing local cleanup.
+    }
     _setState(WindowsSenderSessionState.failed);
   }
 
@@ -456,6 +528,8 @@ final class WindowsSenderSessionController {
     _statsTimer = null;
     _firstEncodedFrameTimer?.cancel();
     _firstEncodedFrameTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await _engineEvents?.cancel();
     _engineEvents = null;
     final engine = _engine;
@@ -467,6 +541,7 @@ final class WindowsSenderSessionController {
     _pendingRemoteIceBytes = 0;
     _remoteDescriptionSet = false;
     _transportReady = false;
+    _transportWasConnected = false;
     _hasEncodedVideo = false;
     if (engine != null) await engine.close();
   }

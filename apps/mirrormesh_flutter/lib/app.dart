@@ -1417,6 +1417,8 @@ class _DevicesPageState extends State<_DevicesPage> {
       'WebRTC transport connected; waiting for an encoded video frame.',
     WindowsSenderSessionState.streaming =>
       'The sender has encoded video. TV frame receipt is still unconfirmed.',
+    WindowsSenderSessionState.reconnecting =>
+      'WebRTC transport was interrupted; attempting to reconnect.',
     WindowsSenderSessionState.stopped => 'Screen share stopped.',
     WindowsSenderSessionState.revoked =>
       'Pairing was revoked. The screen share is stopped.',
