@@ -1,6 +1,6 @@
 # Research sources and version check ledger
 
-Reviewed online **2026-10-18**. Websites and API availability evolve; Codex must recheck the specific target at implementation time and pin dependency lockfiles. The reference Microsoft Store's web listing is sparse and does **not** disclose internal source, listener ports, protocols, codecs or full features.
+Reviewed online **2026-10-19**. Websites and API availability evolve; Codex must recheck the specific target at implementation time and pin dependency lockfiles. The reference Microsoft Store's web listing is sparse and does **not** disclose internal source, listener ports, protocols, codecs or full features.
 
 ## Reference and agent tools
 
@@ -17,6 +17,12 @@ Reviewed online **2026-10-18**. Websites and API availability evolve; Codex must
 - Microsoft MSIX protected install semantics: https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes
 - Android MediaProjection: https://developer.android.com/media/grow/media-projection — user consent and foreground service.
 - Android foreground service types: https://developer.android.com/develop/background-work/services/fgs/service-types
+- Android Keystore system: https://developer.android.com/privacy-and-security/keystore — non-exportable Keystore key material and device-dependent secure-hardware backing.
+- Android `KeyGenParameterSpec.Builder`: https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder — AES key size, GCM block mode, and encryption padding parameters.
+- Android `KeyPairGenerator`: https://developer.android.com/reference/java/security/KeyPairGenerator — documented Android Keystore asymmetric-generator algorithms; Ed25519 is not listed.
+- Flutter Rust Bridge Android NDK initialization: https://cjycode.com/flutter_rust_bridge/guides/how-to/ndk-init — Android library loading and explicit context initialization patterns.
+- `jni` 0.21.1 API and manifest: https://docs.rs/jni/0.21.1/jni/ and https://docs.rs/crate/jni/0.21.1/source/Cargo.toml.orig — pinned JNI bindings; MIT OR Apache-2.0.
+- `ndk-context` 0.1.1 API and manifest: https://docs.rs/ndk-context/0.1.1/ndk_context/ and https://docs.rs/crate/ndk-context/0.1.1/source/Cargo.toml.orig — pinned Android context bridge; MIT OR Apache-2.0.
 - Apple ScreenCaptureKit: https://developer.apple.com/documentation/screencapturekit — Apple now positions it as ReplayKit replacement for streaming/mirroring.
 - Apple iOS ScreenCaptureKit sample: https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-on-ios — sample states iOS 27+.
 - Apple ReplayKit legacy picker: https://developer.apple.com/documentation/replaykit/rpsystembroadcastpickerview — presently marked deprecated.
