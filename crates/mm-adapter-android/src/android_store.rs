@@ -7,8 +7,6 @@ use mm_ports::PortError;
 #[cfg(target_os = "android")]
 use mm_ports::{LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort};
 #[cfg(target_os = "android")]
-use std::path::Path;
-#[cfg(target_os = "android")]
 use zeroize::Zeroize;
 use zeroize::Zeroizing;
 
@@ -234,7 +232,7 @@ fn identity_lock() -> Result<std::sync::MutexGuard<'static, ()>, PortError> {
 }
 
 #[cfg(target_os = "android")]
-fn android_seed_path() -> Result<PathBuf, PortError> {
+pub(super) fn android_data_directory() -> Result<PathBuf, PortError> {
     use jni::JavaVM;
     use jni::objects::JObject;
 
@@ -262,7 +260,12 @@ fn android_seed_path() -> Result<PathBuf, PortError> {
         .get_string(&path.into())
         .map_err(|_| PortError::StorageFailure)?
         .into();
-    Ok(Path::new(&path).join("mirrormesh-identity-v1.bin"))
+    Ok(PathBuf::from(path))
+}
+
+#[cfg(target_os = "android")]
+fn android_seed_path() -> Result<PathBuf, PortError> {
+    Ok(android_data_directory()?.join("mirrormesh-identity-v1.bin"))
 }
 
 #[cfg(target_os = "android")]

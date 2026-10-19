@@ -1133,6 +1133,8 @@ dependencies = [
  "mm-adapter-identity",
  "mm-domain",
  "mm-ports",
+ "mm-runtime",
+ "mm-store",
  "ndk-context",
  "zeroize",
 ]
@@ -1233,6 +1235,7 @@ version = "0.1.0"
 dependencies = [
  "flutter_rust_bridge",
  "jni",
+ "mm-adapter-android",
  "mm-domain",
  "mm-runtime",
  "ndk-context",

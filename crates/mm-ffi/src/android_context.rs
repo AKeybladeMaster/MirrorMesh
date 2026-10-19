@@ -1,7 +1,8 @@
 use jni::JNIEnv;
 use jni::objects::{GlobalRef, JObject};
-use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean};
+use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jstring};
 use std::ffi::c_void;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::OnceLock;
 
 static ANDROID_APPLICATION_CONTEXT: OnceLock<GlobalRef> = OnceLock::new();
@@ -34,4 +35,21 @@ pub extern "system" fn Java_com_mirrormesh_mirrormesh_1flutter_MainActivity_init
     });
 
     JNI_TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_mirrormesh_1flutter_MainActivity_prepareAndroidPairingRuntime(
+    env: JNIEnv,
+    _activity: JObject,
+) -> jstring {
+    let initialized = catch_unwind(AssertUnwindSafe(
+        mm_adapter_android::initialize_pairing_runtime,
+    ));
+    match initialized {
+        Ok(Ok(device_id)) => match env.new_string(device_id.to_string()) {
+            Ok(value) => value.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        Ok(Err(_)) | Err(_) => std::ptr::null_mut(),
+    }
 }

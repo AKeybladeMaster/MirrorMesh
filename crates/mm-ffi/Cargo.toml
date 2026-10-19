@@ -13,6 +13,7 @@ mm-domain.workspace = true
 mm-runtime.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
+mm-adapter-android.workspace = true
 jni.workspace = true
 ndk-context.workspace = true
 

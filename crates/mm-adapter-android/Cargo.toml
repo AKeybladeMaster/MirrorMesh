@@ -16,4 +16,6 @@ zeroize.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
 libc.workspace = true
+mm-runtime.workspace = true
+mm-store.workspace = true
 ndk-context.workspace = true

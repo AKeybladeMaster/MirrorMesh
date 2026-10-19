@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'android_pairing_bootstrap.dart';
 import 'annotation_geometry.dart';
 import 'annotation_overlay.dart';
 import 'rust_session_status.dart';
@@ -66,6 +69,9 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   int _selectedIndex = 0;
   _DemoReceiverState _demoReceiverState = _DemoReceiverState.undiscovered;
   bool _annotationEnabled = false;
+  bool _androidPairingPreparing = false;
+  String? _androidPairingDeviceId;
+  String? _androidPairingError;
   List<AnnotationStroke> _demoStrokes = [];
   Color _demoStrokeColor = const Color(0xFF61D7C5);
   double _demoStrokeWidth = 4;
@@ -122,6 +128,10 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
           2 => _DevicesPage(
             demoReceiverState: _demoReceiverState,
             onConnectDemo: _connectDemoReceiver,
+            androidPairingPreparing: _androidPairingPreparing,
+            androidPairingDeviceId: _androidPairingDeviceId,
+            androidPairingError: _androidPairingError,
+            onPrepareAndroidPairing: _prepareAndroidPairing,
           ),
           _ => _SettingsPage(rustSessionStatus: widget.rustSessionStatus),
         };
@@ -225,6 +235,33 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       return;
     }
     setState(() => _demoReceiverState = _DemoReceiverState.pairing);
+  }
+
+  Future<void> _prepareAndroidPairing() async {
+    if (_androidPairingPreparing || _androidPairingDeviceId != null) return;
+    setState(() {
+      _androidPairingPreparing = true;
+      _androidPairingError = null;
+    });
+    try {
+      final deviceId = await const AndroidPairingBootstrap().prepare();
+      if (!mounted) return;
+      setState(() => _androidPairingDeviceId = deviceId);
+    } on PlatformException {
+      if (!mounted) return;
+      setState(
+        () => _androidPairingError =
+            'Android could not prepare local pairing support. Try again later.',
+      );
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(
+        () => _androidPairingError =
+            'The Android pairing service is unavailable in this build.',
+      );
+    } finally {
+      if (mounted) setState(() => _androidPairingPreparing = false);
+    }
   }
 
   void _disconnectDemoReceiver() {
@@ -679,10 +716,18 @@ class _DevicesPage extends StatelessWidget {
   const _DevicesPage({
     required this.demoReceiverState,
     required this.onConnectDemo,
+    required this.androidPairingPreparing,
+    required this.androidPairingDeviceId,
+    required this.androidPairingError,
+    required this.onPrepareAndroidPairing,
   });
 
   final _DemoReceiverState demoReceiverState;
   final VoidCallback onConnectDemo;
+  final bool androidPairingPreparing;
+  final String? androidPairingDeviceId;
+  final String? androidPairingError;
+  final VoidCallback onPrepareAndroidPairing;
 
   @override
   Widget build(BuildContext context) {
@@ -746,6 +791,62 @@ class _DevicesPage extends StatelessWidget {
           title: 'Live pairing is not available yet',
           message: 'Network discovery, identity verification, trusted-device storage, and revocation are not implemented in this shell.',
         ),
+        if (Platform.isAndroid) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Prepare this device for pairing',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'This opens the local Android identity and trusted-peer database. It does not contact another device, grant trust, or start screen capture.',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    key: const Key('prepare-android-pairing-button'),
+                    onPressed:
+                        androidPairingPreparing ||
+                            androidPairingDeviceId != null
+                        ? null
+                        : onPrepareAndroidPairing,
+                    icon: androidPairingPreparing
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.shield_outlined),
+                    label: Text(
+                      androidPairingDeviceId != null
+                          ? 'Pairing support ready'
+                          : androidPairingPreparing
+                          ? 'Preparing…'
+                          : 'Prepare pairing support',
+                    ),
+                  ),
+                  if (androidPairingDeviceId != null) ...[
+                    const SizedBox(height: 8),
+                    SelectableText('Local device ID: $androidPairingDeviceId'),
+                  ],
+                  if (androidPairingError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      androidPairingError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
