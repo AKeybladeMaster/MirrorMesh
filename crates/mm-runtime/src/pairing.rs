@@ -1,5 +1,6 @@
 use std::fmt;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use mm_application::{
     PairingCoordinator, PairingCoordinatorError, PairingInvitation, PairingProof,
@@ -88,28 +89,31 @@ impl From<PairingAttemptLimiterError> for PairingRuntimeError {
 /// and recreate it after rotating or deleting the local identity before issuing
 /// another invitation. Keep it alive for the listener lifetime so its in-memory
 /// per-source attempt budgets are not reset between requests.
-pub struct PairingRuntime<'a, P, I>
+pub struct PairingRuntime<P, I>
 where
     P: TrustedPeerPort,
     I: LocalPairingIdentityPort + PairingIdentityPort,
 {
-    coordinator: PairingCoordinator<'a, P, I>,
+    coordinator: PairingCoordinator<P, I>,
     attempt_limiter: PairingAttemptLimiter,
 }
 
-impl<'a, P, I> PairingRuntime<'a, P, I>
+impl<P, I> PairingRuntime<P, I>
 where
     P: TrustedPeerPort,
     I: LocalPairingIdentityPort + PairingIdentityPort,
 {
     /// Initializes pairing from the current platform identity and trusted-peer store.
     ///
+    /// The runtime retains shared ownership of both ports. Keep this instance alive across
+    /// listener callbacks to preserve its invitation nonces and attempt limiter.
+    ///
     /// The nonce registry uses the operating system random source. Identity errors
     /// fail initialization; there is no ephemeral-key fallback.
     pub fn new(
         local_device_id: DeviceId,
-        identity: &'a I,
-        peers: &'a P,
+        identity: Arc<I>,
+        peers: Arc<P>,
     ) -> Result<Self, PortError> {
         Self::new_with_limiter(
             local_device_id,
@@ -122,8 +126,8 @@ where
     /// Initializes pairing with an injected attempt limiter for explicit policy ownership.
     pub fn new_with_limiter(
         local_device_id: DeviceId,
-        identity: &'a I,
-        peers: &'a P,
+        identity: Arc<I>,
+        peers: Arc<P>,
         attempt_limiter: PairingAttemptLimiter,
     ) -> Result<Self, PortError> {
         let local_public_key = identity.local_public_key()?;
@@ -132,7 +136,7 @@ where
             local_device_id,
             local_fingerprint,
             PendingPairingNonces::new(),
-            identity,
+            Arc::clone(&identity),
             peers,
         );
         Ok(Self {
@@ -291,6 +295,7 @@ fn decode_nibble(value: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -465,17 +470,31 @@ mod tests {
         )
     }
 
+    fn owned_pairing_runtime() -> (
+        PairingRuntime<FakeTrustedPeers, FakeIdentity>,
+        Arc<FakeTrustedPeers>,
+    ) {
+        let identity = Arc::new(FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap()));
+        let peers = Arc::new(FakeTrustedPeers::default());
+        let runtime = PairingRuntime::new(RECEIVER_ID, identity, Arc::clone(&peers)).unwrap();
+        (runtime, peers)
+    }
+
     fn source_ip() -> IpAddr {
         IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))
     }
 
     #[test]
     fn cooldown_rejects_before_signature_verification() {
-        let identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
-        let store = FakeTrustedPeers::default();
-        let mut runtime =
-            PairingRuntime::new_with_limiter(RECEIVER_ID, &identity, &store, admission_limiter(1))
-                .unwrap();
+        let identity = Arc::new(FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap()));
+        let store = Arc::new(FakeTrustedPeers::default());
+        let mut runtime = PairingRuntime::new_with_limiter(
+            RECEIVER_ID,
+            Arc::clone(&identity),
+            Arc::clone(&store),
+            admission_limiter(1),
+        )
+        .unwrap();
         let invitation = runtime
             .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
             .unwrap();
@@ -511,11 +530,15 @@ mod tests {
 
     #[test]
     fn approved_pairing_clears_the_admitted_source_budget() {
-        let identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
-        let store = FakeTrustedPeers::default();
-        let mut runtime =
-            PairingRuntime::new_with_limiter(RECEIVER_ID, &identity, &store, admission_limiter(1))
-                .unwrap();
+        let identity = Arc::new(FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap()));
+        let store = Arc::new(FakeTrustedPeers::default());
+        let mut runtime = PairingRuntime::new_with_limiter(
+            RECEIVER_ID,
+            Arc::clone(&identity),
+            Arc::clone(&store),
+            admission_limiter(1),
+        )
+        .unwrap();
         let invitation = runtime
             .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
             .unwrap();
@@ -548,9 +571,10 @@ mod tests {
 
     #[test]
     fn derives_local_fingerprint_and_persists_only_after_explicit_approval() {
-        let identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
-        let store = FakeTrustedPeers::default();
-        let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &store).unwrap();
+        let identity = Arc::new(FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap()));
+        let store = Arc::new(FakeTrustedPeers::default());
+        let mut runtime =
+            PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&store)).unwrap();
 
         let invitation = runtime
             .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
@@ -572,12 +596,31 @@ mod tests {
     }
 
     #[test]
+    fn owned_runtime_keeps_invitation_nonce_and_shared_store_across_calls() {
+        let (mut runtime, peers) = owned_pairing_runtime();
+        let invitation = runtime
+            .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
+            .unwrap();
+        let nonce = invitation_nonce(invitation.uri());
+        let pending = runtime
+            .verify_proof_from(source_ip(), pairing_proof(nonce), 101)
+            .unwrap();
+
+        assert!(peers.list_peers().unwrap().is_empty());
+        runtime
+            .approve(pending, requested_grants(), 102, 500)
+            .unwrap();
+
+        assert_eq!(peers.list_peers().unwrap().len(), 1);
+    }
+
+    #[test]
     fn refuses_to_start_when_local_identity_is_unavailable() {
-        let identity = FakeIdentity::failing_local_key();
-        let store = FakeTrustedPeers::default();
+        let identity = Arc::new(FakeIdentity::failing_local_key());
+        let store = Arc::new(FakeTrustedPeers::default());
 
         assert!(matches!(
-            PairingRuntime::new(RECEIVER_ID, &identity, &store),
+            PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&store)),
             Err(PortError::Unavailable)
         ));
         assert!(store.list_peers().unwrap().is_empty());
@@ -587,10 +630,11 @@ mod tests {
     fn refuses_to_start_when_local_fingerprint_is_unavailable() {
         let mut identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
         identity.fail_fingerprint = true;
-        let store = FakeTrustedPeers::default();
+        let identity = Arc::new(identity);
+        let store = Arc::new(FakeTrustedPeers::default());
 
         assert!(matches!(
-            PairingRuntime::new(RECEIVER_ID, &identity, &store),
+            PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&store)),
             Err(PortError::StorageFailure)
         ));
         assert!(store.list_peers().unwrap().is_empty());
@@ -600,8 +644,10 @@ mod tests {
     fn rejects_sender_signature_without_persisting_trust() {
         let mut identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
         identity.reject_signature = true;
-        let store = FakeTrustedPeers::default();
-        let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &store).unwrap();
+        let identity = Arc::new(identity);
+        let store = Arc::new(FakeTrustedPeers::default());
+        let mut runtime =
+            PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&store)).unwrap();
         let invitation = runtime
             .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
             .unwrap();
@@ -618,9 +664,10 @@ mod tests {
 
     #[test]
     fn reports_storage_failure_only_after_explicit_approval() {
-        let identity = FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap());
-        let store = FakeTrustedPeers::failing_save();
-        let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &store).unwrap();
+        let identity = Arc::new(FakeIdentity::new(PeerPublicKey::new(vec![9; 32]).unwrap()));
+        let store = Arc::new(FakeTrustedPeers::failing_save());
+        let mut runtime =
+            PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&store)).unwrap();
         let invitation = runtime
             .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
             .unwrap();

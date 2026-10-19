@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 use mm_domain::{DeviceId, SessionId, TrustedPeerGrants};
 use mm_ports::{PortError, TransportPort, TrustedPeerPort};
@@ -90,23 +91,24 @@ impl std::error::Error for TrustedSessionError {}
 /// runtime blocks new sessions for that peer and closes every tracked transport even if
 /// persistence fails. Failed closes remain tracked so the caller can retry with
 /// [`Self::stop_session`]. A storage error means the revocation may not survive process restart.
-pub struct TrustedSessionRuntime<'a, P, T>
+pub struct TrustedSessionRuntime<P, T>
 where
     P: TrustedPeerPort,
     T: TransportPort,
 {
-    peers: &'a P,
+    peers: Arc<P>,
     transport: T,
     sessions: HashMap<SessionId, DeviceId>,
     revoked_peers: HashSet<DeviceId>,
 }
 
-impl<'a, P, T> TrustedSessionRuntime<'a, P, T>
+impl<P, T> TrustedSessionRuntime<P, T>
 where
     P: TrustedPeerPort,
     T: TransportPort,
 {
-    pub fn new(peers: &'a P, transport: T) -> Self {
+    /// Creates a session runtime that retains shared ownership of its trusted-peer store.
+    pub fn new(peers: Arc<P>, transport: T) -> Self {
         Self {
             peers,
             transport,
@@ -342,10 +344,10 @@ mod tests {
 
     #[test]
     fn refuses_to_start_a_session_for_an_untrusted_peer() {
-        let peers = FakePeers::default();
+        let peers = Arc::new(FakePeers::default());
         let transport = FakeTransport::default();
         let transport_state = Arc::clone(&transport.0);
-        let mut runtime = TrustedSessionRuntime::new(&peers, transport);
+        let mut runtime = TrustedSessionRuntime::new(Arc::clone(&peers), transport);
 
         assert_eq!(
             runtime.start_session(peer(1), session(1), view_scope()),
@@ -356,11 +358,11 @@ mod tests {
 
     #[test]
     fn rejects_a_session_scope_the_peer_was_not_granted() {
-        let peers = FakePeers::default();
+        let peers = Arc::new(FakePeers::default());
         peers.trust_with(peer(1), view_scope());
         let transport = FakeTransport::default();
         let transport_state = Arc::clone(&transport.0);
-        let mut runtime = TrustedSessionRuntime::new(&peers, transport);
+        let mut runtime = TrustedSessionRuntime::new(Arc::clone(&peers), transport);
 
         assert_eq!(
             runtime.start_session(peer(1), session(1), send_scope()),
@@ -378,7 +380,7 @@ mod tests {
 
     #[test]
     fn failed_start_is_closed_and_cleanup_failure_remains_tracked() {
-        let peers = FakePeers::default();
+        let peers = Arc::new(FakePeers::default());
         peers.trust(peer(1));
         let transport = FakeTransport::default();
         let transport_state = Arc::clone(&transport.0);
@@ -388,7 +390,7 @@ mod tests {
             state.fail_start.insert(session(2));
             state.fail_close.insert(session(2));
         }
-        let mut runtime = TrustedSessionRuntime::new(&peers, transport);
+        let mut runtime = TrustedSessionRuntime::new(Arc::clone(&peers), transport);
 
         assert_eq!(
             runtime.start_session(peer(1), session(1), view_scope()),
@@ -424,12 +426,12 @@ mod tests {
 
     #[test]
     fn revoking_a_peer_closes_its_sessions_and_blocks_reconnection() {
-        let peers = FakePeers::default();
+        let peers = Arc::new(FakePeers::default());
         peers.trust(peer(1));
         peers.trust(peer(2));
         let transport = FakeTransport::default();
         let transport_state = Arc::clone(&transport.0);
-        let mut runtime = TrustedSessionRuntime::new(&peers, transport);
+        let mut runtime = TrustedSessionRuntime::new(Arc::clone(&peers), transport);
 
         runtime
             .start_session(peer(1), session(1), view_scope())
@@ -461,7 +463,7 @@ mod tests {
 
     #[test]
     fn failed_revocation_close_remains_tracked_and_can_be_retried() {
-        let peers = FakePeers::default();
+        let peers = Arc::new(FakePeers::default());
         peers.trust(peer(1));
         let transport = FakeTransport::default();
         let transport_state = Arc::clone(&transport.0);
@@ -470,7 +472,7 @@ mod tests {
             .unwrap()
             .fail_close
             .insert(session(1));
-        let mut runtime = TrustedSessionRuntime::new(&peers, transport);
+        let mut runtime = TrustedSessionRuntime::new(Arc::clone(&peers), transport);
         runtime
             .start_session(peer(1), session(1), view_scope())
             .unwrap();
@@ -498,12 +500,12 @@ mod tests {
 
     #[test]
     fn store_failure_still_closes_sessions_and_blocks_peer_locally() {
-        let peers = FakePeers::default();
+        let peers = Arc::new(FakePeers::default());
         peers.trust(peer(1));
         peers.fail_revoke.store(true, Ordering::SeqCst);
         let transport = FakeTransport::default();
         let transport_state = Arc::clone(&transport.0);
-        let mut runtime = TrustedSessionRuntime::new(&peers, transport);
+        let mut runtime = TrustedSessionRuntime::new(Arc::clone(&peers), transport);
         runtime
             .start_session(peer(1), session(1), view_scope())
             .unwrap();

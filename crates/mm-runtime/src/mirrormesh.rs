@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use mm_application::{PairingCoordinatorError, PairingInvitation, PairingProof};
 use mm_domain::{DeviceId, SessionId, TrustedPeer, TrustedPeerGrants};
@@ -15,31 +16,34 @@ use crate::{
 ///
 /// Keep one instance for the local identity lifecycle. Recreate it after identity rotation or
 /// deletion, and serialize its mutating methods on one application runtime owner.
-pub struct MirrorMeshRuntime<'a, P, I, T>
+pub struct MirrorMeshRuntime<P, I, T>
 where
     P: TrustedPeerPort,
     I: LocalPairingIdentityPort + PairingIdentityPort,
     T: TransportPort,
 {
-    pairing: PairingRuntime<'a, P, I>,
-    sessions: TrustedSessionRuntime<'a, P, T>,
+    pairing: PairingRuntime<P, I>,
+    sessions: TrustedSessionRuntime<P, T>,
 }
 
-impl<'a, P, I, T> MirrorMeshRuntime<'a, P, I, T>
+impl<P, I, T> MirrorMeshRuntime<P, I, T>
 where
     P: TrustedPeerPort,
     I: LocalPairingIdentityPort + PairingIdentityPort,
     T: TransportPort,
 {
     /// Builds both runtime components over the same identity and trusted-peer store.
+    ///
+    /// The composed runtime retains shared ownership of these ports. Both components use the
+    /// same peer-store instance; keep one composed runtime alive for the application lifecycle.
     pub fn new(
         local_device_id: DeviceId,
-        identity: &'a I,
-        peers: &'a P,
+        identity: Arc<I>,
+        peers: Arc<P>,
         transport: T,
     ) -> Result<Self, PortError> {
         Ok(Self {
-            pairing: PairingRuntime::new(local_device_id, identity, peers)?,
+            pairing: PairingRuntime::new(local_device_id, identity, Arc::clone(&peers))?,
             sessions: TrustedSessionRuntime::new(peers, transport),
         })
     }

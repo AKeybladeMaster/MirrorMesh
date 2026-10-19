@@ -100,16 +100,17 @@ impl PairingIdentityPort for TestIdentity {
 }
 
 fn run_server_child() {
-    let identity = TestIdentity::new(RECEIVER_SEED);
-    let peers = SqliteTrustedPeers::open_in_memory().expect("open in-memory trusted-peer store");
+    let identity = Arc::new(TestIdentity::new(RECEIVER_SEED));
+    let peers =
+        Arc::new(SqliteTrustedPeers::open_in_memory().expect("open in-memory trusted-peer store"));
     let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
     let tls_identity: Arc<dyn LocalTlsIdentityPort> = Arc::new(TestIdentity::new(RECEIVER_SEED));
     let tls = tls13_server_config(tls_identity).expect("build QR identity TLS config");
     let listener = mm_adapter_signaling::WssPairingListener::bind(address, tls)
         .expect("bind local WSS listener");
     let local_address = listener.local_addr().expect("read bound listener address");
-    let mut runtime =
-        PairingRuntime::new(RECEIVER_ID, &identity, &peers).expect("build pairing runtime");
+    let mut runtime = PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&peers))
+        .expect("build pairing runtime");
     let invitation = runtime
         .create_invitation(
             &local_address.to_string(),

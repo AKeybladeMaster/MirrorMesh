@@ -89,14 +89,14 @@ fn revoke_closes_only_owned_sessions_and_survives_sqlite_reopen() {
     let second_peer = peer(2, 22);
     let first_peer_id = first_peer.id();
     let second_peer_id = second_peer.id();
-    let store = SqliteTrustedPeers::open(database.file()).unwrap();
+    let store = Arc::new(SqliteTrustedPeers::open(database.file()).unwrap());
     store.save_peer(&first_peer).unwrap();
     store.save_peer(&second_peer).unwrap();
 
     let transport = RecordingTransport::default();
     let transport_state = Arc::clone(&transport.0);
     {
-        let mut runtime = TrustedSessionRuntime::new(&store, transport);
+        let mut runtime = TrustedSessionRuntime::new(Arc::clone(&store), transport);
         runtime
             .start_session(first_peer_id, session(1), view_scope())
             .unwrap();
@@ -118,13 +118,14 @@ fn revoke_closes_only_owned_sessions_and_survives_sqlite_reopen() {
     }
     drop(store);
 
-    let reopened_store = SqliteTrustedPeers::open(database.file()).unwrap();
+    let reopened_store = Arc::new(SqliteTrustedPeers::open(database.file()).unwrap());
     assert!(!reopened_store.is_trusted(first_peer_id).unwrap());
     assert!(reopened_store.is_trusted(second_peer_id).unwrap());
 
     let restarted_transport = RecordingTransport::default();
     let restarted_state = Arc::clone(&restarted_transport.0);
-    let mut restarted_runtime = TrustedSessionRuntime::new(&reopened_store, restarted_transport);
+    let mut restarted_runtime =
+        TrustedSessionRuntime::new(Arc::clone(&reopened_store), restarted_transport);
     assert_eq!(
         restarted_runtime.start_session(first_peer_id, session(4), view_scope()),
         Err(TrustedSessionError::PeerNotTrusted)

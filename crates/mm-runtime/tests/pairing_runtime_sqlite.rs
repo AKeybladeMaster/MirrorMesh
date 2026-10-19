@@ -99,7 +99,7 @@ impl PairingIdentityPort for TestIdentity {
 }
 
 fn invitation_nonce(
-    runtime: &mut PairingRuntime<'_, SqliteTrustedPeers, TestIdentity>,
+    runtime: &mut PairingRuntime<SqliteTrustedPeers, TestIdentity>,
 ) -> PairingNonce {
     let invitation = runtime
         .create_invitation("127.0.0.1:8765", &[8765], 100, 200)
@@ -176,9 +176,10 @@ fn signed_pair_begin_frame(nonce: PairingNonce, tamper_signature: bool) -> Vec<u
 
 #[test]
 fn verifies_real_signature_and_persists_sqlite_trust_only_after_approval() {
-    let identity = TestIdentity::new([0x11; 32]);
-    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
-    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let identity = Arc::new(TestIdentity::new([0x11; 32]));
+    let peers = Arc::new(SqliteTrustedPeers::open_in_memory().unwrap());
+    let mut runtime =
+        PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&peers)).unwrap();
     let nonce = invitation_nonce(&mut runtime);
 
     let pending = runtime
@@ -204,9 +205,10 @@ fn verifies_real_signature_and_persists_sqlite_trust_only_after_approval() {
 
 #[test]
 fn rejects_modified_real_signature_without_persisting_trust() {
-    let identity = TestIdentity::new([0x11; 32]);
-    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
-    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let identity = Arc::new(TestIdentity::new([0x11; 32]));
+    let peers = Arc::new(SqliteTrustedPeers::open_in_memory().unwrap());
+    let mut runtime =
+        PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&peers)).unwrap();
     let nonce = invitation_nonce(&mut runtime);
 
     assert!(matches!(
@@ -220,9 +222,10 @@ fn rejects_modified_real_signature_without_persisting_trust() {
 
 #[test]
 fn verifies_signed_pair_begin_frame_without_persisting_before_approval() {
-    let identity = TestIdentity::new([0x11; 32]);
-    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
-    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let identity = Arc::new(TestIdentity::new([0x11; 32]));
+    let peers = Arc::new(SqliteTrustedPeers::open_in_memory().unwrap());
+    let mut runtime =
+        PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&peers)).unwrap();
     let nonce = invitation_nonce(&mut runtime);
 
     let pending = runtime
@@ -237,9 +240,10 @@ fn verifies_signed_pair_begin_frame_without_persisting_before_approval() {
 
 #[test]
 fn rejects_tampered_pair_begin_frame_without_persisting_trust() {
-    let identity = TestIdentity::new([0x11; 32]);
-    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
-    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let identity = Arc::new(TestIdentity::new([0x11; 32]));
+    let peers = Arc::new(SqliteTrustedPeers::open_in_memory().unwrap());
+    let mut runtime =
+        PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&peers)).unwrap();
     let nonce = invitation_nonce(&mut runtime);
 
     assert!(matches!(
@@ -253,9 +257,10 @@ fn rejects_tampered_pair_begin_frame_without_persisting_trust() {
 
 #[test]
 fn malformed_frames_consume_the_source_attempt_budget_before_parsing() {
-    let identity = TestIdentity::new([0x11; 32]);
-    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
-    let mut runtime = PairingRuntime::new(RECEIVER_ID, &identity, &peers).unwrap();
+    let identity = Arc::new(TestIdentity::new([0x11; 32]));
+    let peers = Arc::new(SqliteTrustedPeers::open_in_memory().unwrap());
+    let mut runtime =
+        PairingRuntime::new(RECEIVER_ID, Arc::clone(&identity), Arc::clone(&peers)).unwrap();
     let nonce = invitation_nonce(&mut runtime);
 
     for _ in 0..5 {
@@ -275,11 +280,17 @@ fn malformed_frames_consume_the_source_attempt_budget_before_parsing() {
 
 #[test]
 fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
-    let identity = TestIdentity::new([0x11; 32]);
-    let peers = SqliteTrustedPeers::open_in_memory().unwrap();
+    let identity = Arc::new(TestIdentity::new([0x11; 32]));
+    let peers = Arc::new(SqliteTrustedPeers::open_in_memory().unwrap());
     let transport = RecordingTransport::default();
     let transport_log = Arc::clone(&transport.0);
-    let mut runtime = MirrorMeshRuntime::new(RECEIVER_ID, &identity, &peers, transport).unwrap();
+    let mut runtime = MirrorMeshRuntime::new(
+        RECEIVER_ID,
+        Arc::clone(&identity),
+        Arc::clone(&peers),
+        transport,
+    )
+    .unwrap();
     let session_id = SessionId::from_bytes([9; 16]);
 
     assert_eq!(
@@ -325,8 +336,13 @@ fn composed_runtime_pairs_starts_and_revokes_through_one_store() {
 
     let restarted_transport = RecordingTransport::default();
     let restarted_log = Arc::clone(&restarted_transport.0);
-    let mut restarted =
-        MirrorMeshRuntime::new(RECEIVER_ID, &identity, &peers, restarted_transport).unwrap();
+    let mut restarted = MirrorMeshRuntime::new(
+        RECEIVER_ID,
+        Arc::clone(&identity),
+        Arc::clone(&peers),
+        restarted_transport,
+    )
+    .unwrap();
     assert_eq!(
         restarted.start_session(SENDER_ID, SessionId::from_bytes([10; 16]), view_scope(),),
         Err(TrustedSessionError::PeerNotTrusted)

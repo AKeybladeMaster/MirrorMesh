@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use mm_domain::{
     DeviceId, PeerFingerprint, PeerGrant, PeerPublicKey, TrustedPeer, TrustedPeerGrants,
@@ -27,8 +27,8 @@ impl PairingNonceSource for FixedNonceSource {
     }
 }
 
-#[derive(Default)]
-struct MemoryPeers(Mutex<HashMap<DeviceId, TrustedPeer>>);
+#[derive(Clone, Default)]
+struct MemoryPeers(Arc<Mutex<HashMap<DeviceId, TrustedPeer>>>);
 
 impl TrustedPeerPort for MemoryPeers {
     fn get_peer(&self, peer_id: DeviceId) -> Result<Option<TrustedPeer>, PortError> {
@@ -67,10 +67,10 @@ impl TrustedPeerPort for MemoryPeers {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct FakeIdentity {
-    verified_messages: Mutex<Vec<Vec<u8>>>,
-    signed_messages: Mutex<Vec<Vec<u8>>>,
+    verified_messages: Arc<Mutex<Vec<Vec<u8>>>>,
+    signed_messages: Arc<Mutex<Vec<Vec<u8>>>>,
     fail_signing: bool,
 }
 
@@ -128,20 +128,20 @@ impl PairingIdentityPort for FakeIdentity {
     }
 }
 
-fn coordinator<'a>(
-    peers: &'a MemoryPeers,
-    identity: &'a FakeIdentity,
-) -> PairingCoordinator<'a, MemoryPeers, FakeIdentity> {
+fn coordinator(
+    peers: &MemoryPeers,
+    identity: &FakeIdentity,
+) -> PairingCoordinator<MemoryPeers, FakeIdentity> {
     PairingCoordinator::new(
         RECEIVER_ID,
         PeerFingerprint::from_bytes([9; 32]),
         PendingPairingNonces::with_source(FixedNonceSource(7)),
-        identity,
-        peers,
+        Arc::new(identity.clone()),
+        Arc::new(peers.clone()),
     )
 }
 
-fn invitation(coordinator: &mut PairingCoordinator<'_, MemoryPeers, FakeIdentity>) -> String {
+fn invitation(coordinator: &mut PairingCoordinator<MemoryPeers, FakeIdentity>) -> String {
     coordinator
         .create_invitation("192.168.1.5:8765", &[8765], 100, 1_000)
         .unwrap()
@@ -320,8 +320,8 @@ fn pending_approval_cannot_be_persisted_by_a_different_receiver() {
         DeviceId::from_bytes([4; 16]),
         PeerFingerprint::from_bytes([8; 32]),
         PendingPairingNonces::with_source(FixedNonceSource(9)),
-        &identity,
-        &peers,
+        Arc::new(identity.clone()),
+        Arc::new(peers.clone()),
     );
 
     assert_eq!(

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use mm_domain::{
     DeviceId, MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, PeerFingerprint, PeerGrant, PeerPublicKey,
@@ -243,21 +244,22 @@ impl PendingPairingApproval {
     }
 }
 
-pub struct PairingCoordinator<'a, P: TrustedPeerPort, I: PairingIdentityPort> {
+pub struct PairingCoordinator<P: TrustedPeerPort, I: PairingIdentityPort> {
     local_device_id: DeviceId,
     local_fingerprint: PeerFingerprint,
     nonces: PendingPairingNonces,
-    identity: &'a I,
-    peers: &'a P,
+    identity: Arc<I>,
+    peers: Arc<P>,
 }
 
-impl<'a, P: TrustedPeerPort, I: PairingIdentityPort> PairingCoordinator<'a, P, I> {
+impl<P: TrustedPeerPort, I: PairingIdentityPort> PairingCoordinator<P, I> {
+    /// Creates a coordinator that retains shared ownership of its identity and peer store.
     pub fn new(
         local_device_id: DeviceId,
         local_fingerprint: PeerFingerprint,
         nonces: PendingPairingNonces,
-        identity: &'a I,
-        peers: &'a P,
+        identity: Arc<I>,
+        peers: Arc<P>,
     ) -> Self {
         Self {
             local_device_id,

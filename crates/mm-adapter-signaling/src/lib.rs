@@ -185,7 +185,7 @@ impl WssPairingListener {
     /// Accepts and verifies one pairing request without approving or persisting it.
     pub fn accept_pairing_request<P, I>(
         &self,
-        runtime: &mut PairingRuntime<'_, P, I>,
+        runtime: &mut PairingRuntime<P, I>,
         now_monotonic_ms: u64,
     ) -> Result<PendingPairingConnection, WssListenerError>
     where
