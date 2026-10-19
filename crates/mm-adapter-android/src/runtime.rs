@@ -29,6 +29,7 @@ fn initialize_once<R>(
 
 #[cfg(target_os = "android")]
 mod android {
+    use std::net::SocketAddr;
     use std::sync::{Arc, Mutex, OnceLock};
 
     use mm_domain::DeviceId;
@@ -36,15 +37,20 @@ mod android {
     use mm_runtime::PairingRuntime;
     use mm_store::SqliteTrustedPeers;
 
-    use crate::AndroidPairingIdentity;
+    use crate::{AndroidPairingIdentity, AndroidTvPairingService, AndroidTvPairingServiceError};
 
     use super::device_id_from_fingerprint;
 
     const TRUSTED_PEERS_DATABASE: &str = "mirrormesh-trusted-peers-v1.sqlite";
 
     type AndroidPairingRuntime = PairingRuntime<SqliteTrustedPeers, AndroidPairingIdentity>;
+    #[derive(Clone)]
+    struct AndroidPairingOwner {
+        identity: Arc<AndroidPairingIdentity>,
+        runtime: Arc<Mutex<AndroidPairingRuntime>>,
+    }
 
-    static ANDROID_PAIRING_RUNTIME: OnceLock<Mutex<Option<(DeviceId, AndroidPairingRuntime)>>> =
+    static ANDROID_PAIRING_RUNTIME: OnceLock<Mutex<Option<(DeviceId, AndroidPairingOwner)>>> =
         OnceLock::new();
 
     pub(super) fn initialize_pairing_runtime() -> Result<DeviceId, PortError> {
@@ -58,14 +64,40 @@ mod android {
                 SqliteTrustedPeers::open(directory.join(TRUSTED_PEERS_DATABASE))
                     .map_err(|_| PortError::StorageFailure)?,
             );
-            let pairing_runtime = PairingRuntime::new(device_id, identity, trusted_peers)?;
-            Ok((device_id, pairing_runtime))
+            let pairing_runtime =
+                PairingRuntime::new(device_id, Arc::clone(&identity), trusted_peers)?;
+            Ok((
+                device_id,
+                AndroidPairingOwner {
+                    identity,
+                    runtime: Arc::new(Mutex::new(pairing_runtime)),
+                },
+            ))
         })
+    }
+
+    pub(super) fn create_tv_pairing_service(
+        address: SocketAddr,
+    ) -> Result<
+        AndroidTvPairingService<SqliteTrustedPeers, AndroidPairingIdentity>,
+        AndroidTvPairingServiceError,
+    > {
+        initialize_pairing_runtime().map_err(AndroidTvPairingServiceError::Platform)?;
+        let owner = ANDROID_PAIRING_RUNTIME
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .map_err(|_| AndroidTvPairingServiceError::Platform(PortError::StorageFailure))?
+            .as_ref()
+            .map(|(_, owner)| owner.clone())
+            .ok_or(AndroidTvPairingServiceError::Platform(
+                PortError::Unavailable,
+            ))?;
+        AndroidTvPairingService::bind_shared(address, owner.runtime, owner.identity)
     }
 }
 
 #[cfg(target_os = "android")]
-pub(super) use android::initialize_pairing_runtime;
+pub(super) use android::{create_tv_pairing_service, initialize_pairing_runtime};
 
 #[cfg(test)]
 mod tests {

@@ -37,6 +37,7 @@ mm-adapter-win = { path = "crates/mm-adapter-win" }
 mm-adapter-linux = { path = "crates/mm-adapter-linux" }
 mm-adapter-android = { path = "crates/mm-adapter-android" }
 mm-adapter-tls = { path = "crates/mm-adapter-tls" }
+mm-adapter-signaling = { path = "crates/mm-adapter-signaling" }
 mm-store = { path = "crates/mm-store" }
 mm-runtime = { path = "crates/mm-runtime" }
 mm-transport = { path = "crates/mm-transport" }
