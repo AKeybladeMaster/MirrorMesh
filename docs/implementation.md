@@ -14,6 +14,12 @@ The shared protocol now encodes `session.offer` using the existing v1 schema. Th
 
 This is signaling and negotiation source only. No media track is attached, so no RTP video is sent. Rust protocol/WSS tests, fake-backed Flutter tests, Windows Rust-target checks, and a direct MSVC runner compile pass. The full Windows bundle, Android TV APK, app-to-app peer connection, ICE connectivity and media remain unverified. Proposed [ADR-0042](adr/0042-windows-sender-session-signaling.md) records the ownership boundary and limits.
 
+## Task 42 — Windows desktop track attachment
+
+After rechecking the TV's approved pairing state, the Windows Devices page lists native screen/window source metadata and asks the user to choose a source. The pinned `flutter_webrtc` adapter obtains one silent native video track and attaches it to the existing peer before creating the offer. The synthetic color-bar card is a visual target inside the app window, not a native synthetic frame generator. Track stop and peer cleanup are wired into the controller lifecycle. No frames cross Dart or Rust FFI.
+
+This is a source integration candidate only. The plugin source list is an in-app picker, and its desktop capture implementation has not been established as Windows Graphics Capture or the OS-owned picker. No Windows build, app-to-app WebRTC exchange, H.264 RTP, decoded TV frame, screenshot, or physical-device run is verified. Proposed [ADR-0043](adr/0043-windows-desktop-track-attachment.md) records the boundary; replace this capture provider with the native WGC picker/capture adapter next.
+
 ## Task 25 Android explicit-action runtime assembly (2026-10-19)
 
 The Android phone app now opens `AndroidPairingIdentity` and `SqliteTrustedPeers` only after the user presses **Prepare pairing support**. JNI creates one process-owned `PairingRuntime`, stored beneath `noBackupFilesDir`, and returns a stable local UUIDv8 derived from the public-key fingerprint. The action opens local state only: it does not discover or contact peers, grant trust, request capture, or stream. Proposed [ADR-0030](adr/0030-android-pairing-runtime-assembly.md) records the assembly and its limits. Host Rust and Flutter gates pass; Android ARM64 compilation stops in `dart-sys` because NDK clang is unavailable, so no APK or device behavior is verified.

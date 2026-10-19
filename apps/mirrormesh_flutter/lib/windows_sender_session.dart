@@ -20,8 +20,8 @@ enum WindowsSenderSessionState {
 
 /// Coordinates a real libwebrtc offer with the Windows authenticated WSS bridge.
 ///
-/// This creates a send-only H.264-capable video transceiver but does not attach a media track.
-/// Capture and synthetic media sources are supplied by a later native adapter.
+/// The user selects a desktop source before this controller opens native capture;
+/// the selected native video track is attached before the SDP offer is created.
 final class WindowsSenderSessionController {
   WindowsSenderSessionController({
     required this.pairing,
@@ -57,7 +57,19 @@ final class WindowsSenderSessionController {
   Stream<WindowsSenderSessionState> get states => _states.stream;
   Stream<WebRtcEngineEvent> get rtcEvents => _rtcEvents.stream;
 
-  Future<String> start({required int requestId}) async {
+  Future<List<WebRtcDesktopCaptureSource>> availableCaptureSources() {
+    if (_closed || _starting || _engine != null) {
+      throw StateError(
+        'Capture sources cannot be listed while a session is active.',
+      );
+    }
+    return _engineFactory.listDesktopCaptureSources();
+  }
+
+  Future<String> start({
+    required int requestId,
+    required String sourceId,
+  }) async {
     if (_closed || _starting || _sessionId != null || _engine != null) {
       throw StateError('Windows sender session is already active or closed.');
     }
@@ -69,8 +81,12 @@ final class WindowsSenderSessionController {
     _engine = engine;
 
     try {
+      final pairingStatus = await pairing.pollSenderPairing(requestId);
+      if (pairingStatus.state != WindowsSenderPairingState.approved) {
+        throw StateError('The Android TV has not approved this pairing.');
+      }
       await engine.initialize();
-      await engine.addSendOnlyVideoTransceiver();
+      await engine.startDesktopCapture(sourceId: sourceId);
       _engineEvents = engine.events.listen(
         _onRtcEvent,
         onError: (Object error, StackTrace stackTrace) {

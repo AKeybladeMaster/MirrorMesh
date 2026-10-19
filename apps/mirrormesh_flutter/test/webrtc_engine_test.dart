@@ -89,6 +89,39 @@ void main() {
     },
   );
 
+  test('lists desktop sources without opening a peer connection', () async {
+    final factory = _FakeFactory();
+    factory.captureSources.addAll(const [
+      WebRtcDesktopCaptureSource(
+        id: 'screen-1',
+        name: 'Entire screen',
+        type: WebRtcDesktopCaptureSourceType.screen,
+      ),
+      WebRtcDesktopCaptureSource(
+        id: 'window-2',
+        name: 'MirrorMesh',
+        type: WebRtcDesktopCaptureSourceType.window,
+      ),
+    ]);
+    final engine = FlutterWebRtcEngine(factory: factory);
+
+    expect(await engine.listDesktopCaptureSources(), factory.captureSources);
+    expect(factory.createCalls, 0);
+  });
+
+  test('starts and stops the selected desktop video track', () async {
+    final factory = _FakeFactory();
+    final engine = FlutterWebRtcEngine(factory: factory);
+    await engine.initialize();
+
+    await engine.startDesktopCapture(sourceId: 'window-2');
+    expect(factory.peer.startedCaptureSourceId, 'window-2');
+    await engine.stopDesktopCapture();
+    expect(factory.peer.stopDesktopCaptureCalls, 1);
+
+    await engine.close();
+  });
+
   test('close tears down the peer once and ends the event stream', () async {
     final factory = _FakeFactory();
     final engine = FlutterWebRtcEngine(factory: factory);
@@ -166,6 +199,7 @@ void main() {
 
 final class _FakeFactory implements WebRtcPeerConnectionFactory {
   final _FakePeer peer = _FakePeer();
+  final List<WebRtcDesktopCaptureSource> captureSources = [];
   int createCalls = 0;
 
   @override
@@ -173,6 +207,10 @@ final class _FakeFactory implements WebRtcPeerConnectionFactory {
     createCalls++;
     return peer;
   }
+
+  @override
+  Future<List<WebRtcDesktopCaptureSource>> listDesktopCaptureSources() async =>
+      captureSources;
 }
 
 final class _FakePeer implements WebRtcPeerConnectionPort {
@@ -185,6 +223,8 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   final List<WebRtcIceCandidate> addedCandidates = [];
   int addSendOnlyVideoTransceiverCalls = 0;
   int closeCalls = 0;
+  int stopDesktopCaptureCalls = 0;
+  String? startedCaptureSourceId;
   String? remoteDescription;
   Object? closeFailure;
 
@@ -207,6 +247,16 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   @override
   Future<void> addSendOnlyVideoTransceiver() async {
     addSendOnlyVideoTransceiverCalls++;
+  }
+
+  @override
+  Future<void> startDesktopCapture(String sourceId) async {
+    startedCaptureSourceId = sourceId;
+  }
+
+  @override
+  Future<void> stopDesktopCapture() async {
+    stopDesktopCaptureCalls++;
   }
 
   @override

@@ -84,6 +84,31 @@ final class WebRtcRemoteVideoTrackEvent extends WebRtcEngineEvent {
 
 abstract interface class WebRtcPeerConnectionFactory {
   Future<WebRtcPeerConnectionPort> create();
+  Future<List<WebRtcDesktopCaptureSource>> listDesktopCaptureSources();
+}
+
+enum WebRtcDesktopCaptureSourceType { screen, window }
+
+final class WebRtcDesktopCaptureSource {
+  const WebRtcDesktopCaptureSource({
+    required this.id,
+    required this.name,
+    required this.type,
+  });
+
+  final String id;
+  final String name;
+  final WebRtcDesktopCaptureSourceType type;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WebRtcDesktopCaptureSource &&
+      other.id == id &&
+      other.name == name &&
+      other.type == type;
+
+  @override
+  int get hashCode => Object.hash(id, name, type);
 }
 
 abstract interface class WebRtcPeerConnectionPort {
@@ -92,6 +117,8 @@ abstract interface class WebRtcPeerConnectionPort {
   Stream<String> get remoteVideoTrackIds;
 
   Future<void> addSendOnlyVideoTransceiver();
+  Future<void> startDesktopCapture(String sourceId);
+  Future<void> stopDesktopCapture();
   Future<String> createOffer();
   Future<String> createAnswer();
   Future<void> setLocalDescription({
@@ -106,11 +133,10 @@ abstract interface class WebRtcPeerConnectionPort {
   Future<void> close();
 }
 
-/// Thin control and metadata adapter around the Flutter WebRTC plugin.
+/// Thin control and native track adapter around the Flutter WebRTC plugin.
 ///
-/// It deliberately has no capture or video-frame API. Authenticated signaling,
-/// capture consent and renderer ownership are provided by later application and
-/// platform layers; this class is not wired to the demo UI.
+/// Captured pixels and encoded frames stay in the native WebRTC pipeline. This
+/// API exposes only source metadata and track lifecycle controls.
 final class FlutterWebRtcEngine {
   FlutterWebRtcEngine({WebRtcPeerConnectionFactory? factory})
     : _factory = factory ?? const FlutterWebRtcPeerConnectionFactory();
@@ -127,6 +153,15 @@ final class FlutterWebRtcEngine {
   bool _closed = false;
 
   Stream<WebRtcEngineEvent> get events => _events.stream;
+
+  Future<List<WebRtcDesktopCaptureSource>> listDesktopCaptureSources() {
+    if (_closed) {
+      return Future<List<WebRtcDesktopCaptureSource>>.error(
+        StateError('WebRTC engine is closed.'),
+      );
+    }
+    return _factory.listDesktopCaptureSources();
+  }
 
   Future<void> initialize() {
     if (_closed) {
@@ -158,6 +193,21 @@ final class FlutterWebRtcEngine {
 
   Future<void> addSendOnlyVideoTransceiver() async =>
       _peerOrThrow().addSendOnlyVideoTransceiver();
+
+  Future<void> startDesktopCapture({required String sourceId}) async {
+    if (sourceId.isEmpty || sourceId.length > 256) {
+      throw ArgumentError.value(
+        sourceId,
+        'sourceId',
+        'Invalid desktop source.',
+      );
+    }
+    await _peerOrThrow().startDesktopCapture(sourceId);
+  }
+
+  Future<void> stopDesktopCapture() async {
+    await _peerOrThrow().stopDesktopCapture();
+  }
 
   Future<String> createAnswer() async => _peerOrThrow().createAnswer();
 
@@ -198,7 +248,13 @@ final class FlutterWebRtcEngine {
     final peer = _peer;
     _peer = null;
     try {
-      if (peer != null) await peer.close();
+      if (peer != null) {
+        try {
+          await peer.stopDesktopCapture();
+        } finally {
+          await peer.close();
+        }
+      }
     } finally {
       await _events.close();
     }
@@ -234,6 +290,29 @@ final class FlutterWebRtcPeerConnectionFactory
     final peer = await createPeerConnection(configuration);
     return _FlutterWebRtcPeerConnection(peer);
   }
+
+  @override
+  Future<List<WebRtcDesktopCaptureSource>> listDesktopCaptureSources() async {
+    final sources = await desktopCapturer.getSources(
+      types: const [SourceType.Screen, SourceType.Window],
+    );
+    return [
+      for (final source in sources.take(64))
+        if (source.id.isNotEmpty &&
+            source.id.length <= 256 &&
+            source.name.isNotEmpty &&
+            source.name.length <= 256 &&
+            !source.name.contains(RegExp(r'[\u0000-\u001f\u007f]')))
+          WebRtcDesktopCaptureSource(
+            id: source.id,
+            name: source.name,
+            type: switch (source.type) {
+              SourceType.Screen => WebRtcDesktopCaptureSourceType.screen,
+              SourceType.Window => WebRtcDesktopCaptureSourceType.window,
+            },
+          ),
+    ];
+  }
 }
 
 final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
@@ -250,6 +329,7 @@ final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
       StreamController<WebRtcConnectionState>.broadcast();
   final StreamController<String> _remoteVideoTrackIds =
       StreamController<String>.broadcast();
+  MediaStream? _localDesktopStream;
   bool _closed = false;
 
   @override
@@ -268,6 +348,45 @@ final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
       kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
       init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendOnly),
     );
+  }
+
+  @override
+  Future<void> startDesktopCapture(String sourceId) async {
+    if (_closed || _localDesktopStream != null) {
+      throw StateError(
+        'Desktop capture is already active or the peer is closed.',
+      );
+    }
+    final stream = await navigator.mediaDevices.getDisplayMedia(
+      <String, dynamic>{
+        'audio': false,
+        'video': <String, dynamic>{
+          'deviceId': <String, String>{'exact': sourceId},
+          'mandatory': <String, int>{'frameRate': 30},
+          'cursor': 'always',
+        },
+      },
+    );
+    try {
+      final videoTracks = stream.getVideoTracks();
+      if (videoTracks.length != 1 || stream.getAudioTracks().isNotEmpty) {
+        throw StateError(
+          'The selected source must provide one silent video track.',
+        );
+      }
+      await _peer.addTrack(videoTracks.single, stream);
+      _localDesktopStream = stream;
+    } catch (_) {
+      await _stopStream(stream);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> stopDesktopCapture() async {
+    final stream = _localDesktopStream;
+    _localDesktopStream = null;
+    if (stream != null) await _stopStream(stream);
   }
 
   @override
@@ -305,15 +424,29 @@ final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
     if (_closed) return;
     _closed = true;
     try {
-      await _peer.close();
+      await stopDesktopCapture();
     } finally {
       try {
-        await _peer.dispose();
+        await _peer.close();
       } finally {
-        await _iceCandidates.close();
-        await _connectionStates.close();
-        await _remoteVideoTrackIds.close();
+        try {
+          await _peer.dispose();
+        } finally {
+          await _iceCandidates.close();
+          await _connectionStates.close();
+          await _remoteVideoTrackIds.close();
+        }
       }
+    }
+  }
+
+  Future<void> _stopStream(MediaStream stream) async {
+    try {
+      for (final track in stream.getTracks()) {
+        await track.stop();
+      }
+    } finally {
+      await stream.dispose();
     }
   }
 

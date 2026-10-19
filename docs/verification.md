@@ -67,6 +67,20 @@ The shared WSS client still has its Task 39 two-process loopback coverage, and T
 
 The transceiver has no media track attached. The controller therefore cannot send RTP video yet. The next implementation slice is a native synthetic H.264 source connected to this sender and the existing Android TV decoder path. Proposed [ADR-0042](adr/0042-windows-sender-session-signaling.md) records the ownership and verification limits.
 
+**Task 42 verification update:** The Windows sender now enumerates desktop capture source metadata from the pinned Flutter WebRTC plugin, asks the user to select a source in the app, rechecks that Android TV pairing was approved, starts one video-only desktop track, and attaches it to the existing peer before creating the offer. Stop, peer disposal, and error paths stop local tracks. The app also contains a static color-bar card that can be selected as a window; it is a visual target and does not generate a native synthetic media track. The plugin capture path is not verified as Windows Graphics Capture (WGC) or the OS-owned capture picker, so neither WGC integration nor the required Windows capture UX is accepted by this task.
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `dart format --output=none --set-exit-if-changed` on the five changed Dart files | 0 | Dart 3.13.5 format check passes. |
+| `dart analyze` on the five changed Dart files | 0 | Dart 3.13.5 reports no issues. |
+| `flutter test --no-pub test/webrtc_engine_test.dart test/windows_sender_session_test.dart` | not verified | The Flutter CLI produced no output and did not complete in the available runner; it was interrupted. Added tests cover capture source listing, track lifecycle, pairing recheck, and track attachment through injected fakes, but they have not run. |
+| `git diff --check` | pending final check | Run against the Task 42 patch before commit. |
+| Windows Flutter bundle / Android TV APK | unavailable | No completed bundle build; the Windows runner previously stopped at the plugin symlink-support gate. Android SDK/Gradle is unavailable on this host. |
+| WebRTC/ICE/RTP/H.264 / Android decode / screenshot / reconnect | not verified | No app-to-app peer or media path ran. The track attachment code is source-only evidence; it does not establish a connected remote peer or received frame. |
+| `HARDWARE_VERIFIED` | pending | Physical testing remains deferred to final user testing. |
+
+Task 42 is **SOURCE_IMPLEMENTED** for plugin-backed desktop track attachment only. WGC, OS-mediated capture selection, native synthetic H.264 generation, hardware-accelerated Windows encoding, the Android TV receiver build, decoded frame presentation, screenshot export, and app-to-app media integration remain incomplete. The source list and in-app selection UX do not substitute for those functions.
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

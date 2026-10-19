@@ -10,7 +10,9 @@ import 'annotation_overlay.dart';
 import 'ios_pairing_bootstrap.dart';
 import 'linux_pairing_bootstrap.dart';
 import 'rust_session_status.dart';
+import 'webrtc_engine.dart';
 import 'windows_pairing_bootstrap.dart';
+import 'windows_sender_session.dart';
 
 enum _DemoReceiverState { undiscovered, discovered, pairing }
 
@@ -82,6 +84,11 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Timer? _senderPairingPollTimer;
   WindowsSenderPairingStatus? _senderPairingStatus;
   String? _senderPairingError;
+  bool _senderSessionStarting = false;
+  WindowsSenderSessionController? _windowsSenderSession;
+  StreamSubscription<WindowsSenderSessionState>? _senderSessionSubscription;
+  WindowsSenderSessionState? _senderSessionState;
+  String? _senderSessionError;
   List<AnnotationStroke> _demoStrokes = [];
   Color _demoStrokeColor = const Color(0xFF61D7C5);
   double _demoStrokeWidth = 4;
@@ -147,6 +154,11 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
             senderPairingError: _senderPairingError,
             onBeginSenderPairing: _beginWindowsSenderPairing,
             onCancelSenderPairing: _cancelWindowsSenderPairing,
+            senderSessionStarting: _senderSessionStarting,
+            senderSessionState: _senderSessionState,
+            senderSessionError: _senderSessionError,
+            onStartSenderSession: _startWindowsSenderSession,
+            onStopSenderSession: _stopWindowsSenderSession,
           ),
           _ => _SettingsPage(rustSessionStatus: widget.rustSessionStatus),
         };
@@ -367,6 +379,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
     final requestId = _senderPairingRequestId;
     if (requestId == null) return;
     try {
+      await _stopWindowsSenderSession();
       await const WindowsPairingBootstrap().cancelSenderPairing(requestId);
       if (mounted) await _pollWindowsSenderPairing(requestId);
     } on PlatformException catch (error) {
@@ -378,6 +391,122 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
         () => _senderPairingError =
             'The Windows sender pairing service is unavailable in this build.',
       );
+    }
+  }
+
+  Future<void> _startWindowsSenderSession() async {
+    final requestId = _senderPairingRequestId;
+    if (!Platform.isWindows ||
+        requestId == null ||
+        _senderPairingStatus?.state != WindowsSenderPairingState.approved ||
+        _senderSessionStarting ||
+        _windowsSenderSession != null) {
+      return;
+    }
+
+    setState(() {
+      _senderSessionStarting = true;
+      _senderSessionError = null;
+    });
+    try {
+      final sources = await const FlutterWebRtcPeerConnectionFactory()
+          .listDesktopCaptureSources();
+      if (!mounted) return;
+      if (sources.isEmpty) {
+        setState(
+          () => _senderSessionError =
+              'Windows did not report an available screen or window source.',
+        );
+        return;
+      }
+
+      final source = await showDialog<WebRtcDesktopCaptureSource>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Choose a screen or window'),
+          content: SizedBox(
+            width: 480,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'The selected source will be captured and sent to the approved Android TV. Capture starts only after you choose a source.',
+                  ),
+                ),
+                for (final source in sources)
+                  ListTile(
+                    leading: Icon(
+                      source.type == WebRtcDesktopCaptureSourceType.screen
+                          ? Icons.desktop_windows_outlined
+                          : Icons.web_asset_outlined,
+                    ),
+                    title: Text(source.name),
+                    subtitle: Text(
+                      source.type == WebRtcDesktopCaptureSourceType.screen
+                          ? 'Screen'
+                          : 'Window',
+                    ),
+                    onTap: () => Navigator.of(context).pop(source),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || source == null) return;
+
+      final controller = WindowsSenderSessionController(
+        pairing: const WindowsPairingBootstrap(),
+      );
+      _windowsSenderSession = controller;
+      _senderSessionSubscription = controller.states.listen((state) {
+        if (mounted) setState(() => _senderSessionState = state);
+      });
+      await controller.start(requestId: requestId, sourceId: source.id);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _senderSessionError =
+            error.message ??
+            'Windows could not start the selected video source.',
+      );
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(
+        () => _senderSessionError =
+            'The Windows WebRTC capture service is unavailable in this build.',
+      );
+    } on Object {
+      if (!mounted) return;
+      setState(
+        () => _senderSessionError =
+            'The screen share could not start. No video is being sent.',
+      );
+    } finally {
+      if (mounted) setState(() => _senderSessionStarting = false);
+    }
+  }
+
+  Future<void> _stopWindowsSenderSession() async {
+    final subscription = _senderSessionSubscription;
+    _senderSessionSubscription = null;
+    await subscription?.cancel();
+    final controller = _windowsSenderSession;
+    _windowsSenderSession = null;
+    if (controller != null) await controller.dispose();
+    if (mounted) {
+      setState(() {
+        _senderSessionState = null;
+        _senderSessionStarting = false;
+      });
     }
   }
 
@@ -393,6 +522,8 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   @override
   void dispose() {
     _senderPairingPollTimer?.cancel();
+    unawaited(_senderSessionSubscription?.cancel());
+    unawaited(_windowsSenderSession?.dispose());
     final requestId = _senderPairingRequestId;
     if (requestId != null && _senderPairingStatus?.state.isActive == true) {
       unawaited(const WindowsPairingBootstrap().cancelSenderPairing(requestId));
@@ -861,6 +992,11 @@ class _DevicesPage extends StatefulWidget {
     required this.senderPairingError,
     required this.onBeginSenderPairing,
     required this.onCancelSenderPairing,
+    required this.senderSessionStarting,
+    required this.senderSessionState,
+    required this.senderSessionError,
+    required this.onStartSenderSession,
+    required this.onStopSenderSession,
   });
 
   final _DemoReceiverState demoReceiverState;
@@ -874,6 +1010,11 @@ class _DevicesPage extends StatefulWidget {
   final String? senderPairingError;
   final ValueChanged<String> onBeginSenderPairing;
   final VoidCallback onCancelSenderPairing;
+  final bool senderSessionStarting;
+  final WindowsSenderSessionState? senderSessionState;
+  final String? senderSessionError;
+  final VoidCallback onStartSenderSession;
+  final VoidCallback onStopSenderSession;
 
   @override
   State<_DevicesPage> createState() => _DevicesPageState();
@@ -1099,6 +1240,100 @@ class _DevicesPageState extends State<_DevicesPage> {
                         ),
                       ],
                     ],
+                    if (senderStatus?.state ==
+                        WindowsSenderPairingState.approved) ...[
+                      const SizedBox(height: 16),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Synthetic media test target',
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 8),
+                              const AspectRatio(
+                                aspectRatio: 16 / 9,
+                                child: CustomPaint(
+                                  painter: _SyntheticVideoTestPatternPainter(),
+                                  child: Center(
+                                    child: Text(
+                                      'MirrorMesh test pattern',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                        shadows: [
+                                          Shadow(
+                                            color: Colors.black,
+                                            blurRadius: 8,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Select the MirrorMesh window to send this known color pattern. It is a visual test target, not a native synthetic frame source.',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        key: const Key('start-windows-screen-share-button'),
+                        onPressed:
+                            widget.senderSessionStarting ||
+                                widget.senderSessionState != null
+                            ? null
+                            : widget.onStartSenderSession,
+                        icon: widget.senderSessionStarting
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.screen_share_outlined),
+                        label: Text(
+                          widget.senderSessionStarting
+                              ? 'Starting screen share'
+                              : 'Choose screen or window to share',
+                        ),
+                      ),
+                      if (widget.senderSessionState != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _senderSessionStatusText(widget.senderSessionState!),
+                        ),
+                        if (widget.senderSessionState !=
+                                WindowsSenderSessionState.stopped &&
+                            widget.senderSessionState !=
+                                WindowsSenderSessionState.revoked) ...[
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            key: const Key('stop-windows-screen-share-button'),
+                            onPressed: widget.onStopSenderSession,
+                            icon: const Icon(Icons.stop_circle_outlined),
+                            label: const Text('Stop screen share'),
+                          ),
+                        ],
+                      ],
+                      if (widget.senderSessionError != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          widget.senderSessionError!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
                     if (widget.senderPairingError != null) ...[
                       const SizedBox(height: 8),
                       Text(
@@ -1138,6 +1373,58 @@ class _DevicesPageState extends State<_DevicesPage> {
         WindowsSenderPairingState.cancelled =>
           'Pairing was cancelled and the control channel was closed.',
       };
+
+  String _senderSessionStatusText(
+    WindowsSenderSessionState state,
+  ) => switch (state) {
+    WindowsSenderSessionState.idle => 'Media session is idle.',
+    WindowsSenderSessionState.negotiating =>
+      'Negotiating the authenticated media peer.',
+    WindowsSenderSessionState.transportConnected =>
+      'WebRTC transport connected. TV frame receipt has not been confirmed.',
+    WindowsSenderSessionState.stopped => 'Screen share stopped.',
+    WindowsSenderSessionState.revoked =>
+      'Pairing was revoked. The screen share is stopped.',
+    WindowsSenderSessionState.failed =>
+      'The media session failed and its local peer was closed.',
+  };
+}
+
+class _SyntheticVideoTestPatternPainter extends CustomPainter {
+  const _SyntheticVideoTestPatternPainter();
+
+  static const _bars = <Color>[
+    Color(0xFFFFFFFF),
+    Color(0xFFFFFF00),
+    Color(0xFF00FFFF),
+    Color(0xFF00FF00),
+    Color(0xFFFF00FF),
+    Color(0xFFFF0000),
+    Color(0xFF0000FF),
+    Color(0xFF000000),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final barWidth = size.width / _bars.length;
+    for (var index = 0; index < _bars.length; index++) {
+      canvas.drawRect(
+        Rect.fromLTWH(index * barWidth, 0, barWidth, size.height),
+        Paint()..color = _bars[index],
+      );
+    }
+    final center = Offset(size.width / 2, size.height / 2);
+    canvas.drawCircle(center, size.height * 0.16, Paint()..color = Colors.grey);
+    canvas.drawCircle(
+      center,
+      size.height * 0.13,
+      Paint()..color = Colors.white,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SyntheticVideoTestPatternPainter oldDelegate) =>
+      false;
 }
 
 class _SettingsPage extends StatelessWidget {
