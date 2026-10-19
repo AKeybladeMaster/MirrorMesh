@@ -13,4 +13,8 @@
 
 ## Current source evidence (2026-10-18)
 
-The local approval shell has five D-pad-focusable controls, explicit accept/reject/disconnect wiring, no network or media permissions, and a polite accessibility live region on the changing approval help text. `verify-shell.ps1` was extended test-first: it failed before the XML change because `help_text` had no live-region property, then passed after setting `android:accessibilityLiveRegion="polite"`. The JDK-only approval-state test also passes. Gradle and Android SDK environment variables are absent, so no APK build, emulator run, screen-reader result, or physical TV test is claimed. This source-only UX improvement does not implement discovery, QR pairing, WebRTC, MediaCodec, or a native video surface.
+The local approval shell has five D-pad-focusable controls, explicit accept/reject/disconnect wiring, INTERNET-only permission, disabled cleartext, and a polite accessibility live region. Task 30 adds an Android native receive-only libwebrtc adapter with a hardware-only H.264 decoder, H.264-only receive codec preferences, bounded SDP/ICE handling, a fullscreen native surface, diagnostics, and cleanup. The approved-channel contract is not yet implemented or connected to the Rust pairing runtime or standby approval UI, so the receiver is dormant and no sender-to-TV path is claimed. JDK policy/state tests and source-boundary checks pass. `gradle :app:assembleDebug` cannot run on this host because Gradle is absent; no APK or physical TV evidence exists.
+
+## Next implementation slice
+
+Implement the Windows synthetic H.264 sender against the shared Rust-backed authenticated signaling/session contract, then wire explicit TV approval into `TvApprovedSessionLauncher`. Keep WGC capture and hardware encoding behind their native adapters, and add a received-frame screenshot path after the native surface is integrated.

@@ -19,3 +19,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+dependencies {
+    implementation("io.github.webrtc-sdk:android:150.7871.01")
+}

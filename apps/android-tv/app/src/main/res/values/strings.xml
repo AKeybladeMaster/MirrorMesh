@@ -10,4 +10,8 @@
     <string name="demo_connected_help">This is a local UI demonstration only. Choose Disconnect to return to standby; no media is flowing.</string>
     <string name="demo_rejected_help">The local demo request was rejected. You can show another local request.</string>
     <string name="signaling_details">Authenticated signaling is not configured. Demo controls only change local UI state; no remote sender can connect and no media is rendered.</string>
+    <string name="video_receiving">Receiving H.264 video</string>
+    <string name="video_session_failed">The approved video session could not start. Return to pairing and try again.</string>
+    <string name="video_session_revoked">Access was revoked. The video session has ended.</string>
+    <string name="video_frame_diagnostics">Received %1$d × %2$d frame; %3$d frames received.</string>
 </resources>

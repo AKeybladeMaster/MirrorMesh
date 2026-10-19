@@ -1,8 +1,8 @@
 # MirrorMesh Android TV receiver shell
 
-This is a separate native Android TV application target. It declares the Leanback launcher, touchscreen-free navigation, app icon, and TV banner. Its D-pad-friendly local demo lets a tester show a request from a fictional sender, explicitly Accept or Reject it, and Disconnect. The request and session labels are local UI state only; they do not discover a device or pair with a sender.
+This is a separate native Android TV application target. It declares the Leanback launcher, touchscreen-free navigation, app icon, and TV banner. The D-pad-friendly standby screen still demonstrates local Accept/Reject/Disconnect states. The app now also contains a native receive-only WebRTC adapter and fullscreen `SurfaceViewRenderer` activity. The adapter accepts only an approved signaling channel, bounds SDP and ICE inputs, configures a receive-only transceiver with H.264-only codec preferences, and uses `HardwareVideoDecoderFactory` without a software decoder fallback.
 
-No network, capture, microphone, or media permissions are requested. The shell does not implement QR pairing, authenticated signaling, WebRTC, MediaCodec, or a video surface; those remain gated on the shared v1 contract and ADR-0002. Accepting the local demo does not start a stream. Native Android TV is the primary TV path; the browser receiver is a compatibility fallback.
+The adapter is not yet wired to an Android TV pairing/signaling implementation or a Windows sender, so the current APK does not receive a real session. Only the ordinary `INTERNET` permission is requested; cleartext traffic is disabled and no local screen, camera, or microphone capture is requested. Accepting the local demo still does not start a stream. Native Android TV is the primary TV path; the browser receiver remains a compatibility fallback.
 
 ## Build
 
@@ -19,4 +19,4 @@ powershell.exe -ExecutionPolicy Bypass -File .\apps\android-tv\scripts\test-demo
 powershell.exe -ExecutionPolicy Bypass -File .\apps\android-tv\scripts\verify-shell.ps1
 ```
 
-On an Android TV device, install the separately built APK and use the remote to show a local request, confirm the state stays pending, press Reject, show another request, press Accept, then Disconnect. Verify the screen always labels this as a local demonstration and no media appears. These steps verify only the mock approval UX; actual sender discovery, pairing, capture, and video require separate implementation and hardware evidence.
+The JDK-only tests cover bounded H.264 SDP selection, approval/rejection, reconnect and revocation state, and the existing local demo. The native receive adapter has no Android build evidence on this workstation because Gradle and the Android SDK are unavailable. Final hardware testing must install the APK on an Android TV, pair to a trusted Windows sender, explicitly approve, receive H.264, verify fullscreen hardware decode, and exercise Disconnect, reconnect, rejection and revocation. Emulator compilation is only build evidence, not TV hardware evidence.

@@ -6,6 +6,7 @@ $layoutPath = Join-Path $appRoot 'app/src/main/res/layout/activity_main.xml'
 $stringsPath = Join-Path $appRoot 'app/src/main/res/values/strings.xml'
 $javaPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/MainActivity.java'
 $statePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/PairingDemoState.java'
+$appGradlePath = Join-Path $appRoot 'app/build.gradle.kts'
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
 
 $manifest = [xml](Get-Content -LiteralPath $manifestPath -Raw)
@@ -19,8 +20,18 @@ if ('android.software.leanback' -notin $featureNames) {
 if ('android.hardware.touchscreen' -notin $featureNames) {
     throw 'Manifest must declare touchscreen as optional.'
 }
-if ($manifest.SelectNodes("//*[local-name()='uses-permission']").Count -ne 0) {
-    throw 'Standby shell must not request network, capture, camera, or microphone permissions.'
+$permissions = @(
+    $manifest.SelectNodes("//*[local-name()='uses-permission']") |
+        ForEach-Object { $_.GetAttribute('name', $androidNamespace) }
+)
+if ('android.permission.INTERNET' -notin $permissions) {
+    throw 'WebRTC requires the ordinary Android INTERNET permission.'
+}
+if ($permissions | Where-Object { $_ -match 'CAMERA|RECORD_AUDIO|MediaProjection|FOREGROUND_SERVICE' }) {
+    throw 'The receive-only TV target must not request capture, camera, or microphone permissions.'
+}
+if ($manifest.SelectSingleNode("//*[local-name()='application']").GetAttribute('usesCleartextTraffic', $androidNamespace) -ne 'false') {
+    throw 'TV signaling must use TLS; cleartext traffic must remain disabled.'
 }
 
 $categories = @(
@@ -65,8 +76,25 @@ foreach ($action in @('showDemoRequest', 'accept', 'reject', 'disconnect')) {
         throw "TV activity must wire the $action action to an explicit user control."
     }
 }
-if ($activity -match 'android\.net|android\.media|MediaProjection|MediaCodec|WifiManager') {
-    throw 'The local UI demonstration must not access network, capture, or media APIs.'
+$receiverPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvWebRtcReceiver.java'
+$receiverSource = Get-Content -LiteralPath $receiverPath -Raw
+if ($receiverSource -notmatch 'HardwareVideoDecoderFactory' -or
+    $receiverSource -notmatch 'SurfaceViewRenderer' -or
+    $receiverSource -notmatch 'H264SdpPolicy\.requireH264VideoCodec' -or
+    $receiverSource -notmatch 'setCodecPreferences\(' -or
+    $receiverSource -notmatch 'RtpTransceiverDirection\.RECV_ONLY' -or
+    $receiverSource -notmatch 'H264SdpPolicy\.requireOnlyH264VideoCodec' -or
+    $receiverSource -notmatch 'createPeerConnection\(' -or
+    $receiverSource -notmatch 'setRemoteDescription\(' -or
+    $receiverSource -notmatch '\.dispose\(') {
+    throw 'The native receive adapter must require H.264, use hardware decoding, and render to a native surface.'
+}
+if ($receiverSource -match 'MediaProjection|ScreenCapturerAndroid|Camera2Enumerator|Camera1Enumerator') {
+    throw 'The TV receiver must not start local screen or camera capture.'
+}
+$appGradle = Get-Content -LiteralPath $appGradlePath -Raw
+if ($appGradle -notmatch 'io\.github\.webrtc-sdk:android:150\.7871\.01') {
+    throw 'The Android TV app must pin the reviewed native WebRTC artifact version.'
 }
 
 $strings = [xml](Get-Content -LiteralPath $stringsPath -Raw)
@@ -75,4 +103,4 @@ if ($null -eq $demoStatus -or $demoStatus.InnerText -notmatch 'No network or vid
     throw 'The UI must disclose that its controls are local-only and do not stream media.'
 }
 
-Write-Output "Android TV source shell checks passed: $($resourceFiles.Count) XML resources, $($buttons.Count) D-pad buttons, explicit local approval flow, no permissions or media APIs."
+Write-Output "Android TV source checks passed: $($resourceFiles.Count) XML resources, $($buttons.Count) D-pad buttons, explicit approval shell, INTERNET only, hardware H.264 receiver, no local capture permissions."

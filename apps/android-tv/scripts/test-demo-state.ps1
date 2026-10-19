@@ -3,6 +3,10 @@ $ErrorActionPreference = 'Stop'
 $appRoot = Split-Path $PSScriptRoot -Parent
 $statePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/PairingDemoState.java'
 $testPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/PairingDemoStateTest.java'
+$h264PolicyPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/H264SdpPolicy.java'
+$h264PolicyTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/H264SdpPolicyTest.java'
+$receiverStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvReceiverState.java'
+$receiverStateTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvReceiverStateTest.java'
 $outputPath = Join-Path $env:TEMP 'MirrorMeshAndroidTvStateTests'
 $javac = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/javac.exe' } else { 'javac' }
 $java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { 'java' }
@@ -13,14 +17,21 @@ if (!(Test-Path -LiteralPath $statePath)) {
 if (!(Test-Path -LiteralPath $testPath)) {
     throw "State test not found: $testPath"
 }
+foreach ($requiredPath in @($h264PolicyPath, $h264PolicyTestPath, $receiverStatePath, $receiverStateTestPath)) {
+    if (!(Test-Path -LiteralPath $requiredPath)) {
+        throw "Android TV receiver test input not found: $requiredPath"
+    }
+}
 
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
-& $javac --release 17 -d $outputPath $statePath $testPath
+& $javac --release 17 -d $outputPath $statePath $testPath $h264PolicyPath $h264PolicyTestPath $receiverStatePath $receiverStateTestPath
 if ($LASTEXITCODE -ne 0) {
     throw "javac failed with exit code $LASTEXITCODE"
 }
 
-& $java -cp $outputPath com.mirrormesh.tv.PairingDemoStateTest
-if ($LASTEXITCODE -ne 0) {
-    throw "Java state test failed with exit code $LASTEXITCODE"
+foreach ($testClass in @('PairingDemoStateTest', 'H264SdpPolicyTest', 'TvReceiverStateTest')) {
+    & $java -cp $outputPath "com.mirrormesh.tv.$testClass"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Java test $testClass failed with exit code $LASTEXITCODE"
+    }
 }

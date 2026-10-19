@@ -35,6 +35,8 @@ Reviewed online **2026-10-19**. Websites and API availability evolve; Codex must
 - TypeScript source license: https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt â€” Apache-2.0; no browser runtime package added.
 - flutter_rust_bridge: https://github.com/fzyzcjy/flutter_rust_bridge ; releases: https://github.com/fzyzcjy/flutter_rust_bridge/releases — stable `v2.13.0` listed, beta later. Do not adopt beta automatically.
 - Android TV native app design + D-pad: https://developer.android.com/media/implement/surfaces/android-tv
+- Native WebRTC Android artifact `io.github.webrtc-sdk:android:150.7871.01`, source tag and license metadata: https://github.com/webrtc-sdk/android/tree/v150.7871.01 and https://central.sonatype.com/artifact/io.github.webrtc-sdk/android
+- Android hardware-only WebRTC decoder API: https://webrtc.googlesource.com/src/+/refs/heads/main/sdk/android/api/org/webrtc/HardwareVideoDecoderFactory.java
 - Google Cast Web Receiver: https://developers.google.com/cast/docs/web_receiver — default vs registered custom receivers.
 - Cast receiver registration: https://developers.google.com/cast/docs/registration
 - Cast Web Sender requirements: https://developers.google.com/cast/docs/web_sender

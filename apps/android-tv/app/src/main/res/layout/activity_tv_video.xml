@@ -1,0 +1,37 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <org.webrtc.SurfaceViewRenderer
+        android:id="@+id/video_surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="Received MirrorMesh screen" />
+
+    <TextView
+        android:id="@+id/video_diagnostics"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="32dp"
+        android:accessibilityLiveRegion="polite"
+        android:background="#B8000000"
+        android:padding="12dp"
+        android:text="Connecting to approved sender"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/video_disconnect_button"
+        android:layout_width="wrap_content"
+        android:layout_height="64dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="36dp"
+        android:background="@drawable/tv_button_background"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:text="Disconnect"
+        android:textAllCaps="false"
+        android:textSize="18sp" />
+</FrameLayout>
