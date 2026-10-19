@@ -6,7 +6,7 @@ The adapter is not yet wired to an Android TV pairing/signaling implementation o
 
 ## Build
 
-Install JDK 17 or newer, Android SDK platform 37, Build Tools 36.0.0 or newer, and Gradle 9.6.0. From this directory run `gradle :app:assembleDebug`. The output, when the required SDK is installed, is `app/build/outputs/apk/debug/app-debug.apk`. An emulator build is only a compile/UI smoke check; it does not prove hardware decoding or a real TV session.
+Install JDK 17 or newer, Android SDK platform 37, Build Tools 36.0.0 or newer, NDK 28.2.13676358, Rust 1.99.1 with the `aarch64-linux-android` target, and Gradle 9.6.0. From this directory run `gradle :app:assembleDebug`. Gradle builds and packages the shared `mm_ffi` Rust library for ARM64. The output is `app/build/outputs/apk/debug/app-debug.apk`. An emulator build is only a compile/UI smoke check; it does not prove hardware decoding or a real TV session. The native JNI pairing bridge is implemented, but the current activity has not been wired to it yet.
 
 GitHub Actions runs the Java state checks separately from an Ubuntu native APK build. The build job installs Android platform 37 and Build Tools 36.0.0, assembles the debug APK, and prints its SHA-256 digest. It does not publish or sign the APK.
 

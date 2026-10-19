@@ -6,6 +6,9 @@ mod frb_generated;
 #[cfg(target_os = "android")]
 mod android_context;
 
+#[cfg(target_os = "android")]
+mod android_tv_pairing;
+
 #[cfg(target_os = "linux")]
 mod linux_pairing;
 

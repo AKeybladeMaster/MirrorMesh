@@ -14,8 +14,10 @@ mm-runtime.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 mm-adapter-android.workspace = true
+mm-adapter-signaling.workspace = true
 jni.workspace = true
 ndk-context.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mm-adapter-linux.workspace = true

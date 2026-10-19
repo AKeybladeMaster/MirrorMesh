@@ -7,6 +7,10 @@ $stringsPath = Join-Path $appRoot 'app/src/main/res/values/strings.xml'
 $javaPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/MainActivity.java'
 $statePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/PairingDemoState.java'
 $appGradlePath = Join-Path $appRoot 'app/build.gradle.kts'
+$nativeBridgePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/NativePairingBridge.java'
+$repoRoot = Split-Path (Split-Path $appRoot -Parent) -Parent
+$nativePairingPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_tv_pairing.rs'
+$nativeContextPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_context.rs'
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
 
 $manifest = [xml](Get-Content -LiteralPath $manifestPath -Raw)
@@ -95,6 +99,29 @@ if ($receiverSource -match 'MediaProjection|ScreenCapturerAndroid|Camera2Enumera
 $appGradle = Get-Content -LiteralPath $appGradlePath -Raw
 if ($appGradle -notmatch 'io\.github\.webrtc-sdk:android:150\.7871\.01') {
     throw 'The Android TV app must pin the reviewed native WebRTC artifact version.'
+}
+$bridge = Get-Content -LiteralPath $nativeBridgePath -Raw
+foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'closeControlChannel')) {
+    $methodPattern = "native\s+\w+\s+$([regex]::Escape($method))\s*\("
+    if ($bridge -notmatch $methodPattern) {
+        throw "Native TV pairing bridge is missing $method."
+    }
+}
+if ($bridge -notmatch 'System\.loadLibrary\("mm_ffi"\)') {
+    throw 'The TV native bridge must load the packaged Rust library.'
+}
+if ($appGradle -notmatch 'aarch64-linux-android' -or $appGradle -notmatch 'libmm_ffi\.so') {
+    throw 'The Android TV Gradle build must package the Rust ARM64 library.'
+}
+$nativePairing = Get-Content -LiteralPath $nativePairingPath -Raw
+foreach ($jniName in @('startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'closeControlChannel')) {
+    if ($nativePairing -notmatch [regex]::Escape("NativePairingBridge_$jniName")) {
+        throw "Rust JNI implementation is missing $jniName."
+    }
+}
+$nativeContext = Get-Content -LiteralPath $nativeContextPath -Raw
+if ($nativeContext -notmatch 'Java_com_mirrormesh_tv_NativePairingBridge_initializeRustAndroidContext') {
+    throw 'Rust must initialize the Android context before opening Android Keystore or private storage.'
 }
 
 $strings = [xml](Get-Content -LiteralPath $stringsPath -Raw)

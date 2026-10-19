@@ -6,6 +6,7 @@ $testPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/PairingDemoS
 $h264PolicyPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/H264SdpPolicy.java'
 $h264PolicyTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/H264SdpPolicyTest.java'
 $receiverStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvReceiverState.java'
+$nativeBridgePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/NativePairingBridge.java'
 $receiverStateTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvReceiverStateTest.java'
 $outputPath = Join-Path $env:TEMP 'MirrorMeshAndroidTvStateTests'
 $javac = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/javac.exe' } else { 'javac' }
@@ -17,14 +18,14 @@ if (!(Test-Path -LiteralPath $statePath)) {
 if (!(Test-Path -LiteralPath $testPath)) {
     throw "State test not found: $testPath"
 }
-foreach ($requiredPath in @($h264PolicyPath, $h264PolicyTestPath, $receiverStatePath, $receiverStateTestPath)) {
+foreach ($requiredPath in @($h264PolicyPath, $h264PolicyTestPath, $receiverStatePath, $receiverStateTestPath, $nativeBridgePath)) {
     if (!(Test-Path -LiteralPath $requiredPath)) {
         throw "Android TV receiver test input not found: $requiredPath"
     }
 }
 
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
-& $javac --release 17 -d $outputPath $statePath $testPath $h264PolicyPath $h264PolicyTestPath $receiverStatePath $receiverStateTestPath
+& $javac --release 17 -d $outputPath $statePath $testPath $h264PolicyPath $h264PolicyTestPath $receiverStatePath $receiverStateTestPath $nativeBridgePath
 if ($LASTEXITCODE -ne 0) {
     throw "javac failed with exit code $LASTEXITCODE"
 }

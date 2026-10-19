@@ -1,5 +1,5 @@
 use jni::JNIEnv;
-use jni::objects::{GlobalRef, JObject};
+use jni::objects::{GlobalRef, JClass, JObject};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jstring};
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -13,13 +13,34 @@ pub extern "system" fn Java_com_mirrormesh_mirrormesh_1flutter_MainActivity_init
     _activity: JObject,
     application_context: JObject,
 ) -> jboolean {
+    if initialize_android_context(env, application_context) {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_initializeRustAndroidContext(
+    env: JNIEnv,
+    _bridge: JClass,
+    application_context: JObject,
+) -> jboolean {
+    let initialized = catch_unwind(AssertUnwindSafe(|| {
+        initialize_android_context(env, application_context)
+    }))
+    .unwrap_or(false);
+    if initialized { JNI_TRUE } else { JNI_FALSE }
+}
+
+fn initialize_android_context(env: JNIEnv, application_context: JObject) -> bool {
     let java_vm = match env.get_java_vm() {
         Ok(java_vm) => java_vm,
-        Err(_) => return JNI_FALSE,
+        Err(_) => return false,
     };
     let global_context = match env.new_global_ref(&application_context) {
         Ok(global_context) => global_context,
-        Err(_) => return JNI_FALSE,
+        Err(_) => return false,
     };
 
     ANDROID_APPLICATION_CONTEXT.get_or_init(|| {
@@ -34,7 +55,7 @@ pub extern "system" fn Java_com_mirrormesh_mirrormesh_1flutter_MainActivity_init
         global_context
     });
 
-    JNI_TRUE
+    true
 }
 
 #[unsafe(no_mangle)]

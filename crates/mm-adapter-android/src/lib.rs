@@ -18,5 +18,9 @@ pub use pairing_service::{
     PendingAndroidTvPairing,
 };
 
+#[cfg(target_os = "android")]
+pub type AndroidTvPairingServiceHandle =
+    AndroidTvPairingService<mm_store::SqliteTrustedPeers, AndroidPairingIdentity>;
+
 #[cfg(test)]
 mod tests;
