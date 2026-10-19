@@ -21,14 +21,14 @@ Secret Service lookup attributes are metadata and may be stored without encrypti
 ## Dependency and implementation evidence
 
 - `secret-service 5.1.0` declares MIT OR Apache-2.0 and Rust 1.77. Its newer 5.2.0 release raises its Rust requirement to 1.87, so the candidate pins 5.1.0 for the workspace Rust 1.85 floor. The resolved Linux dependency graph uses `zbus 5.13.2`, `zbus_names 4.3.1`, `zvariant 5.9.2`, and `uuid 1.17.0`; it passes a Rust 1.85 Linux-target check.
-- The crate implements the common local signer lifecycle and the Linux Secret Service backend in `crates/mm-adapter-linux/`. Eight fake-store tests cover persistence, signing, rotation, deletion, malformed values, store failures, canonical-message rejection, and a known Ed25519 vector.
+- The crate implements the common local signer lifecycle and the Linux Secret Service backend in `crates/mm-adapter-linux/`. Twelve fake-store tests cover persistence, pairing and TLS signing, rotation, deletion, malformed values, store failures, message-shape rejection, and a known Ed25519 vector. The TLS signer accepts only the TLS 1.3 server CertificateVerify input form: 64 leading `0x20` bytes, the exact server context, and a 32-byte or 48-byte transcript hash. It reads the same Secret Service seed as the pairing signer and runs under the existing per-user identity lock.
 - Rust 1.99.1 Linux-target check and strict Clippy pass. Rust 1.85 Linux-target check passes. These checks compile the backend but do not connect to D-Bus or execute Linux tests.
 
 ## Consequences and open gates
 
 - Secret Service implementations may differ in unlock prompts, default collection policy, item locking, and persistence. A live GNOME Keyring/KWallet smoke test and cancellation/locked-collection checks are still required.
 - The locked Rust 1.85-compatible D-Bus graph triggered informational RustSec unmaintained notices for `zbus_names 4.3.1`, `zvariant 5.9.2`, and `zvariant_derive 5.9.2` (RUSTSEC-2026-0371/0370/0372). Local audit found no vulnerable dependency, but this maintenance signal remains a review item; the selected graph does not add advisory suppressions.
-- No Linux Flutter startup path currently assembles `LinuxPairingIdentity` with SQLite and `PairingRuntime`. The adapter has not accessed a user's keyring.
+- No Linux Flutter startup path currently assembles `LinuxPairingIdentity` with SQLite, the TLS configuration, and `PairingRuntime`. The adapter has not accessed a user's keyring or participated in a TLS handshake. The blocking Secret Service operations must run on a dedicated worker, not an async executor thread.
 - Same-user processes may be able to request the secret through the session service. The key is exportable through the service API and is not hardware-backed. D-Bus session encryption is not a defense against a malicious local service.
 - Cross-track/security review of the Ed25519 encoding and signing port remains pending. The broader mDNS, authenticated signaling, QR UI, revocation closure, and owned-LAN pairing gates remain open.
 
