@@ -1,5 +1,6 @@
 use std::fmt;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mm_adapter_signaling::{
@@ -27,6 +28,7 @@ where
 {
     listener: WssPairingListener,
     runtime: Arc<Mutex<PairingRuntime<P, I>>>,
+    cancellation: AtomicBool,
 }
 
 impl<P, I> AndroidTvPairingService<P, I>
@@ -72,7 +74,11 @@ where
         let listener = WssPairingListener::bind(address, tls_config)
             .map_err(WssListenerError::Io)
             .map_err(AndroidTvPairingServiceError::Listener)?;
-        Ok(Self { listener, runtime })
+        Ok(Self {
+            listener,
+            runtime,
+            cancellation: AtomicBool::new(false),
+        })
     }
 
     /// Returns the actual bound address, including an OS-assigned port when bound to port zero.
@@ -113,7 +119,7 @@ where
             .map_err(|_| AndroidTvPairingServiceError::RuntimeLockPoisoned)?;
         let pending = self
             .listener
-            .accept_pairing_request(&mut runtime, now_monotonic_ms)
+            .accept_pairing_request_cancellable(&mut runtime, now_monotonic_ms, &self.cancellation)
             .map_err(AndroidTvPairingServiceError::Listener)?;
         let approval = pending.admitted().approval();
         let request = AndroidTvPairingRequest {
@@ -124,6 +130,16 @@ where
             requested_grants: approval.requested_grants(),
         };
         Ok(PendingAndroidTvPairing { request, pending })
+    }
+
+    /// Cancels an idle accept loop. Once stopped, this service instance cannot accept again.
+    pub fn stop_accepting(&self) {
+        self.cancellation.store(true, Ordering::Release);
+    }
+
+    /// Returns whether the listener is still accepting requests.
+    pub fn is_accepting(&self) -> bool {
+        !self.cancellation.load(Ordering::Acquire)
     }
 
     /// Persists only an explicitly accepted subset and returns its approved control channel.

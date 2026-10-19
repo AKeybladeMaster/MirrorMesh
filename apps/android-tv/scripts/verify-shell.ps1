@@ -101,7 +101,7 @@ if ($appGradle -notmatch 'io\.github\.webrtc-sdk:android:150\.7871\.01') {
     throw 'The Android TV app must pin the reviewed native WebRTC artifact version.'
 }
 $bridge = Get-Content -LiteralPath $nativeBridgePath -Raw
-foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'closeControlChannel')) {
+foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
     $methodPattern = "native\s+\w+\s+$([regex]::Escape($method))\s*\("
     if ($bridge -notmatch $methodPattern) {
         throw "Native TV pairing bridge is missing $method."
@@ -114,7 +114,7 @@ if ($appGradle -notmatch 'aarch64-linux-android' -or $appGradle -notmatch 'libmm
     throw 'The Android TV Gradle build must package the Rust ARM64 library.'
 }
 $nativePairing = Get-Content -LiteralPath $nativePairingPath -Raw
-foreach ($jniName in @('startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'closeControlChannel')) {
+foreach ($jniName in @('startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
     if ($nativePairing -notmatch [regex]::Escape("NativePairingBridge_$jniName")) {
         throw "Rust JNI implementation is missing $jniName."
     }

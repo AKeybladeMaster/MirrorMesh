@@ -23,6 +23,9 @@ final class NativePairingBridge {
     /** Sends pair.reject without persisting receiver trust. */
     static native String rejectPairing(long requestId);
 
+    /** Stops pairing, cancels an idle accept worker, and closes pending/approved channels. */
+    static native String stopPairing();
+
     /** Releases an approved signaling connection when the TV session ends. */
     static native boolean closeControlChannel(long connectionId);
 }

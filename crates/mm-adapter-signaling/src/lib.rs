@@ -3,7 +3,7 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use mm_adapter_tls::{TlsAdapterError, tls13_pinned_client_config};
@@ -33,6 +33,7 @@ pub const MAX_PAIR_BEGIN_BYTES: usize = MAX_ENVELOPE_BYTES;
 pub const MAX_PENDING_PAIRING_CONNECTIONS: usize = 8;
 
 const SOCKET_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const LISTENER_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SOCKET_READ_BUFFER_BYTES: usize = 8 * 1024;
 const SOCKET_WRITE_BUFFER_BYTES: usize = 4 * 1024;
 
@@ -798,7 +799,7 @@ fn remaining_until(deadline: Instant, now: Instant) -> io::Result<Duration> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "WSS handshake deadline elapsed"))
 }
 
-/// A blocking listener candidate for native TLS 1.3 raw-public-key WSS pairing.
+/// A cancellable listener candidate for native TLS 1.3 raw-public-key WSS pairing.
 ///
 /// Run `accept_pairing_request` on a dedicated worker. It accepts one connection at a time,
 /// captures the socket peer IP before TLS/WebSocket parsing, and hands the first valid `pair.begin`
@@ -811,8 +812,10 @@ pub struct WssPairingListener {
 
 impl WssPairingListener {
     pub fn bind(address: SocketAddr, tls_config: Arc<ServerConfig>) -> Result<Self, io::Error> {
+        let listener = TcpListener::bind(address)?;
+        listener.set_nonblocking(true)?;
         Ok(Self {
-            listener: TcpListener::bind(address)?,
+            listener,
             tls_config,
             active_pending_connections: Arc::new(AtomicUsize::new(0)),
         })
@@ -832,9 +835,53 @@ impl WssPairingListener {
         P: TrustedPeerPort,
         I: LocalPairingIdentityPort + PairingIdentityPort,
     {
+        self.accept_pairing_request_inner(runtime, now_monotonic_ms, None)
+    }
+
+    /// Accepts and verifies one request, returning promptly if the caller cancels while idle.
+    pub fn accept_pairing_request_cancellable<P, I>(
+        &self,
+        runtime: &mut PairingRuntime<P, I>,
+        now_monotonic_ms: u64,
+        cancellation: &AtomicBool,
+    ) -> Result<PendingPairingConnection, WssListenerError>
+    where
+        P: TrustedPeerPort,
+        I: LocalPairingIdentityPort + PairingIdentityPort,
+    {
+        self.accept_pairing_request_inner(runtime, now_monotonic_ms, Some(cancellation))
+    }
+
+    fn accept_pairing_request_inner<P, I>(
+        &self,
+        runtime: &mut PairingRuntime<P, I>,
+        now_monotonic_ms: u64,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<PendingPairingConnection, WssListenerError>
+    where
+        P: TrustedPeerPort,
+        I: LocalPairingIdentityPort + PairingIdentityPort,
+    {
         let slot = PendingConnectionSlot::try_acquire(Arc::clone(&self.active_pending_connections))
             .ok_or(WssListenerError::PendingCapacityLimited)?;
-        let (socket, _) = self.listener.accept().map_err(WssListenerError::Io)?;
+        let (socket, _) = loop {
+            match self.listener.accept() {
+                Ok(accepted) => break accepted,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+                        return Err(WssListenerError::Cancelled);
+                    }
+                    std::thread::sleep(LISTENER_ACCEPT_POLL_INTERVAL);
+                }
+                Err(error) => return Err(WssListenerError::Io(error)),
+            }
+        };
+        socket
+            .set_nonblocking(false)
+            .map_err(WssListenerError::Io)?;
+        if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+            return Err(WssListenerError::Cancelled);
+        }
         let handshake_deadline = Instant::now() + SOCKET_HANDSHAKE_TIMEOUT;
         let source_ip = socket.peer_addr().map_err(WssListenerError::Io)?.ip();
         socket.set_nodelay(true).map_err(WssListenerError::Io)?;
@@ -866,6 +913,9 @@ impl WssPairingListener {
         let admitted = runtime
             .verify_pair_begin_from(source_ip, frame.as_str().as_bytes(), now_monotonic_ms)
             .map_err(WssListenerError::Pairing)?;
+        if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+            return Err(WssListenerError::Cancelled);
+        }
         websocket
             .get_mut()
             .sock
@@ -889,6 +939,7 @@ pub enum WssListenerError {
     Pairing(PairingRuntimeError),
     UnexpectedFirstMessage,
     PendingCapacityLimited,
+    Cancelled,
 }
 
 impl fmt::Display for WssListenerError {
@@ -907,6 +958,7 @@ impl fmt::Display for WssListenerError {
             Self::PendingCapacityLimited => {
                 formatter.write_str("pending WSS pairing connection capacity is full")
             }
+            Self::Cancelled => formatter.write_str("WSS pairing listener was stopped"),
         }
     }
 }

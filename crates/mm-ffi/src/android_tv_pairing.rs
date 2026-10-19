@@ -112,11 +112,23 @@ fn accept_one_request() -> Result<Value, String> {
     let service = get_service()?;
     let pending = service
         .accept_request(monotonic_millis())
-        .map_err(|_| "sender request failed identity or protocol checks".to_owned())?;
+        .map_err(|error| match error {
+            mm_adapter_android::AndroidTvPairingServiceError::Listener(
+                mm_adapter_signaling::WssListenerError::Cancelled,
+            ) => "receiver pairing was stopped".to_owned(),
+            _ => "sender request failed identity or protocol checks".to_owned(),
+        })?;
     let request = pending.request().clone();
     let request_id = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
     if request_id <= 0 {
         return Err("receiver request identifier space is exhausted".to_owned());
+    }
+    // Serialize the handoff with stop_pairing so shutdown can always drain this request.
+    let service_guard = service_slot()
+        .lock()
+        .map_err(|_| "receiver service lock is unavailable".to_owned())?;
+    if service_guard.is_none() || !service.is_accepting() {
+        return Err("receiver pairing was stopped".to_owned());
     }
     let mut slot = pending_slot()
         .lock()
@@ -125,6 +137,7 @@ fn accept_one_request() -> Result<Value, String> {
         return Err("decide on the current receiver request first".to_owned());
     }
     *slot = Some((request_id, pending));
+    drop(service_guard);
     Ok(json!({
         "ok": true,
         "request_id": request_id,
@@ -156,8 +169,14 @@ fn approve_request(
 ) -> Result<Value, String> {
     let grants = TrustedPeerGrants::new(view, send, annotate)
         .map_err(|_| "approve at least one requested permission".to_owned())?;
+    let service_guard = service_slot()
+        .lock()
+        .map_err(|_| "receiver service lock is unavailable".to_owned())?;
+    let service = service_guard
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "receiver pairing has not been started".to_owned())?;
     let pending = take_pending(request_id)?;
-    let service = get_service()?;
     let (peer, connection) = service
         .approve(pending, grants, monotonic_millis(), unix_millis()?)
         .map_err(|_| "pairing approval failed; inspect trust before retrying".to_owned())?;
@@ -169,6 +188,7 @@ fn approve_request(
         .lock()
         .map_err(|_| "approved connection registry is unavailable".to_owned())?
         .insert(connection_id, connection);
+    drop(service_guard);
     Ok(json!({
         "ok": true,
         "peer_id": peer.id().to_string(),
@@ -177,11 +197,54 @@ fn approve_request(
 }
 
 fn reject_request(request_id: i64) -> Result<Value, String> {
+    let service_guard = service_slot()
+        .lock()
+        .map_err(|_| "receiver service lock is unavailable".to_owned())?;
+    if service_guard.is_none() {
+        return Err("receiver pairing has not been started".to_owned());
+    }
     let pending = take_pending(request_id)?;
     pending
         .reject("user_rejected", unix_millis()?)
         .map_err(|_| "the rejection response could not be delivered".to_owned())?;
+    drop(service_guard);
     Ok(json!({ "ok": true }))
+}
+
+fn stop_pairing() -> Result<Value, String> {
+    let service = service_slot()
+        .lock()
+        .map_err(|_| "receiver service lock is unavailable".to_owned())?
+        .take();
+    let was_active = service.is_some();
+    if let Some(service) = &service {
+        service.stop_accepting();
+    }
+
+    let pending = pending_slot()
+        .lock()
+        .map_err(|_| "pending request lock is unavailable".to_owned())?
+        .take();
+    drop(pending);
+
+    let mut connections = std::mem::take(
+        &mut *connection_slot()
+            .lock()
+            .map_err(|_| "approved connection registry is unavailable".to_owned())?,
+    );
+    let closed_connections = connections.len();
+    let mut close_failures = 0;
+    for connection in connections.values_mut() {
+        if connection.close().is_err() {
+            close_failures += 1;
+        }
+    }
+    Ok(json!({
+        "ok": true,
+        "was_active": was_active,
+        "closed_connections": closed_connections,
+        "close_failures": close_failures
+    }))
 }
 
 fn take_pending(request_id: i64) -> Result<PendingAndroidTvPairing, String> {
@@ -284,6 +347,16 @@ pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_rejectPairing(
 ) -> jstring {
     let result = catch_unwind(AssertUnwindSafe(|| reject_request(request_id)))
         .unwrap_or_else(|_| Err("pairing rejection failed unexpectedly".to_owned()));
+    java_string(&mut env, response_json(result))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_stopPairing(
+    mut env: JNIEnv,
+    _bridge: JClass,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(stop_pairing))
+        .unwrap_or_else(|_| Err("receiver pairing could not stop cleanly".to_owned()));
     java_string(&mut env, response_json(result))
 }
 

@@ -255,3 +255,33 @@ fn explicit_android_tv_rejection_closes_without_saving_sender_trust() {
     ));
     assert!(peers.get_peer(SENDER_ID).unwrap().is_none());
 }
+
+#[test]
+fn stopping_receiver_service_cancels_an_idle_pairing_accept() {
+    let receiver_identity = Arc::new(TestIdentity::new([0x51; 32]));
+    let peers = Arc::new(MemoryPeers::default());
+    let runtime =
+        mm_runtime::PairingRuntime::new(RECEIVER_ID, Arc::clone(&receiver_identity), peers)
+            .unwrap();
+    let service = Arc::new(
+        AndroidTvPairingService::bind(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            runtime,
+            receiver_identity,
+        )
+        .unwrap(),
+    );
+
+    let waiting_service = Arc::clone(&service);
+    let waiting = thread::spawn(move || waiting_service.accept_request(901));
+    thread::sleep(std::time::Duration::from_millis(20));
+    service.stop_accepting();
+
+    assert!(matches!(
+        waiting.join().unwrap(),
+        Err(super::AndroidTvPairingServiceError::Listener(
+            mm_adapter_signaling::WssListenerError::Cancelled
+        ))
+    ));
+    assert!(!service.is_accepting());
+}
