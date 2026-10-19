@@ -22,9 +22,17 @@ fi
   --target aarch64-apple-ios \
   --release
 
+"$cargo_bin" build \
+  --manifest-path "$repo_root/Cargo.toml" \
+  --package mm-adapter-ios \
+  --target aarch64-apple-ios \
+  --release
+
 bridge_archive="$repo_root/target/aarch64-apple-ios/release/libmm_ffi.a"
+ios_adapter_archive="$repo_root/target/aarch64-apple-ios/release/libmm_adapter_ios.a"
 exported_symbols="$repo_root/target/aarch64-apple-ios/release/frb-exported-symbols.txt"
 test -f "$bridge_archive"
+test -f "$ios_adapter_archive"
 
 # Dart resolves flutter_rust_bridge exports with DynamicLibrary.process().
 # Export only those bridge symbols from the app executable.

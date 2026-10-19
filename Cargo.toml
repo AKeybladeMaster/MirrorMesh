@@ -12,6 +12,7 @@ members = [
     "crates/mm-adapter-win",
     "crates/mm-adapter-linux",
     "crates/mm-adapter-android",
+    "crates/mm-adapter-ios",
     "crates/mm-store",
     "crates/mm-runtime",
     "crates/mm-transport",

@@ -1160,6 +1160,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mm-adapter-ios"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "getrandom 0.4.3",
+ "mm-adapter-identity",
+ "mm-domain",
+ "mm-ports",
+ "mm-runtime",
+ "mm-store",
+ "zeroize",
+]
+
+[[package]]
 name = "mm-adapter-linux"
 version = "0.1.0"
 dependencies = [
