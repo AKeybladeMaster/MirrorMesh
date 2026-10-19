@@ -5,12 +5,12 @@ $manifestPath = Join-Path $appRoot 'app/src/main/AndroidManifest.xml'
 $layoutPath = Join-Path $appRoot 'app/src/main/res/layout/activity_main.xml'
 $stringsPath = Join-Path $appRoot 'app/src/main/res/values/strings.xml'
 $javaPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/MainActivity.java'
-$statePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/PairingDemoState.java'
 $appGradlePath = Join-Path $appRoot 'app/build.gradle.kts'
 $nativeBridgePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/NativePairingBridge.java'
 $repoRoot = Split-Path (Split-Path $appRoot -Parent) -Parent
 $nativePairingPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_tv_pairing.rs'
 $nativeContextPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_context.rs'
+$pairingStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvPairingState.java'
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
 
 $manifest = [xml](Get-Content -LiteralPath $manifestPath -Raw)
@@ -54,12 +54,22 @@ foreach ($file in $resourceFiles) {
 $layout = [xml](Get-Content -LiteralPath $layoutPath -Raw)
 $buttons = $layout.SelectNodes("//*[local-name()='Button']")
 if ($buttons.Count -lt 5) {
-    throw 'TV screen must include its five focusable action buttons.'
+    throw 'TV screen must include its focusable pairing action buttons.'
 }
 foreach ($button in $buttons) {
     if ($button.GetAttribute('focusable', $androidNamespace) -ne 'true' -or
         $button.GetAttribute('focusableInTouchMode', $androidNamespace) -ne 'true') {
         throw 'Every TV action button must support D-pad focus.'
+    }
+}
+$grantControls = $layout.SelectNodes("//*[local-name()='CheckBox']")
+if ($grantControls.Count -ne 3) {
+    throw 'The TV pairing screen must expose the three independently scoped grant controls.'
+}
+foreach ($grantControl in $grantControls) {
+    if ($grantControl.GetAttribute('focusable', $androidNamespace) -ne 'true' -or
+        $grantControl.GetAttribute('focusableInTouchMode', $androidNamespace) -ne 'true') {
+        throw 'Every TV grant control must support D-pad focus.'
     }
 }
 
@@ -71,15 +81,6 @@ if ($null -eq $helpText -or
     throw 'Dynamic TV approval help text must announce politely to accessibility services.'
 }
 
-$activity = Get-Content -LiteralPath $javaPath -Raw
-if (!(Test-Path -LiteralPath $statePath)) {
-    throw 'TV approval controls must use the tested local state model.'
-}
-foreach ($action in @('showDemoRequest', 'accept', 'reject', 'disconnect')) {
-    if ($activity -notmatch [regex]::Escape("demoState.$action()")) {
-        throw "TV activity must wire the $action action to an explicit user control."
-    }
-}
 $receiverPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvWebRtcReceiver.java'
 $receiverSource = Get-Content -LiteralPath $receiverPath -Raw
 if ($receiverSource -notmatch 'HardwareVideoDecoderFactory' -or
@@ -100,8 +101,11 @@ $appGradle = Get-Content -LiteralPath $appGradlePath -Raw
 if ($appGradle -notmatch 'io\.github\.webrtc-sdk:android:150\.7871\.01') {
     throw 'The Android TV app must pin the reviewed native WebRTC artifact version.'
 }
+if ($appGradle -notmatch 'com\.google\.zxing:core:3\.5\.4') {
+    throw 'The Android TV QR encoder dependency must use the reviewed pinned ZXing core version.'
+}
 $bridge = Get-Content -LiteralPath $nativeBridgePath -Raw
-foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
+foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'refreshPairingInvitation', 'cancelPairingWait', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
     $methodPattern = "native\s+\w+\s+$([regex]::Escape($method))\s*\("
     if ($bridge -notmatch $methodPattern) {
         throw "Native TV pairing bridge is missing $method."
@@ -114,10 +118,32 @@ if ($appGradle -notmatch 'aarch64-linux-android' -or $appGradle -notmatch 'libmm
     throw 'The Android TV Gradle build must package the Rust ARM64 library.'
 }
 $nativePairing = Get-Content -LiteralPath $nativePairingPath -Raw
-foreach ($jniName in @('startPairing', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
+foreach ($jniName in @('startPairing', 'refreshPairingInvitation', 'cancelPairingWait', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
     if ($nativePairing -notmatch [regex]::Escape("NativePairingBridge_$jniName")) {
         throw "Rust JNI implementation is missing $jniName."
     }
+}
+$mainActivity = Get-Content -LiteralPath $javaPath -Raw
+foreach ($requiredSource in @('NativePairingBridge.startPairing', 'NativePairingBridge.waitForPairingRequest', 'NativePairingBridge.approvePairing', 'NativePairingBridge.rejectPairing', 'NativePairingBridge.stopPairing', 'QRCodeWriter', 'NetworkInterface.getNetworkInterfaces', 'onDestroy()')) {
+    if ($mainActivity -notmatch [regex]::Escape($requiredSource)) {
+        throw "Android TV activity is missing the real pairing flow element: $requiredSource."
+    }
+}
+if ($mainActivity -notmatch 'grantView\.setChecked\(false\)' -or
+    $mainActivity -notmatch 'grantSend\.setChecked\(false\)' -or
+    $mainActivity -notmatch 'grantAnnotate\.setChecked\(false\)' -or
+    $mainActivity -notmatch 'if \(!view && !send && !annotate\)') {
+    throw 'Grant controls must start unchecked and approval must require an explicit non-empty selection.'
+}
+if ($mainActivity -match 'PairingDemoState') {
+    throw 'The Android TV activity must not use local-only demo pairing state.'
+}
+if (!(Test-Path -LiteralPath $pairingStatePath)) {
+    throw 'The Android TV explicit pairing state is missing.'
+}
+$pairingState = Get-Content -LiteralPath $pairingStatePath -Raw
+if ($pairingState -notmatch 'REQUEST_PENDING' -or $pairingState -notmatch 'requestApproved') {
+    throw 'Android TV pairing state must keep request arrival separate from approval.'
 }
 $nativeContext = Get-Content -LiteralPath $nativeContextPath -Raw
 if ($nativeContext -notmatch 'Java_com_mirrormesh_tv_NativePairingBridge_initializeRustAndroidContext') {
@@ -125,9 +151,9 @@ if ($nativeContext -notmatch 'Java_com_mirrormesh_tv_NativePairingBridge_initial
 }
 
 $strings = [xml](Get-Content -LiteralPath $stringsPath -Raw)
-$demoStatus = $strings.SelectSingleNode("//*[local-name()='string' and @name='local_demo_status']")
-if ($null -eq $demoStatus -or $demoStatus.InnerText -notmatch 'No network or video') {
-    throw 'The UI must disclose that its controls are local-only and do not stream media.'
+$pairingMediaStatus = $strings.SelectSingleNode("//*[local-name()='string' and @name='pairing_paired']")
+if ($null -eq $pairingMediaStatus -or $pairingMediaStatus.InnerText -notmatch 'video is not connected') {
+    throw 'The pairing UI must state that an approved control channel does not imply a video stream.'
 }
 
-Write-Output "Android TV source checks passed: $($resourceFiles.Count) XML resources, $($buttons.Count) D-pad buttons, explicit approval shell, INTERNET only, hardware H.264 receiver, no local capture permissions."
+Write-Output "Android TV source checks passed: $($resourceFiles.Count) XML resources, $($buttons.Count) D-pad buttons, native pairing bridge, QR invitation, explicit grant approval, INTERNET only, hardware H.264 receiver, no local capture permissions."

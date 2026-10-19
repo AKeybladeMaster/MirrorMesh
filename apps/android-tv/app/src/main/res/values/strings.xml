@@ -10,6 +10,14 @@
     <string name="demo_connected_help">This is a local UI demonstration only. Choose Disconnect to return to standby; no media is flowing.</string>
     <string name="demo_rejected_help">The local demo request was rejected. You can show another local request.</string>
     <string name="signaling_details">Authenticated signaling is not configured. Demo controls only change local UI state; no remote sender can connect and no media is rendered.</string>
+    <string name="pairing_stopped">Pairing is stopped</string>
+    <string name="pairing_idle_help">Start the receiver to create a short-lived pairing code. Video streaming is not connected yet.</string>
+    <string name="pairing_ready">Receiver is active. Select Wait for sender to listen again. No sender is trusted automatically.</string>
+    <string name="pairing_request_pending">A verified sender is asking to pair. Review the identity and select permissions.</string>
+    <string name="pairing_paired">Sender paired. The authenticated control channel is open; video is not connected yet.</string>
+    <string name="pairing_trust_remains">Channel closed. Pairing approval is still saved for this sender.</string>
+    <string name="pairing_no_address">No active IPv4 network address is available. Connect the TV to a network and retry.</string>
+    <string name="pairing_accessibility_qr">Short-lived MirrorMesh pairing QR code. No screen video is currently streaming.</string>
     <string name="video_receiving">Receiving H.264 video</string>
     <string name="video_session_failed">The approved video session could not start. Return to pairing and try again.</string>
     <string name="video_session_revoked">Access was revoked. The video session has ended.</string>

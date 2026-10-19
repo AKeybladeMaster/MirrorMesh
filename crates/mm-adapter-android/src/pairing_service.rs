@@ -18,9 +18,11 @@ use mm_runtime::{PairingRuntime, PairingRuntimeError};
 /// Android TV receiver service over the shared authenticated pairing runtime and WSS adapter.
 ///
 /// Call [`Self::bind`] only after an explicit user action. Calls to [`Self::accept_request`] block
-/// while waiting for the next request and must run on a worker thread. The returned pending
-/// request contains verified identity metadata only; it is not trusted until [`Self::approve`]
-/// succeeds after explicit user consent.
+/// while waiting for the next request and must run on a worker thread. [`Self::cancel_wait`] ends
+/// only the current wait so the caller can refresh a one-time invitation; [`Self::stop_accepting`]
+/// permanently stops this service instance. The returned pending request contains verified
+/// identity metadata only; it is not trusted until [`Self::approve`] succeeds after explicit
+/// user consent.
 pub struct AndroidTvPairingService<P, I>
 where
     P: TrustedPeerPort,
@@ -29,6 +31,7 @@ where
     listener: WssPairingListener,
     runtime: Arc<Mutex<PairingRuntime<P, I>>>,
     cancellation: AtomicBool,
+    stopped: AtomicBool,
 }
 
 impl<P, I> AndroidTvPairingService<P, I>
@@ -78,6 +81,7 @@ where
             listener,
             runtime,
             cancellation: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
         })
     }
 
@@ -113,14 +117,23 @@ where
         &self,
         now_monotonic_ms: u64,
     ) -> Result<PendingAndroidTvPairing, AndroidTvPairingServiceError> {
+        if self.stopped.load(Ordering::Acquire) {
+            return Err(AndroidTvPairingServiceError::Listener(
+                WssListenerError::Cancelled,
+            ));
+        }
         let mut runtime = self
             .runtime
             .lock()
             .map_err(|_| AndroidTvPairingServiceError::RuntimeLockPoisoned)?;
-        let pending = self
+        let result = self
             .listener
             .accept_pairing_request_cancellable(&mut runtime, now_monotonic_ms, &self.cancellation)
-            .map_err(AndroidTvPairingServiceError::Listener)?;
+            .map_err(AndroidTvPairingServiceError::Listener);
+        if !self.stopped.load(Ordering::Acquire) {
+            self.cancellation.store(false, Ordering::Release);
+        }
+        let pending = result?;
         let approval = pending.admitted().approval();
         let request = AndroidTvPairingRequest {
             source_ip: pending.admitted().source_ip(),
@@ -134,12 +147,20 @@ where
 
     /// Cancels an idle accept loop. Once stopped, this service instance cannot accept again.
     pub fn stop_accepting(&self) {
+        self.stopped.store(true, Ordering::Release);
         self.cancellation.store(true, Ordering::Release);
+    }
+
+    /// Cancels the current idle wait while leaving the listener available for another wait.
+    pub fn cancel_wait(&self) {
+        if !self.stopped.load(Ordering::Acquire) {
+            self.cancellation.store(true, Ordering::Release);
+        }
     }
 
     /// Returns whether the listener is still accepting requests.
     pub fn is_accepting(&self) -> bool {
-        !self.cancellation.load(Ordering::Acquire)
+        !self.stopped.load(Ordering::Acquire)
     }
 
     /// Persists only an explicitly accepted subset and returns its approved control channel.

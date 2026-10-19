@@ -76,4 +76,5 @@ tasks.named("preBuild").configure {
 
 dependencies {
     implementation("io.github.webrtc-sdk:android:150.7871.01")
+    implementation("com.google.zxing:core:3.5.4")
 }

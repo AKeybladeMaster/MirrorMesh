@@ -13,6 +13,12 @@ final class NativePairingBridge {
     /** Starts pairing on an explicitly selected numeric local endpoint and returns JSON. */
     static native String startPairing(String socketAddress);
 
+    /** Issues a fresh one-time invitation after a request decision or expiry. */
+    static native String refreshPairingInvitation();
+
+    /** Interrupts the current idle wait but leaves the listener available for another wait. */
+    static native String cancelPairingWait();
+
     /** Blocking wait; call only from a background thread. Returns verified request metadata JSON. */
     static native String waitForPairingRequest();
 

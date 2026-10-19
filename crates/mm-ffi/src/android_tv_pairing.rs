@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const PAIRING_PORT: u16 = 8765;
+const PAIRING_WORKER_STOP_TIMEOUT: Duration = Duration::from_secs(11);
 
 static SERVICE: OnceLock<Mutex<Option<Arc<AndroidTvPairingServiceHandle>>>> = OnceLock::new();
 static PENDING: OnceLock<Mutex<Option<(i64, PendingAndroidTvPairing)>>> = OnceLock::new();
@@ -22,6 +23,7 @@ static CONNECTIONS: OnceLock<Mutex<HashMap<i64, PairingConnection>>> = OnceLock:
 static NEXT_REQUEST_ID: AtomicI64 = AtomicI64::new(1);
 static NEXT_CONNECTION_ID: AtomicI64 = AtomicI64::new(1);
 static WAITING_FOR_REQUEST: AtomicBool = AtomicBool::new(false);
+static WAIT_GENERATION: AtomicU64 = AtomicU64::new(0);
 static PROCESS_START: OnceLock<Instant> = OnceLock::new();
 
 fn service_slot() -> &'static Mutex<Option<Arc<AndroidTvPairingServiceHandle>>> {
@@ -93,6 +95,45 @@ fn start_pairing(address: &str) -> Result<String, String> {
     Ok(uri)
 }
 
+fn refresh_pairing_invitation() -> Result<Value, String> {
+    let service = get_service()?;
+    if !service.is_accepting() {
+        return Err("receiver pairing has been stopped".to_owned());
+    }
+    let address = service
+        .local_addr()
+        .map_err(|_| "receiver local address is unavailable".to_owned())?;
+    let invitation = service
+        .create_invitation(
+            &address.to_string(),
+            monotonic_millis(),
+            unix_millis()? / 1000,
+        )
+        .map_err(|_| "a fresh receiver invitation could not be created".to_owned())?;
+    Ok(json!({ "ok": true, "invitation": invitation.uri() }))
+}
+
+fn cancel_pairing_wait() -> Result<Value, String> {
+    let service_guard = service_slot()
+        .lock()
+        .map_err(|_| "receiver service lock is unavailable".to_owned())?;
+    let service = service_guard
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "receiver pairing has not been started".to_owned())?;
+    if !service.is_accepting() {
+        return Err("receiver pairing has been stopped".to_owned());
+    }
+    WAIT_GENERATION.fetch_add(1, Ordering::AcqRel);
+    service.cancel_wait();
+    let pending = pending_slot()
+        .lock()
+        .map_err(|_| "pending request lock is unavailable".to_owned())?
+        .take();
+    drop(pending);
+    Ok(json!({ "ok": true }))
+}
+
 fn accept_one_request() -> Result<Value, String> {
     if WAITING_FOR_REQUEST
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -109,10 +150,14 @@ fn accept_one_request() -> Result<Value, String> {
         return Err("decide on the current receiver request first".to_owned());
     }
 
+    let wait_generation = WAIT_GENERATION.load(Ordering::Acquire);
     let service = get_service()?;
     let pending = service
         .accept_request(monotonic_millis())
         .map_err(|error| match error {
+            mm_adapter_android::AndroidTvPairingServiceError::Listener(
+                mm_adapter_signaling::WssListenerError::Cancelled,
+            ) if service.is_accepting() => "receiver wait was cancelled".to_owned(),
             mm_adapter_android::AndroidTvPairingServiceError::Listener(
                 mm_adapter_signaling::WssListenerError::Cancelled,
             ) => "receiver pairing was stopped".to_owned(),
@@ -129,6 +174,9 @@ fn accept_one_request() -> Result<Value, String> {
         .map_err(|_| "receiver service lock is unavailable".to_owned())?;
     if service_guard.is_none() || !service.is_accepting() {
         return Err("receiver pairing was stopped".to_owned());
+    }
+    if WAIT_GENERATION.load(Ordering::Acquire) != wait_generation {
+        return Err("receiver wait was cancelled".to_owned());
     }
     let mut slot = pending_slot()
         .lock()
@@ -239,6 +287,13 @@ fn stop_pairing() -> Result<Value, String> {
             close_failures += 1;
         }
     }
+    let worker_deadline = Instant::now() + PAIRING_WORKER_STOP_TIMEOUT;
+    while WAITING_FOR_REQUEST.load(Ordering::Acquire) && Instant::now() < worker_deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if WAITING_FOR_REQUEST.load(Ordering::Acquire) {
+        return Err("pairing worker did not exit after listener cancellation".to_owned());
+    }
     Ok(json!({
         "ok": true,
         "was_active": was_active,
@@ -305,6 +360,26 @@ pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_startPairing(
         start_pairing(&address).map(|uri| json!({ "ok": true, "invitation": uri }))
     }))
     .unwrap_or_else(|_| Err("receiver pairing could not start".to_owned()));
+    java_string(&mut env, response_json(result))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_refreshPairingInvitation(
+    mut env: JNIEnv,
+    _bridge: JClass,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(refresh_pairing_invitation))
+        .unwrap_or_else(|_| Err("a fresh receiver invitation could not be created".to_owned()));
+    java_string(&mut env, response_json(result))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_cancelPairingWait(
+    mut env: JNIEnv,
+    _bridge: JClass,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(cancel_pairing_wait))
+        .unwrap_or_else(|_| Err("receiver wait could not be cancelled".to_owned()));
     java_string(&mut env, response_json(result))
 }
 

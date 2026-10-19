@@ -285,3 +285,39 @@ fn stopping_receiver_service_cancels_an_idle_pairing_accept() {
     ));
     assert!(!service.is_accepting());
 }
+
+#[test]
+fn cancelling_receiver_wait_releases_runtime_for_a_fresh_single_use_invitation() {
+    let receiver_identity = Arc::new(TestIdentity::new([0x61; 32]));
+    let peers = Arc::new(MemoryPeers::default());
+    let runtime =
+        mm_runtime::PairingRuntime::new(RECEIVER_ID, Arc::clone(&receiver_identity), peers)
+            .unwrap();
+    let service = Arc::new(
+        AndroidTvPairingService::bind(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            runtime,
+            receiver_identity,
+        )
+        .unwrap(),
+    );
+
+    let waiting_service = Arc::clone(&service);
+    let waiting = thread::spawn(move || waiting_service.accept_request(1001));
+    thread::sleep(std::time::Duration::from_millis(20));
+    service.cancel_wait();
+    assert!(service.is_accepting());
+    assert!(matches!(
+        waiting.join().unwrap(),
+        Err(super::AndroidTvPairingServiceError::Listener(
+            mm_adapter_signaling::WssListenerError::Cancelled
+        ))
+    ));
+    assert!(service.is_accepting());
+
+    let address = service.local_addr().unwrap();
+    let refreshed = service
+        .create_invitation(&address.to_string(), 1002, 30_000)
+        .unwrap();
+    assert!(refreshed.expires_at_unix_seconds() > 30_000);
+}
