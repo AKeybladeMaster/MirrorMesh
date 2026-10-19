@@ -1,26 +1,20 @@
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::time::Duration;
 
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
-use mm_adapter_tls::{tls13_pinned_client_config, tls13_server_config};
-use mm_application::{PairingCoordinatorError, PairingProof};
-use mm_domain::{DeviceId, MessageId, PeerGrant, PeerPublicKey, TrustedPeerGrants};
+use mm_adapter_tls::tls13_server_config;
+use mm_application::PairingCoordinatorError;
+use mm_domain::{DeviceId, PeerGrant, PeerPublicKey, TrustedPeerGrants};
 use mm_ports::{
     LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort,
 };
-use mm_protocol::{PairBegin, encode_pair_begin};
+use mm_protocol::parse_message;
 use mm_runtime::{PairingRuntime, PairingRuntimeError};
 use mm_security::parse_pairing_qr;
 use mm_store::SqliteTrustedPeers;
-use rustls::pki_types::ServerName;
-use rustls::{ClientConnection, StreamOwned};
-use tungstenite::client::IntoClientRequest;
-use tungstenite::client::client_with_config;
-use tungstenite::protocol::Message;
 
 const CHILD_MODE: &str = "MIRRORMESH_WSS_PAIRING_CHILD";
 const RECEIVER_ID: DeviceId = DeviceId::from_bytes([1; 16]);
@@ -288,39 +282,17 @@ fn run_client_parent(decision: TestDecision) {
     assert_eq!(qr.endpoint().socket_addr().port(), port);
 
     let sender = TestIdentity::new(SENDER_SEED);
-    let proof = PairingProof::create_signed(
-        qr.device_id(),
-        qr.nonce(),
+    let client = mm_adapter_signaling::WssPairingClient::begin_pairing(
+        &invitation,
+        NOW_UNIX_SECONDS,
+        &[port],
         SENDER_ID,
-        "Sender test process".to_owned(),
+        "Sender test process",
         TrustedPeerGrants::new(true, false, false).expect("view grant scope"),
         &sender,
+        NOW_UNIX_SECONDS * 1000,
     )
-    .expect("create signed sender proof");
-    let frame = encode_proof(&proof);
-    let client_config = tls13_pinned_client_config(qr.fingerprint()).expect("pin QR fingerprint");
-    let socket = TcpStream::connect(qr.endpoint().socket_addr()).expect("connect to child process");
-    socket
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .expect("set client read timeout");
-    socket
-        .set_write_timeout(Some(Duration::from_secs(10)))
-        .expect("set client write timeout");
-    let server_name = ServerName::try_from("mirrormesh.local").expect("static server name");
-    let tls = StreamOwned::new(
-        ClientConnection::new(client_config, server_name).expect("create pinned TLS client"),
-        socket,
-    );
-    let request = format!("wss://127.0.0.1:{port}/v1/control")
-        .into_client_request()
-        .expect("build control WebSocket request");
-    let (mut websocket, _) = client_with_config(request, tls, None)
-        .expect("complete QR-pinned TLS and WebSocket handshakes");
-    websocket
-        .send(Message::text(
-            String::from_utf8(frame).expect("pair.begin frame is UTF-8 JSON"),
-        ))
-        .expect("send signed pair.begin");
+    .expect("connect to the QR-pinned receiver and send signed pair.begin");
 
     let pending_line = read_prefixed_line(&mut output, &mut transcript, "PENDING=");
     assert!(pending_line.ends_with("|untrusted"), "{pending_line}");
@@ -334,64 +306,47 @@ fn run_client_parent(decision: TestDecision) {
         TestDecision::Expire => {
             let expired_line = read_prefixed_line(&mut output, &mut transcript, "EXPIRED=");
             assert_eq!(expired_line, "untrusted");
-            assert!(websocket.read().is_err(), "expired approval kept WSS open");
+            let error = match client.wait_for_decision() {
+                Err(error) => error,
+                Ok(_) => panic!("expired approval unexpectedly returned an approved channel"),
+            };
+            assert!(
+                matches!(&error, mm_adapter_signaling::WssClientError::Closed),
+                "expired approval returned {error:?}"
+            );
         }
         TestDecision::Reject => {
             let rejected_line = read_prefixed_line(&mut output, &mut transcript, "REJECTED=");
             assert_eq!(rejected_line, "untrusted");
-            let rejection = match websocket.read().expect("read pair.reject response") {
-                Message::Text(text) => text,
-                other => panic!("expected text pair.reject, received {other:?}"),
-            };
-            let parsed = mm_protocol::parse_message(rejection.as_str().as_bytes())
-                .expect("pair.reject uses the shared v1 protocol");
-            assert_eq!(parsed.header.kind, mm_protocol::MessageKind::PairReject);
-            match parsed.payload {
-                mm_protocol::MessagePayload::PairReject(value) => {
-                    assert_eq!(value.reason, "user_rejected");
-                }
-                _ => panic!("response must contain a PairReject payload"),
-            }
+            assert!(matches!(
+                client.wait_for_decision(),
+                Err(mm_adapter_signaling::WssClientError::Rejected(reason))
+                    if reason == "user_rejected"
+            ));
         }
         TestDecision::Approve => {
             let approved_line = read_prefixed_line(&mut output, &mut transcript, "APPROVED=");
             assert!(approved_line.ends_with("|view"), "{approved_line}");
-            let approval = match websocket.read().expect("read pair.approve response") {
-                Message::Text(text) => text,
-                other => panic!("expected text pair.approve, received {other:?}"),
-            };
-            let parsed_approval = mm_protocol::parse_message(approval.as_str().as_bytes())
-                .expect("pair.approve uses the shared v1 protocol");
+            let mut approved = client
+                .wait_for_decision()
+                .expect("receive approval from the QR-pinned receiver");
             assert_eq!(
-                parsed_approval.header.kind,
-                mm_protocol::MessageKind::PairApprove
+                approved.accepted_grants,
+                TrustedPeerGrants::new(true, false, false).expect("view grant scope")
             );
-            match parsed_approval.payload {
-                mm_protocol::MessagePayload::PairApprove(value) => {
-                    assert_eq!(value.accepted_grants, vec!["view"]);
-                    assert_eq!(value.peer_identity_proof, qr.fingerprint().to_hex());
-                }
-                _ => panic!("response must contain a PairApprove payload"),
-            }
-            websocket
-                .send(Message::text(VALID_SESSION_OFFER))
+            assert_eq!(approved.peer_fingerprint, qr.fingerprint());
+            approved
+                .connection
+                .send_control_message(VALID_SESSION_OFFER.as_bytes())
                 .expect("send a session offer over the approved WSS channel");
-            let answer = match websocket.read().expect("read session answer") {
-                Message::Text(text) => text,
-                other => panic!("expected text session answer, received {other:?}"),
-            };
-            let parsed_answer = mm_protocol::parse_message(answer.as_str().as_bytes())
-                .expect("server answer uses the shared v1 protocol");
-            let parsed_offer = mm_protocol::parse_message(VALID_SESSION_OFFER.as_bytes())
+            let answer = approved
+                .connection
+                .receive_control_message()
+                .expect("receive a session answer over the approved WSS channel");
+            let parsed_offer = parse_message(VALID_SESSION_OFFER.as_bytes())
                 .expect("client offer uses the shared v1 protocol");
-            assert_eq!(
-                parsed_answer.header.kind,
-                mm_protocol::MessageKind::SessionAnswer
-            );
-            assert_eq!(
-                parsed_answer.header.session_id,
-                parsed_offer.header.session_id
-            );
+            assert_eq!(answer.header.kind, mm_protocol::MessageKind::SessionAnswer);
+            assert_eq!(answer.header.session_id, parsed_offer.header.session_id);
             let exchanged_line =
                 read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
             assert_eq!(exchanged_line, "session.offer/session.answer");
@@ -446,43 +401,4 @@ fn invitation_port(invitation: &str) -> u16 {
         .expect("QR invitation has a port")
         .parse()
         .expect("QR invitation port is numeric")
-}
-
-fn encode_proof(proof: &PairingProof) -> Vec<u8> {
-    let grants = proof.requested_grants();
-    let requested_grants = [
-        (PeerGrant::View, "view"),
-        (PeerGrant::Send, "send"),
-        (PeerGrant::Annotate, "annotate"),
-    ]
-    .into_iter()
-    .filter(|(grant, _)| grants.allows(*grant))
-    .map(|(_, name)| name.to_owned())
-    .collect();
-    let payload = PairBegin {
-        receiver_id: proof.receiver_id().to_string(),
-        nonce: proof.nonce().to_hex(),
-        peer_id: proof.peer_id().to_string(),
-        display_name: proof.display_name().to_owned(),
-        public_key: encode_hex(proof.public_key().as_bytes()),
-        requested_grants,
-        signature: encode_hex(proof.signature()),
-    };
-    encode_pair_begin(
-        MessageId::from_bytes([0xB8; 16]),
-        1,
-        NOW_UNIX_SECONDS * 1000,
-        &payload,
-    )
-    .expect("encode bounded pair.begin frame")
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(HEX[(byte >> 4) as usize] as char);
-        encoded.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    encoded
 }

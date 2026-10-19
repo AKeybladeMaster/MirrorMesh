@@ -5,14 +5,15 @@ use std::sync::atomic::AtomicUsize;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use mm_domain::{DeviceId, MessageId, SessionId};
-use mm_protocol::{MessageKind, ProtocolError};
+use mm_domain::{DeviceId, MessageId, PeerFingerprint, SessionId, TrustedPeerGrants};
+use mm_protocol::{MessageKind, PairApprove, ProtocolError};
 use tungstenite::http::{Method, Request, Uri};
 
 use super::{
     ControlSequenceState, HandshakeDeadlineStream, MAX_PAIR_BEGIN_BYTES,
-    MAX_PENDING_PAIRING_CONNECTIONS, PendingConnectionSlot, WssControlChannelError,
-    is_control_request, parse_post_approval_control_frame, remaining_until, websocket_config,
+    MAX_PENDING_PAIRING_CONNECTIONS, PendingConnectionSlot, WssClientError, WssControlChannelError,
+    is_control_request, parse_post_approval_control_frame, remaining_until, validate_pair_approval,
+    websocket_config,
 };
 
 const VALID_SESSION_OFFER: &str =
@@ -198,5 +199,37 @@ fn approved_control_channel_enforces_per_peer_session_and_revoke_sequences() {
         Err(WssControlChannelError::Protocol(
             ProtocolError::SequenceReplay
         ))
+    ));
+}
+
+#[test]
+fn sender_rejects_approval_identity_mismatch_and_grant_escalation() {
+    let fingerprint = PeerFingerprint::from_bytes([0xab; 32]);
+    let requested = TrustedPeerGrants::new(true, false, false).unwrap();
+    let approval = PairApprove {
+        accepted_grants: vec!["view".to_owned()],
+        peer_identity_proof: fingerprint.to_hex(),
+    };
+    assert_eq!(
+        validate_pair_approval(&approval, fingerprint, requested).unwrap(),
+        requested
+    );
+
+    let wrong_identity = PairApprove {
+        peer_identity_proof: PeerFingerprint::from_bytes([0xcd; 32]).to_hex(),
+        ..approval
+    };
+    assert!(matches!(
+        validate_pair_approval(&wrong_identity, fingerprint, requested),
+        Err(WssClientError::PeerIdentityMismatch)
+    ));
+
+    let unrequested = PairApprove {
+        accepted_grants: vec!["send".to_owned()],
+        peer_identity_proof: fingerprint.to_hex(),
+    };
+    assert!(matches!(
+        validate_pair_approval(&unrequested, fingerprint, requested),
+        Err(WssClientError::GrantsNotSubset)
     ));
 }

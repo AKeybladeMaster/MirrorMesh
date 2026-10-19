@@ -1,20 +1,27 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::str;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use mm_adapter_tls::{TlsAdapterError, tls13_pinned_client_config};
+use mm_application::{PairingProof, PairingProofSigningError};
 use mm_domain::{
     DeviceId, MessageId, PeerFingerprint, PeerGrant, SessionId, TrustedPeer, TrustedPeerGrants,
 };
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, TrustedPeerPort};
 use mm_protocol::{
-    EnvelopeHeader, MAX_ENVELOPE_BYTES, MessageKind, PairApprove, PairReject, ProtocolError,
-    SequenceTracker, ValidatedMessage, encode_pair_approve, encode_pair_reject, parse_message,
+    EnvelopeHeader, MAX_ENVELOPE_BYTES, MessageKind, PairApprove, PairBegin, PairReject,
+    ProtocolError, SequenceTracker, ValidatedMessage, encode_pair_approve, encode_pair_begin,
+    encode_pair_reject, parse_message,
 };
 use mm_runtime::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
-use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use mm_security::{PairingQrError, parse_pairing_qr};
+use rustls::pki_types::ServerName;
+use rustls::{ClientConnection, ServerConfig, ServerConnection, StreamOwned};
+use tungstenite::client::{IntoClientRequest, client_with_config};
 use tungstenite::handshake::HandshakeError;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::{Method, StatusCode};
@@ -31,6 +38,34 @@ const SOCKET_WRITE_BUFFER_BYTES: usize = 4 * 1024;
 
 pub type PendingPairingWebSocket =
     WebSocket<StreamOwned<ServerConnection, HandshakeDeadlineStream>>;
+
+trait WssSocket: Send {
+    fn send_message(&mut self, message: Message) -> Result<(), WebSocketError>;
+    fn read_message(&mut self) -> Result<Message, WebSocketError>;
+    fn flush_socket(&mut self) -> Result<(), WebSocketError>;
+    fn close_socket(&mut self) -> Result<(), WebSocketError>;
+}
+
+impl<S> WssSocket for WebSocket<S>
+where
+    S: Read + Write + Send + 'static,
+{
+    fn send_message(&mut self, message: Message) -> Result<(), WebSocketError> {
+        self.send(message)
+    }
+
+    fn read_message(&mut self) -> Result<Message, WebSocketError> {
+        self.read()
+    }
+
+    fn flush_socket(&mut self) -> Result<(), WebSocketError> {
+        self.flush()
+    }
+
+    fn close_socket(&mut self) -> Result<(), WebSocketError> {
+        self.close(None)
+    }
+}
 
 /// A pending pairing request and the authenticated WSS connection that carried it.
 ///
@@ -89,12 +124,12 @@ impl PendingPairingConnection {
         let text = String::from_utf8(frame)
             .map_err(|_| WssControlChannelError::Protocol(ProtocolError::InvalidUtf8))?;
         self.connection
-            .websocket
-            .send(Message::text(text))
+            .socket
+            .send_message(Message::text(text))
             .map_err(WssControlChannelError::WebSocket)?;
         self.connection
-            .websocket
-            .close(None)
+            .socket
+            .close_socket()
             .map_err(WssControlChannelError::WebSocket)
     }
 }
@@ -120,11 +155,11 @@ impl std::error::Error for WssApprovalError {}
 /// A live WSS connection that retains its listener capacity slot until dropped.
 pub struct PairingConnection {
     peer_id: DeviceId,
-    websocket: PendingPairingWebSocket,
+    socket: Box<dyn WssSocket>,
     inbound_sequences: ControlSequenceState,
     outbound_sequences: ControlSequenceState,
     control_ready: bool,
-    _slot: PendingConnectionSlot,
+    _slot: Option<PendingConnectionSlot>,
 }
 
 impl PairingConnection {
@@ -135,11 +170,22 @@ impl PairingConnection {
     ) -> Self {
         Self {
             peer_id,
-            websocket,
+            socket: Box::new(websocket),
             inbound_sequences: ControlSequenceState::new(),
             outbound_sequences: ControlSequenceState::new(),
             control_ready: false,
-            _slot: slot,
+            _slot: Some(slot),
+        }
+    }
+
+    fn new_client(peer_id: DeviceId, socket: Box<dyn WssSocket>) -> Self {
+        Self {
+            peer_id,
+            socket,
+            inbound_sequences: ControlSequenceState::new(),
+            outbound_sequences: ControlSequenceState::new(),
+            control_ready: true,
+            _slot: None,
         }
     }
 
@@ -164,8 +210,8 @@ impl PairingConnection {
         let header = message.header;
         let text = std::str::from_utf8(frame)
             .map_err(|_| WssControlChannelError::Protocol(ProtocolError::InvalidUtf8))?;
-        self.websocket
-            .send(Message::text(text))
+        self.socket
+            .send_message(Message::text(text))
             .map_err(WssControlChannelError::WebSocket)?;
         Ok(header)
     }
@@ -177,11 +223,11 @@ impl PairingConnection {
     pub fn receive_control_message(&mut self) -> Result<ValidatedMessage, WssControlChannelError> {
         self.ensure_control_ready()?;
         loop {
-            let frame = match self.websocket.read() {
+            let frame = match self.socket.read_message() {
                 Ok(Message::Text(text)) => text,
                 Ok(Message::Ping(_)) => {
-                    self.websocket
-                        .flush()
+                    self.socket
+                        .flush_socket()
                         .map_err(WssControlChannelError::WebSocket)?;
                     continue;
                 }
@@ -211,8 +257,8 @@ impl PairingConnection {
 
     /// Starts a WebSocket close handshake. Dropping this connection also releases its slot.
     pub fn close(&mut self) -> Result<(), WssControlChannelError> {
-        self.websocket
-            .close(None)
+        self.socket
+            .close_socket()
             .map_err(WssControlChannelError::WebSocket)
     }
 
@@ -241,8 +287,8 @@ impl PairingConnection {
         let frame = encode_pair_approve(random_message_id()?, 1, sent_at_ms, &payload)?;
         let text = String::from_utf8(frame)
             .map_err(|_| WssControlChannelError::Protocol(ProtocolError::InvalidUtf8))?;
-        self.websocket
-            .send(Message::text(text))
+        self.socket
+            .send_message(Message::text(text))
             .map_err(WssControlChannelError::WebSocket)?;
         self.control_ready = true;
         Ok(())
@@ -258,11 +304,15 @@ impl PairingConnection {
 }
 
 fn random_message_id() -> Result<MessageId, WssControlChannelError> {
+    random_message_id_raw().ok_or(WssControlChannelError::RandomnessUnavailable)
+}
+
+fn random_message_id_raw() -> Option<MessageId> {
     let mut bytes = [0_u8; 16];
-    getrandom::fill(&mut bytes).map_err(|_| WssControlChannelError::RandomnessUnavailable)?;
+    getrandom::fill(&mut bytes).ok()?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Ok(MessageId::from_bytes(bytes))
+    Some(MessageId::from_bytes(bytes))
 }
 
 /// Errors from the authenticated, post-approval WSS control channel.
@@ -386,6 +436,270 @@ impl ControlSequenceState {
     fn forget_session(&mut self, session_id: SessionId) {
         self.sessions.forget_session(session_id);
     }
+}
+
+/// Sender-side WSS pairing entry point for a validated QR invitation.
+pub struct WssPairingClient;
+
+impl WssPairingClient {
+    /// Validates a QR invitation, pins TLS to its fingerprint, signs `pair.begin`, and submits it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_pairing<I>(
+        invitation_uri: &str,
+        now_unix_seconds: u64,
+        approved_ports: &[u16],
+        local_device_id: DeviceId,
+        display_name: &str,
+        requested_grants: TrustedPeerGrants,
+        identity: &I,
+        sent_at_ms: u64,
+    ) -> Result<PendingWssPairingClient, WssClientError>
+    where
+        I: LocalPairingIdentityPort,
+    {
+        let invitation = parse_pairing_qr(invitation_uri, now_unix_seconds, approved_ports)
+            .map_err(WssClientError::PairingQr)?;
+        let proof = PairingProof::create_signed(
+            invitation.device_id(),
+            invitation.nonce(),
+            local_device_id,
+            display_name.to_owned(),
+            requested_grants,
+            identity,
+        )
+        .map_err(WssClientError::Proof)?;
+        let payload = PairBegin {
+            receiver_id: proof.receiver_id().to_string(),
+            nonce: proof.nonce().to_hex(),
+            peer_id: proof.peer_id().to_string(),
+            display_name: proof.display_name().to_owned(),
+            public_key: encode_lower_hex(proof.public_key().as_bytes()),
+            requested_grants: grants_to_wire(proof.requested_grants()),
+            signature: encode_lower_hex(proof.signature()),
+        };
+        let message_id = random_message_id_raw().ok_or(WssClientError::RandomnessUnavailable)?;
+        let frame = encode_pair_begin(message_id, 1, sent_at_ms, &payload)
+            .map_err(WssClientError::Protocol)?;
+
+        let deadline = Instant::now() + SOCKET_HANDSHAKE_TIMEOUT;
+        let socket = TcpStream::connect_timeout(
+            &invitation.endpoint().socket_addr(),
+            SOCKET_HANDSHAKE_TIMEOUT,
+        )
+        .map_err(WssClientError::Io)?;
+        socket.set_nodelay(true).map_err(WssClientError::Io)?;
+        let tls_config =
+            tls13_pinned_client_config(invitation.fingerprint()).map_err(WssClientError::Tls)?;
+        let server_name = ServerName::try_from("mirrormesh.local")
+            .expect("static MirrorMesh TLS server name is valid");
+        let tls = StreamOwned::new(
+            ClientConnection::new(tls_config, server_name).map_err(WssClientError::TlsSetup)?,
+            HandshakeDeadlineStream::new(socket, deadline),
+        );
+        let request = format!(
+            "wss://mirrormesh.local:{}/v1/control",
+            invitation.endpoint().socket_addr().port()
+        )
+        .into_client_request()
+        .map_err(|error| WssClientError::WebSocketHandshake(error.to_string()))?;
+        let (mut websocket, _) = client_with_config(request, tls, Some(websocket_config()))
+            .map_err(|error| WssClientError::WebSocketHandshake(error.to_string()))?;
+        websocket
+            .get_mut()
+            .sock
+            .clear_deadline()
+            .map_err(WssClientError::Io)?;
+        let text = String::from_utf8(frame)
+            .map_err(|_| WssClientError::Protocol(ProtocolError::InvalidUtf8))?;
+        websocket
+            .send(Message::text(text))
+            .map_err(WssClientError::WebSocket)?;
+
+        Ok(PendingWssPairingClient {
+            socket: Box::new(websocket),
+            receiver_id: invitation.device_id(),
+            peer_fingerprint: invitation.fingerprint(),
+            requested_grants,
+        })
+    }
+}
+
+/// A sender connection waiting for an explicit TV/receiver approval or rejection.
+pub struct PendingWssPairingClient {
+    socket: Box<dyn WssSocket>,
+    receiver_id: DeviceId,
+    peer_fingerprint: PeerFingerprint,
+    requested_grants: TrustedPeerGrants,
+}
+
+impl PendingWssPairingClient {
+    /// Waits for one authenticated `pair.approve` or `pair.reject` response.
+    pub fn wait_for_decision(mut self) -> Result<WssClientApprovedPairing, WssClientError> {
+        loop {
+            let frame = match self.socket.read_message() {
+                Ok(Message::Text(text)) => text,
+                Ok(Message::Ping(_)) => {
+                    self.socket
+                        .flush_socket()
+                        .map_err(WssClientError::WebSocket)?;
+                    continue;
+                }
+                Ok(Message::Pong(_)) => continue,
+                Ok(Message::Binary(_)) => return Err(WssClientError::UnexpectedBinaryMessage),
+                Ok(Message::Close(_)) => return Err(WssClientError::Closed),
+                Ok(Message::Frame(_)) => unreachable!("tungstenite does not expose raw frames"),
+                Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
+                    return Err(WssClientError::Closed);
+                }
+                Err(WebSocketError::Io(error))
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::UnexpectedEof
+                            | io::ErrorKind::ConnectionReset
+                            | io::ErrorKind::BrokenPipe
+                    ) =>
+                {
+                    return Err(WssClientError::Closed);
+                }
+                Err(error) => return Err(WssClientError::WebSocket(error)),
+            };
+            let message =
+                parse_message(frame.as_str().as_bytes()).map_err(WssClientError::Protocol)?;
+            if message.header.sequence != 1 {
+                return Err(WssClientError::Protocol(ProtocolError::InvalidSequence));
+            }
+            match message.payload {
+                mm_protocol::MessagePayload::PairApprove(approval) => {
+                    let accepted_grants = validate_pair_approval(
+                        &approval,
+                        self.peer_fingerprint,
+                        self.requested_grants,
+                    )?;
+                    let connection = PairingConnection::new_client(self.receiver_id, self.socket);
+                    return Ok(WssClientApprovedPairing {
+                        accepted_grants,
+                        peer_fingerprint: self.peer_fingerprint,
+                        connection,
+                    });
+                }
+                mm_protocol::MessagePayload::PairReject(rejection) => {
+                    return Err(WssClientError::Rejected(rejection.reason));
+                }
+                _ => return Err(WssClientError::UnexpectedMessageKind),
+            }
+        }
+    }
+}
+
+/// A successfully approved sender-side connection and the grant subset selected by the receiver.
+pub struct WssClientApprovedPairing {
+    pub accepted_grants: TrustedPeerGrants,
+    pub peer_fingerprint: PeerFingerprint,
+    pub connection: PairingConnection,
+}
+
+/// Errors from QR-pinned sender-side pairing and decision handling.
+#[derive(Debug)]
+pub enum WssClientError {
+    PairingQr(PairingQrError),
+    Proof(PairingProofSigningError),
+    Tls(TlsAdapterError),
+    TlsSetup(rustls::Error),
+    Io(io::Error),
+    WebSocket(WebSocketError),
+    WebSocketHandshake(String),
+    Protocol(ProtocolError),
+    PeerIdentityMismatch,
+    GrantsNotSubset,
+    UnexpectedMessageKind,
+    UnexpectedBinaryMessage,
+    RandomnessUnavailable,
+    Rejected(String),
+    Closed,
+}
+
+impl fmt::Display for WssClientError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PairingQr(error) => write!(formatter, "pairing QR is invalid: {error:?}"),
+            Self::Proof(error) => write!(formatter, "sender proof could not be created: {error}"),
+            Self::Tls(error) => write!(formatter, "pinned TLS setup failed: {error}"),
+            Self::TlsSetup(error) => write!(formatter, "pinned TLS connection failed: {error}"),
+            Self::Io(error) => write!(formatter, "WSS client socket failed: {error}"),
+            Self::WebSocket(error) => write!(formatter, "WSS client protocol failed: {error}"),
+            Self::WebSocketHandshake(error) => {
+                write!(formatter, "WSS client handshake failed: {error}")
+            }
+            Self::Protocol(error) => write!(formatter, "pairing response is invalid: {error}"),
+            Self::PeerIdentityMismatch => {
+                formatter.write_str("pairing approval identity does not match the QR pin")
+            }
+            Self::GrantsNotSubset => {
+                formatter.write_str("receiver approved grants that the sender did not request")
+            }
+            Self::UnexpectedMessageKind => {
+                formatter.write_str("receiver sent an unexpected pairing response")
+            }
+            Self::UnexpectedBinaryMessage => {
+                formatter.write_str("binary WebSocket messages are not pairing responses")
+            }
+            Self::RandomnessUnavailable => {
+                formatter.write_str("operating-system randomness is unavailable")
+            }
+            Self::Rejected(reason) => write!(formatter, "receiver rejected pairing: {reason}"),
+            Self::Closed => formatter.write_str("receiver closed the pairing connection"),
+        }
+    }
+}
+
+impl std::error::Error for WssClientError {}
+
+fn grants_to_wire(grants: TrustedPeerGrants) -> Vec<String> {
+    [
+        (PeerGrant::View, "view"),
+        (PeerGrant::Send, "send"),
+        (PeerGrant::Annotate, "annotate"),
+    ]
+    .into_iter()
+    .filter(|(grant, _)| grants.allows(*grant))
+    .map(|(_, name)| name.to_owned())
+    .collect()
+}
+
+fn grants_from_wire(grants: &[String]) -> Result<TrustedPeerGrants, WssClientError> {
+    TrustedPeerGrants::new(
+        grants.iter().any(|grant| grant == "view"),
+        grants.iter().any(|grant| grant == "send"),
+        grants.iter().any(|grant| grant == "annotate"),
+    )
+    .map_err(|_| WssClientError::Protocol(ProtocolError::InvalidPayload))
+}
+
+fn validate_pair_approval(
+    approval: &PairApprove,
+    expected_fingerprint: PeerFingerprint,
+    requested_grants: TrustedPeerGrants,
+) -> Result<TrustedPeerGrants, WssClientError> {
+    let peer_fingerprint = PeerFingerprint::from_hex(&approval.peer_identity_proof)
+        .map_err(|_| WssClientError::PeerIdentityMismatch)?;
+    if peer_fingerprint != expected_fingerprint {
+        return Err(WssClientError::PeerIdentityMismatch);
+    }
+    let accepted_grants = grants_from_wire(&approval.accepted_grants)?;
+    if !accepted_grants.is_subset_of(requested_grants) {
+        return Err(WssClientError::GrantsNotSubset);
+    }
+    Ok(accepted_grants)
+}
+
+fn encode_lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 struct PendingConnectionSlot {
