@@ -43,6 +43,7 @@ void main() {
             calls.add(call);
             return switch (call.method) {
               'beginSenderSession' => sessionId,
+              'startSenderSession' => true,
               'sendSenderSessionIce' => true,
               'pollSenderPairing' => <String, Object?>{
                 'state': WindowsSenderPairingState.approved.nativeValue,
@@ -83,6 +84,11 @@ void main() {
           sdpMLineIndex: 0,
         ),
       );
+      expect(
+        calls.where((call) => call.method == 'startSenderSession'),
+        isEmpty,
+      );
+      peer.emitState(WebRtcConnectionState.connected);
       peer.emitState(WebRtcConnectionState.connected);
       await Future<void>.delayed(const Duration(milliseconds: 240));
 
@@ -103,6 +109,14 @@ void main() {
         calls.where((call) => call.method == 'sendSenderSessionIce'),
         hasLength(1),
       );
+      final startCalls = calls
+          .where((call) => call.method == 'startSenderSession')
+          .toList();
+      expect(startCalls, hasLength(1));
+      expect(startCalls.single.arguments, <String, Object?>{
+        'requestId': 41,
+        'sourceId': 'desktop-capture',
+      });
       expect(controller.state, WindowsSenderSessionState.transportConnected);
 
       await controller.dispose();

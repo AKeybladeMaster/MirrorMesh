@@ -40,6 +40,7 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
     private final Queue<String> bufferedRemoteOffers = new ArrayDeque<>();
 
     private volatile RemoteIceCandidateListener remoteIceListener;
+    private volatile RemoteStartListener remoteStartListener;
     private volatile RemoteOfferListener remoteOfferListener;
     private volatile Runnable revokedListener;
     private volatile Runnable remoteStopListener;
@@ -106,6 +107,11 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
     }
 
     @Override
+    public void setRemoteStartListener(RemoteStartListener listener) {
+        remoteStartListener = listener;
+    }
+
+    @Override
     public void setRemoteOfferListener(RemoteOfferListener listener) {
         List<String> buffered;
         synchronized (listenerLock) {
@@ -139,6 +145,7 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
     public void clearListeners() {
         synchronized (listenerLock) {
             remoteIceListener = null;
+            remoteStartListener = null;
             remoteOfferListener = null;
             bufferedIceCandidates.clear();
             bufferedRemoteOffers.clear();
@@ -182,9 +189,9 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
                             message.optString("media_id"),
                             message.getInt("media_line_index"),
                             message.getString("candidate"));
+                    case "start" -> receiveStart(message.optString("source_id"));
                     case "stop" -> receiveRemoteStop();
                     case "revoke" -> receiveRevocation();
-                    case "start" -> { }
                     default -> throw new IllegalStateException(
                             "Rust signaling returned an unknown message kind.");
                 }
@@ -195,6 +202,18 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
                 }
                 return;
             }
+        }
+    }
+
+    private void receiveStart(String sourceId) {
+        try {
+            sourceId = SessionStartNotice.validateSourceId(sourceId);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalStateException("Rust signaling returned an invalid source ID.", error);
+        }
+        RemoteStartListener listener = remoteStartListener;
+        if (listener != null) {
+            listener.onStarted(sourceId);
         }
     }
 

@@ -20,6 +20,7 @@ constexpr char kBeginSenderPairingMethod[] = "beginSenderPairing";
 constexpr char kPollSenderPairingMethod[] = "pollSenderPairing";
 constexpr char kCancelSenderPairingMethod[] = "cancelSenderPairing";
 constexpr char kBeginSenderSessionMethod[] = "beginSenderSession";
+constexpr char kStartSenderSessionMethod[] = "startSenderSession";
 constexpr char kSendSenderSessionIceMethod[] = "sendSenderSessionIce";
 constexpr char kPollSenderSessionEventMethod[] = "pollSenderSessionEvent";
 constexpr char kPreparePairingRuntimeSymbol[] =
@@ -34,6 +35,8 @@ constexpr char kShutdownSenderPairingSymbol[] =
     "mirrormesh_windows_shutdown_sender_pairing";
 constexpr char kBeginSenderSessionSymbol[] =
     "mirrormesh_windows_begin_sender_session";
+constexpr char kStartSenderSessionSymbol[] =
+    "mirrormesh_windows_start_sender_session";
 constexpr char kSendSenderSessionIceSymbol[] =
     "mirrormesh_windows_send_sender_session_ice";
 constexpr char kPollSenderSessionEventSymbol[] =
@@ -168,6 +171,22 @@ int32_t SendSenderSessionIce(uint64_t request_id,
       request_id, reinterpret_cast<const uint8_t*>(media_id.data()),
       media_id.size(), media_line_index,
       reinterpret_cast<const uint8_t*>(candidate.data()), candidate.size());
+}
+
+int32_t StartSenderSession(uint64_t request_id, const std::string& source_id) {
+  HMODULE rust_bridge = ::GetModuleHandleW(L"mm_ffi.dll");
+  if (rust_bridge == nullptr) {
+    return 2;
+  }
+  using StartSession = int32_t (*)(uint64_t, const uint8_t*, size_t);
+  auto start_session = reinterpret_cast<StartSession>(
+      ::GetProcAddress(rust_bridge, kStartSenderSessionSymbol));
+  if (start_session == nullptr) {
+    return 2;
+  }
+  return start_session(
+      request_id, reinterpret_cast<const uint8_t*>(source_id.data()),
+      source_id.size());
 }
 
 int32_t PollSenderSessionEvent(uint64_t request_id, std::string* event_json) {
@@ -420,6 +439,30 @@ bool FlutterWindow::OnCreate() {
                           status == 5
                               ? "Start a sender session before sending ICE."
                               : "Windows could not send the ICE candidate.");
+            return;
+          }
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
+
+        if (call.method_name() == kStartSenderSessionMethod) {
+          const auto request_id = ReadIntegerMapValue(call.arguments(), "requestId");
+          const auto source_id = ReadStringMapValue(call.arguments(), "sourceId");
+          if (!request_id.has_value() || *request_id <= 0 || !source_id.has_value()) {
+            result->Error("invalid_argument",
+                          "A pairing request ID and source ID are required.");
+            return;
+          }
+          const int32_t status = StartSenderSession(
+              static_cast<uint64_t>(*request_id), *source_id);
+          if (status != 0) {
+            result->Error(status == 5 ? "session_not_ready"
+                                     : (status == 3 ? "session_busy"
+                                                    : "session_unavailable"),
+                          status == 5
+                              ? "The peer connection must be ready before capture starts."
+                              : (status == 3 ? "The session start was already requested."
+                                             : "Windows could not report the active source."));
             return;
           }
           result->Success(flutter::EncodableValue(true));

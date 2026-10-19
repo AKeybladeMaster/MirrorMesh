@@ -47,6 +47,7 @@ final class WindowsSenderSessionController {
   StreamSubscription<WebRtcEngineEvent>? _engineEvents;
   Timer? _pollTimer;
   Timer? _statsTimer;
+  Completer<void>? _localIceDrainComplete;
   String? _sessionId;
   int? _requestId;
   int _pendingLocalIceBytes = 0;
@@ -54,7 +55,9 @@ final class WindowsSenderSessionController {
   bool _remoteDescriptionSet = false;
   bool _polling = false;
   bool _statsPolling = false;
-  bool _drainingLocalIce = false;
+  bool _sessionStartInFlight = false;
+  bool _sessionStartQueued = false;
+  bool _transportReady = false;
   bool _starting = false;
   bool _closed = false;
   Object? _lastError;
@@ -83,6 +86,9 @@ final class WindowsSenderSessionController {
     }
     _starting = true;
     _requestId = requestId;
+    _sessionStartInFlight = false;
+    _sessionStartQueued = false;
+    _transportReady = false;
     _lastError = null;
     _setState(WindowsSenderSessionState.negotiating);
     final engine = FlutterWebRtcEngine(factory: _engineFactory);
@@ -111,6 +117,7 @@ final class WindowsSenderSessionController {
         sdp: offer,
       );
       await _drainLocalIce();
+      if (_transportReady) await _sendSessionStart();
       _pollTimer = Timer.periodic(
         const Duration(milliseconds: 100),
         (_) => unawaited(_pollSessionEvent()),
@@ -173,7 +180,9 @@ final class WindowsSenderSessionController {
     } else if (event is WebRtcConnectionStateEvent) {
       switch (event.state) {
         case WebRtcConnectionState.connected:
+          _transportReady = true;
           _setState(WindowsSenderSessionState.transportConnected);
+          unawaited(_sendSessionStart());
         case WebRtcConnectionState.failed:
         case WebRtcConnectionState.closed:
           unawaited(_fail(StateError('The WebRTC peer connection failed.')));
@@ -182,6 +191,30 @@ final class WindowsSenderSessionController {
         case WebRtcConnectionState.disconnected:
           break;
       }
+    }
+  }
+
+  Future<void> _sendSessionStart() async {
+    if (!_transportReady ||
+        _closed ||
+        _sessionStartQueued ||
+        _sessionStartInFlight ||
+        _sessionId == null) {
+      return;
+    }
+    _sessionStartInFlight = true;
+    try {
+      await _drainLocalIce();
+      if (_closed || _sessionId == null || _sessionStartQueued) return;
+      await pairing.startSenderSession(
+        requestId: _requestId!,
+        sourceId: 'desktop-capture',
+      );
+      _sessionStartQueued = true;
+    } catch (error) {
+      await _fail(error);
+    } finally {
+      _sessionStartInFlight = false;
     }
   }
 
@@ -203,9 +236,17 @@ final class WindowsSenderSessionController {
     unawaited(_drainLocalIce());
   }
 
-  Future<void> _drainLocalIce() async {
-    if (_drainingLocalIce || _sessionId == null || _closed) return;
-    _drainingLocalIce = true;
+  Future<void> _drainLocalIce() {
+    if (_sessionId == null || _closed) return Future<void>.value();
+    final activeDrain = _localIceDrainComplete;
+    if (activeDrain != null) return activeDrain.future;
+    final completion = Completer<void>();
+    _localIceDrainComplete = completion;
+    unawaited(_runLocalIceDrain(completion));
+    return completion.future;
+  }
+
+  Future<void> _runLocalIceDrain(Completer<void> completion) async {
     try {
       while (_pendingLocalIce.isNotEmpty && !_closed) {
         final candidate = _pendingLocalIce.removeAt(0);
@@ -220,7 +261,10 @@ final class WindowsSenderSessionController {
     } catch (error) {
       await _fail(error);
     } finally {
-      _drainingLocalIce = false;
+      if (identical(_localIceDrainComplete, completion)) {
+        _localIceDrainComplete = null;
+      }
+      if (!completion.isCompleted) completion.complete();
     }
   }
 

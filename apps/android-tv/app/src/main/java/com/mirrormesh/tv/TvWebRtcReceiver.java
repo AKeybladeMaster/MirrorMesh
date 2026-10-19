@@ -263,6 +263,11 @@ public final class TvWebRtcReceiver implements AutoCloseable {
 
     private void attachSignalingListeners(ApprovedSignalingChannel channel) {
         channel.setRemoteIceCandidateListener(this::addRemoteIceCandidate);
+        channel.setRemoteStartListener(sourceId -> {
+            if (!closed.get() && receivedFrameCount == 0) {
+                listener.onStatus("Sender reports capture started");
+            }
+        });
         channel.setRemoteOfferListener(this::reconnectWithOffer);
         channel.setRevokedListener(() -> {
             if (state.revoke()) {

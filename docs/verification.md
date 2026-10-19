@@ -121,6 +121,27 @@ Task 45 is **SOURCE_IMPLEMENTED** for sender-side diagnostics, not media deliver
 
 **Task 46 source update:** The MirrorMesh test pattern now animates a vertical marker across the color bars. The pattern is rendered by Flutter into the app window; if the user selects that window, the existing plugin's native desktop capturer supplies the changing content to the H.264-constrained WebRTC track. Dart format and analysis pass. The focused widget test produced no output for 50 seconds and was interrupted (exit 1); the Windows release build produced no output for 30 seconds and was interrupted (exit 1). No test/build pass is claimed. This pattern is not WGC or a direct native video track, and there is no evidence yet for native capture, encoding, RTP delivery, or TV decode.
 
+**Task 47 source update:** The Windows sender queues the existing `session.start` message once the peer reports `connected`, after any pending local ICE send drains. Its source ID is the generic `desktop-capture` label; the local capture ID/name stays on Windows. The Rust sender worker requires the approved connection, active session, answer receipt, bounded source label, and next sequence. Android TV JNI verifies that the message belongs to the approved session and forwards bounded metadata to a status listener. This reports sender intent only and does not confirm video frames.
+
+| Command / check | Exit | Result |
+|---|---:|---|
+| `cargo fmt --all -- --check` | 0 | Workspace formatting passes. |
+| `cargo test -p mm-protocol -p mm-adapter-signaling -p mm-ffi --locked --offline` | 0 | 21 protocol tests, 9 signaling unit tests, 4 two-process WSS tests, 4 FFI unit tests, and 3 FFI integration tests pass. WSS now exercises offer/answer/start control. |
+| `cargo test --workspace --all-features --locked --offline --quiet` | 0 | Full all-feature unit, integration, and doc tests pass. Cargo prints its existing `C:\Users\Beasty` canonicalization warning. |
+| `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | 0 | Strict workspace Clippy passes. |
+| `cargo test -p mm-adapter-win -p mm-ffi --target x86_64-pc-windows-msvc --locked --offline` | 0 | 23 Windows adapter tests, 4 FFI unit tests, and 3 FFI integration tests pass. |
+| `cargo clippy -p mm-adapter-win -p mm-ffi --target x86_64-pc-windows-msvc --all-targets --locked --offline -- -D warnings` | 0 | Windows-target adapter/FFI Clippy passes. |
+| `cargo build -p mm-ffi --target x86_64-pc-windows-msvc --release --locked --offline` | 0 | Optimized DLL links. `dumpbin /exports` confirms `mirrormesh_windows_start_sender_session`. |
+| Dart format check and focused analysis | 0 | Changed Windows pairing/session Dart files and tests are formatted; analyzer reports no issues. |
+| Direct JDK 17 compile and Java tests | 0 | Six TV state, H.264, screenshot-conversion, and session-start label test classes pass. |
+| Focused Flutter session tests | 1; interrupted | No output for 55 seconds; process interrupted. No Flutter test pass is claimed. |
+| `flutter build windows --release --no-pub` | 1; interrupted | No output for 30 seconds; process interrupted. No Windows bundle or current runner translation-unit compile is verified. |
+| Android TV shell PowerShell check | blocked | Windows PowerShell execution policy prevents loading the repository `.ps1` script. No policy change or bypass was made. |
+| Android TV APK build | unavailable | No Gradle executable or Android SDK/NDK is installed/configured on this host. |
+| App-to-app WSS/ICE/RTP and TV decode | not run | Two-process WSS covers control messages only. No live app peer, H.264 frame, TV decode, screenshot, WGC, or hardware test ran. |
+
+The Task 47 API/FFI changes use the existing v1 message vocabulary and require cross-track review. Proposed [ADR-0047](adr/0047-windows-session-start-control.md) records the decision and limits. `BUILD_VERIFIED` applies to Rust Windows adapter/FFI code and the optimized DLL, not the Flutter bundle, C++ method-channel source, Android TV APK, or media path. `HARDWARE_VERIFIED` remains pending.
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

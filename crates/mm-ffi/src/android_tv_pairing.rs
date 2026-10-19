@@ -430,11 +430,17 @@ fn poll_control_message(connection_id: i64) -> Result<Value, String> {
                 "reason": stop.reason
             }))
         }
-        MessagePayload::SessionStart(_) => Ok(json!({
-            "ok": true,
-            "pending": false,
-            "kind": "start"
-        })),
+        MessagePayload::SessionStart(start) => {
+            if connection.session_id != message.header.session_id {
+                return Err("session start does not belong to the approved TV session".to_owned());
+            }
+            Ok(json!({
+                "ok": true,
+                "pending": false,
+                "kind": "start",
+                "source_id": start.source_id
+            }))
+        }
         MessagePayload::PairRevoke(_) => Ok(json!({
             "ok": true,
             "pending": false,

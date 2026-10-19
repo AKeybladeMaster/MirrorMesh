@@ -11,7 +11,9 @@ use mm_domain::{DeviceId, PeerGrant, PeerPublicKey, TrustedPeerGrants};
 use mm_ports::{
     LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort,
 };
-use mm_protocol::{MessagePayload, encode_session_offer, parse_message};
+use mm_protocol::{
+    MessagePayload, SessionStart, encode_session_offer, encode_session_start, parse_message,
+};
 use mm_runtime::{PairingRuntime, PairingRuntimeError};
 use mm_security::parse_pairing_qr;
 use mm_store::SqliteTrustedPeers;
@@ -225,7 +227,18 @@ fn run_server_child() {
             connection
                 .send_control_message(VALID_SESSION_ANSWER.as_bytes())
                 .expect("send a typed session answer after approval");
-            println!("CONTROL_EXCHANGED=session.offer/session.answer");
+            let start = connection
+                .receive_control_message()
+                .expect("receive the post-connect session start message");
+            assert_eq!(start.header.kind, mm_protocol::MessageKind::SessionStart);
+            assert_eq!(start.header.session_id, offer.header.session_id);
+            match start.payload {
+                MessagePayload::SessionStart(start) => {
+                    assert_eq!(start.source_id, "desktop-capture");
+                }
+                _ => panic!("session start had a different payload"),
+            }
+            println!("CONTROL_EXCHANGED=session.offer/session.answer/session.start");
             std::io::stdout()
                 .flush()
                 .expect("flush control exchange result");
@@ -391,9 +404,23 @@ fn run_client_parent(decision: TestDecision) {
                 .expect("receive a session answer over the approved WSS channel");
             assert_eq!(answer.header.kind, mm_protocol::MessageKind::SessionAnswer);
             assert_eq!(answer.header.session_id, Some(session_id));
+            let start = encode_session_start(
+                mm_domain::MessageId::from_bytes([0xd4; 16]),
+                session_id,
+                sequence + 1,
+                sent_at_ms + 1,
+                &SessionStart {
+                    source_id: "desktop-capture".to_owned(),
+                },
+            )
+            .expect("encode source-start control message");
+            approved
+                .connection
+                .send_control_message(&start)
+                .expect("send session start after the peer answer");
             let exchanged_line =
                 read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
-            assert_eq!(exchanged_line, "session.offer/session.answer");
+            assert_eq!(exchanged_line, "session.offer/session.answer/session.start");
         }
         TestDecision::Cancel => {
             client.cancel();

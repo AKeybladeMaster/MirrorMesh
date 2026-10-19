@@ -12,6 +12,8 @@ $receiverStateTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv
 $pairingStateTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvPairingStateTest.java'
 $screenshotFramePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvScreenshotFrame.java'
 $screenshotFrameTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/TvScreenshotFrameTest.java'
+$sessionStartNoticePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/SessionStartNotice.java'
+$sessionStartNoticeTestPath = Join-Path $appRoot 'app/src/test/java/com/mirrormesh/tv/SessionStartNoticeTest.java'
 $outputPath = Join-Path $env:TEMP 'MirrorMeshAndroidTvStateTests'
 $javac = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/javac.exe' } else { 'javac' }
 $java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { 'java' }
@@ -31,7 +33,9 @@ $requiredPaths = @(
     $pairingStateTestPath,
     $nativeBridgePath,
     $screenshotFramePath,
-    $screenshotFrameTestPath
+    $screenshotFrameTestPath,
+    $sessionStartNoticePath,
+    $sessionStartNoticeTestPath
 )
 foreach ($requiredPath in $requiredPaths) {
     if (!(Test-Path -LiteralPath $requiredPath)) {
@@ -51,7 +55,9 @@ $javacInputs = @(
     $pairingStateTestPath,
     $nativeBridgePath,
     $screenshotFramePath,
-    $screenshotFrameTestPath
+    $screenshotFrameTestPath,
+    $sessionStartNoticePath,
+    $sessionStartNoticeTestPath
 )
 & $javac --release 17 -d $outputPath @javacInputs
 if ($LASTEXITCODE -ne 0) {
@@ -63,7 +69,8 @@ foreach ($testClass in @(
     'H264SdpPolicyTest',
     'TvReceiverStateTest',
     'TvPairingStateTest',
-    'TvScreenshotFrameTest'
+    'TvScreenshotFrameTest',
+    'SessionStartNoticeTest'
 )) {
     & $java -cp $outputPath "com.mirrormesh.tv.$testClass"
     if ($LASTEXITCODE -ne 0) {

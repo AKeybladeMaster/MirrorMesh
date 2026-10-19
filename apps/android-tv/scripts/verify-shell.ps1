@@ -12,6 +12,7 @@ $repoRoot = Split-Path (Split-Path $appRoot -Parent) -Parent
 $nativePairingPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_tv_pairing.rs'
 $nativeContextPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_context.rs'
 $approvedChannelPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/RustApprovedSignalingChannel.java'
+$sessionStartNoticePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/SessionStartNotice.java'
 $pairingStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvPairingState.java'
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
 
@@ -167,14 +168,20 @@ if (!(Test-Path -LiteralPath $approvedChannelPath)) {
     throw 'The Rust-backed approved signaling channel adapter is missing.'
 }
 $approvedChannel = Get-Content -LiteralPath $approvedChannelPath -Raw
-foreach ($requiredSignal in @('NativePairingBridge.pollControlMessage', 'NativePairingBridge.sendSessionAnswer', 'NativePairingBridge.sendSessionIce', 'MAX_BUFFERED_ICE_CANDIDATES', 'setRemoteIceCandidateListener')) {
+foreach ($requiredSignal in @('NativePairingBridge.pollControlMessage', 'NativePairingBridge.sendSessionAnswer', 'NativePairingBridge.sendSessionIce', 'MAX_BUFFERED_ICE_CANDIDATES', 'setRemoteIceCandidateListener', 'setRemoteStartListener', 'case "start"', 'source_id')) {
     if ($approvedChannel -notmatch [regex]::Escape($requiredSignal)) {
         throw "The approved WebRTC signaling adapter is missing $requiredSignal."
     }
 }
+$sessionStartNotice = Get-Content -LiteralPath $sessionStartNoticePath -Raw
+if ($sessionStartNotice -notmatch 'validateSourceId\(' -or
+    $approvedChannel -notmatch 'SessionStartNotice\.validateSourceId\(') {
+    throw 'Session-start metadata must be validated before reaching the TV receiver.'
+}
 if ($nativePairing -notmatch 'try_receive_control_message' -or
     $nativePairing -notmatch 'MessagePayload::SessionOffer' -or
     $nativePairing -notmatch 'MessagePayload::SessionIce' -or
+    $nativePairing -notmatch 'MessagePayload::SessionStart' -or
     $nativePairing -notmatch 'PeerGrant::View') {
     throw 'Rust must validate the approved view grant and typed session offer/ICE before crossing JNI.'
 }

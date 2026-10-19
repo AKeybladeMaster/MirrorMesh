@@ -4,7 +4,7 @@ use mm_adapter_win::{
     MAX_PAIRING_INVITATION_BYTES, SenderPairingError, SenderPairingSnapshot, SenderSessionEvent,
     begin_sender_pairing, begin_sender_session, cancel_sender_pairing, initialize_pairing_runtime,
     poll_sender_pairing, poll_sender_session_event, send_sender_session_ice,
-    shutdown_sender_pairing,
+    shutdown_sender_pairing, start_sender_session,
 };
 
 const DEVICE_ID_BYTES: usize = 16;
@@ -19,6 +19,7 @@ const SENDER_PAIRING_UNKNOWN_REQUEST: i32 = 4;
 const SENDER_PAIRING_INVALID_STATE: i32 = 5;
 const SENDER_PAIRING_CONTROL_FAILED: i32 = 6;
 const MAX_SESSION_EVENT_JSON_BYTES: usize = 256 * 1024;
+const MAX_SESSION_SOURCE_ID_BYTES: usize = 128;
 
 /// Initializes Windows pairing support after an explicit user action.
 ///
@@ -200,6 +201,36 @@ pub unsafe extern "C" fn mirrormesh_windows_send_sender_session_ice(
     }
 }
 
+/// Sends the selected, privacy-safe source identifier after WebRTC connects.
+///
+/// # Safety
+/// `source_id` must point to `source_id_length` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mirrormesh_windows_start_sender_session(
+    request_id: u64,
+    source_id: *const u8,
+    source_id_length: usize,
+) -> i32 {
+    if source_id.is_null()
+        || source_id_length == 0
+        || source_id_length > MAX_SESSION_SOURCE_ID_BYTES
+    {
+        return SENDER_PAIRING_INVALID_ARGUMENT;
+    }
+    // SAFETY: The C caller provides the readable byte range documented above.
+    let source_id = unsafe { std::slice::from_raw_parts(source_id, source_id_length) };
+    let Ok(source_id) = std::str::from_utf8(source_id) else {
+        return SENDER_PAIRING_INVALID_ARGUMENT;
+    };
+    match catch_unwind(AssertUnwindSafe(|| {
+        start_sender_session(request_id, source_id)
+    })) {
+        Ok(Ok(())) => SENDER_PAIRING_OK,
+        Ok(Err(error)) => sender_pairing_error_code(error),
+        Err(_) => SENDER_PAIRING_UNAVAILABLE,
+    }
+}
+
 /// Polls one bounded response from the TV over the approved control channel as JSON.
 ///
 /// # Safety
@@ -303,12 +334,13 @@ fn sender_pairing_error_code(error: SenderPairingError) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SESSION_EVENT_JSON_BYTES, PAIRING_RUNTIME_INVALID_ARGUMENT,
-        SENDER_PAIRING_INVALID_ARGUMENT, SENDER_PAIRING_UNKNOWN_REQUEST,
-        mirrormesh_windows_begin_sender_pairing, mirrormesh_windows_begin_sender_session,
-        mirrormesh_windows_cancel_sender_pairing, mirrormesh_windows_poll_sender_pairing,
-        mirrormesh_windows_poll_sender_session_event, mirrormesh_windows_prepare_pairing_runtime,
-        mirrormesh_windows_send_sender_session_ice,
+        MAX_SESSION_EVENT_JSON_BYTES, MAX_SESSION_SOURCE_ID_BYTES,
+        PAIRING_RUNTIME_INVALID_ARGUMENT, SENDER_PAIRING_INVALID_ARGUMENT,
+        SENDER_PAIRING_UNKNOWN_REQUEST, mirrormesh_windows_begin_sender_pairing,
+        mirrormesh_windows_begin_sender_session, mirrormesh_windows_cancel_sender_pairing,
+        mirrormesh_windows_poll_sender_pairing, mirrormesh_windows_poll_sender_session_event,
+        mirrormesh_windows_prepare_pairing_runtime, mirrormesh_windows_send_sender_session_ice,
+        mirrormesh_windows_start_sender_session,
     };
 
     #[test]
@@ -406,6 +438,36 @@ mod tests {
                     11,
                 )
             },
+            SENDER_PAIRING_UNKNOWN_REQUEST
+        );
+        assert_eq!(
+            unsafe { mirrormesh_windows_start_sender_session(0, std::ptr::null(), 0) },
+            SENDER_PAIRING_INVALID_ARGUMENT
+        );
+        let invalid_source_id = [0xff_u8];
+        assert_eq!(
+            unsafe {
+                mirrormesh_windows_start_sender_session(
+                    0,
+                    invalid_source_id.as_ptr(),
+                    invalid_source_id.len(),
+                )
+            },
+            SENDER_PAIRING_INVALID_ARGUMENT
+        );
+        let oversized_source_id = [b'x'; MAX_SESSION_SOURCE_ID_BYTES + 1];
+        assert_eq!(
+            unsafe {
+                mirrormesh_windows_start_sender_session(
+                    0,
+                    oversized_source_id.as_ptr(),
+                    oversized_source_id.len(),
+                )
+            },
+            SENDER_PAIRING_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            unsafe { mirrormesh_windows_start_sender_session(0, b"desktop-capture".as_ptr(), 15) },
             SENDER_PAIRING_UNKNOWN_REQUEST
         );
 

@@ -242,7 +242,7 @@ pub struct SessionIce {
     pub mline_index: Option<u16>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionStart {
     pub source_id: String,
@@ -550,6 +550,24 @@ pub fn encode_session_offer(
     bounded_sdp(&payload.sdp)?;
     encode_session_control(
         "session.offer",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes the sender's source-start notification after the peer connection is ready.
+pub fn encode_session_start(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionStart,
+) -> Result<Vec<u8>, ProtocolError> {
+    encode_session_control(
+        "session.start",
         message_id,
         session_id,
         sequence,
@@ -997,9 +1015,9 @@ mod tests {
     use super::{
         Capabilities, MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairApprove,
         PairBegin, PairReject, ProtocolError, SequenceTracker, SessionAnswer, SessionIce,
-        SessionOffer, encode_pair_approve, encode_pair_begin, encode_pair_reject,
-        encode_session_answer, encode_session_ice, encode_session_offer, parse_message,
-        preflight_json, validate_version,
+        SessionOffer, SessionStart, encode_pair_approve, encode_pair_begin, encode_pair_reject,
+        encode_session_answer, encode_session_ice, encode_session_offer, encode_session_start,
+        parse_message, preflight_json, validate_version,
     };
     use mm_domain::{DeviceId, MessageId, SessionId};
 
@@ -1188,6 +1206,39 @@ mod tests {
                 assert_eq!(parsed.sdp, offer.sdp);
             }
             _ => panic!("encoded sender offer parsed as a different message"),
+        }
+    }
+
+    #[test]
+    fn encodes_session_start_only_with_bounded_source_metadata() {
+        let session_id = SessionId::parse("8b3d8788-1476-4aae-a287-334a428b5b6f").unwrap();
+        let start = SessionStart {
+            source_id: "desktop-capture".to_owned(),
+        };
+        let message_id = MessageId::from_bytes(id(0xd3));
+        let frame = encode_session_start(message_id, session_id, 2, 301, &start).unwrap();
+        let parsed = parse_message(&frame).unwrap();
+
+        assert_eq!(parsed.header.kind, super::MessageKind::SessionStart);
+        assert_eq!(parsed.header.message_id, message_id);
+        assert_eq!(parsed.header.session_id, Some(session_id));
+        assert_eq!(parsed.header.sequence, 2);
+        match parsed.payload {
+            MessagePayload::SessionStart(parsed) => {
+                assert_eq!(parsed.source_id, "desktop-capture");
+            }
+            _ => panic!("encoded start parsed as a different message"),
+        }
+
+        assert_eq!(
+            encode_session_start(message_id, session_id, 0, 301, &start,),
+            Err(ProtocolError::InvalidSequence)
+        );
+        for source_id in [String::new(), "x".repeat(129), "window\nname".to_owned()] {
+            assert_eq!(
+                encode_session_start(message_id, session_id, 2, 301, &SessionStart { source_id },),
+                Err(ProtocolError::InvalidPayload)
+            );
         }
     }
 

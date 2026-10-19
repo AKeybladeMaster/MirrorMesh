@@ -20,6 +20,8 @@ interface ApprovedSignalingChannel extends AutoCloseable {
 
     void setRemoteIceCandidateListener(RemoteIceCandidateListener listener);
 
+    void setRemoteStartListener(RemoteStartListener listener);
+
     void setRemoteOfferListener(RemoteOfferListener listener);
 
     void setRevokedListener(Runnable listener);
@@ -39,6 +41,10 @@ interface ApprovedSignalingChannel extends AutoCloseable {
 
     interface RemoteOfferListener {
         void onOffer(String sdp);
+    }
+
+    interface RemoteStartListener {
+        void onStarted(String sourceId);
     }
 
     interface TextListener {

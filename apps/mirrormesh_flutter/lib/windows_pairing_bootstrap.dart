@@ -12,6 +12,7 @@ class WindowsPairingBootstrap {
   static const _pollSenderPairingMethod = 'pollSenderPairing';
   static const _cancelSenderPairingMethod = 'cancelSenderPairing';
   static const _beginSenderSessionMethod = 'beginSenderSession';
+  static const _startSenderSessionMethod = 'startSenderSession';
   static const _sendSenderSessionIceMethod = 'sendSenderSessionIce';
   static const _pollSenderSessionEventMethod = 'pollSenderSessionEvent';
 
@@ -99,6 +100,22 @@ class WindowsPairingBootstrap {
         'mediaLineIndex': mediaLineIndex,
       },
     );
+  }
+
+  Future<void> startSenderSession({
+    required int requestId,
+    required String sourceId,
+  }) async {
+    final started = await _channel.invokeMethod<bool>(
+      _startSenderSessionMethod,
+      <String, Object?>{'requestId': requestId, 'sourceId': sourceId},
+    );
+    if (started != true) {
+      throw PlatformException(
+        code: 'session_start_unavailable',
+        message: 'Windows did not start the approved sender source.',
+      );
+    }
   }
 
   Future<WindowsSenderSessionEvent> pollSenderSessionEvent(

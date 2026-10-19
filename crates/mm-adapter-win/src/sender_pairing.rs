@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mm_adapter_signaling::{PairingConnection, WssClientError, WssPairingClient};
 use mm_domain::{MessageId, PeerGrant, SessionId, TrustedPeerGrants};
 use mm_protocol::{
-    Capabilities, MessagePayload, SessionAnswer, SessionIce, SessionOffer, encode_session_ice,
-    encode_session_offer,
+    Capabilities, MessagePayload, SessionAnswer, SessionIce, SessionOffer, SessionStart,
+    encode_session_ice, encode_session_offer, encode_session_start,
 };
 
 use crate::{WindowsPairingIdentity, initialize_pairing_runtime};
@@ -29,6 +29,7 @@ const PAIRING_ERROR_CONTROL_CHANNEL: u32 = 7;
 const MAX_SESSION_DESCRIPTION_BYTES: usize = 128 * 1024;
 const MAX_ICE_CANDIDATE_BYTES: usize = 4 * 1024;
 const MAX_ICE_MEDIA_ID_BYTES: usize = 256;
+const MAX_SESSION_SOURCE_ID_BYTES: usize = 128;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +107,8 @@ pub enum SenderSessionEvent {
 struct SenderSession {
     id: SessionId,
     outbound_sequence: u64,
+    answer_received: bool,
+    started: bool,
 }
 
 struct SenderPairingTask {
@@ -115,6 +118,7 @@ struct SenderPairingTask {
     commands: SyncSender<SenderSessionCommand>,
     events: Mutex<Receiver<SenderSessionEvent>>,
     session_id: Arc<Mutex<Option<SessionId>>>,
+    session_start_requested: Arc<AtomicBool>,
 }
 
 enum SenderSessionCommand {
@@ -127,6 +131,10 @@ enum SenderSessionCommand {
         candidate: String,
         media_id: String,
         media_line_index: u16,
+    },
+    Start {
+        id: SessionId,
+        source_id: String,
     },
 }
 
@@ -194,6 +202,7 @@ pub fn begin_sender_pairing(invitation_uri: String) -> Result<u64, SenderPairing
     let (command_sender, command_receiver) = sync_channel(32);
     let (event_sender, event_receiver) = sync_channel(128);
     let session_id = Arc::new(Mutex::new(None));
+    let session_start_requested = Arc::new(AtomicBool::new(false));
 
     let worker_snapshot = Arc::clone(&snapshot);
     let worker_cancel_requested = Arc::clone(&cancel_requested);
@@ -228,6 +237,7 @@ pub fn begin_sender_pairing(invitation_uri: String) -> Result<u64, SenderPairing
         commands: command_sender,
         events: Mutex::new(event_receiver),
         session_id,
+        session_start_requested,
     });
     Ok(request_id)
 }
@@ -253,6 +263,7 @@ pub fn begin_sender_session(request_id: u64, sdp: &str) -> Result<SessionId, Sen
     }
     let session_id = random_session_id().ok_or(SenderPairingError::Unavailable)?;
     *current_session_id = Some(session_id);
+    task.session_start_requested.store(false, Ordering::Release);
     match task.commands.try_send(SenderSessionCommand::Begin {
         id: session_id,
         sdp: sdp.to_owned(),
@@ -263,6 +274,50 @@ pub fn begin_sender_session(request_id: u64, sdp: &str) -> Result<SessionId, Sen
             Err(SenderPairingError::Unavailable)
         }
     }
+}
+
+/// Queues the privacy-safe source-start control message after the peer connection is ready.
+pub fn start_sender_session(request_id: u64, source_id: &str) -> Result<(), SenderPairingError> {
+    validate_session_source_id(source_id)?;
+
+    let slot = lock_recover(task_slot());
+    let task = slot
+        .as_ref()
+        .filter(|task| task.request_id == request_id)
+        .ok_or(SenderPairingError::UnknownRequest)?;
+    if lock_recover(&task.snapshot).state != SenderPairingState::Approved {
+        return Err(SenderPairingError::SessionNotStarted);
+    }
+    let session_id = lock_recover(&task.session_id)
+        .as_ref()
+        .copied()
+        .ok_or(SenderPairingError::SessionNotStarted)?;
+    task.session_start_requested
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| SenderPairingError::SessionAlreadyStarted)?;
+
+    if task
+        .commands
+        .try_send(SenderSessionCommand::Start {
+            id: session_id,
+            source_id: source_id.to_owned(),
+        })
+        .is_err()
+    {
+        task.session_start_requested.store(false, Ordering::Release);
+        return Err(SenderPairingError::Unavailable);
+    }
+    Ok(())
+}
+
+fn validate_session_source_id(source_id: &str) -> Result<(), SenderPairingError> {
+    if source_id.is_empty()
+        || source_id.len() > MAX_SESSION_SOURCE_ID_BYTES
+        || source_id.chars().any(char::is_control)
+    {
+        return Err(SenderPairingError::InvalidSessionMessage);
+    }
+    Ok(())
 }
 
 /// Queues one bounded trickled ICE candidate for the active sender session.
@@ -384,6 +439,8 @@ fn run_sender_session_worker(
                     session = Some(SenderSession {
                         id,
                         outbound_sequence: 1,
+                        answer_received: false,
+                        started: false,
                     });
                 }
                 Ok(SenderSessionCommand::Ice {
@@ -429,6 +486,45 @@ fn run_sender_session_worker(
                     }
                     current.outbound_sequence = next_sequence;
                 }
+                Ok(SenderSessionCommand::Start { id, source_id }) => {
+                    let Some(current) = session.as_mut().filter(|current| current.id == id) else {
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    if !current.answer_received || current.started {
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    }
+                    let Some(next_sequence) = current.outbound_sequence.checked_add(1) else {
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    let Some(message_id) = random_message_id() else {
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    let start = SessionStart { source_id };
+                    let Ok(frame) = encode_session_start(
+                        message_id,
+                        id,
+                        next_sequence,
+                        now.as_millis().min(u64::MAX as u128) as u64,
+                        &start,
+                    ) else {
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    if connection.send_control_message(&frame).is_err() {
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    }
+                    current.outbound_sequence = next_sequence;
+                    current.started = true;
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     let _ = connection.close();
@@ -456,6 +552,9 @@ fn run_sender_session_worker(
                     && message.header.session_id == active_session_id =>
             {
                 let active_session_id = active_session_id.expect("checked active session");
+                if let Some(current) = session.as_mut() {
+                    current.answer_received = true;
+                }
                 SenderSessionEvent::Answer {
                     session_id: active_session_id.to_string(),
                     sdp,
@@ -786,7 +885,10 @@ fn set_terminal_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_PAIRING_INVITATION_BYTES, SenderPairingState, validate_invitation_uri};
+    use super::{
+        MAX_PAIRING_INVITATION_BYTES, SenderPairingState, validate_invitation_uri,
+        validate_session_source_id,
+    };
 
     #[test]
     fn accepts_a_bounded_nonempty_invitation_uri() {
@@ -805,6 +907,15 @@ mod tests {
     fn rejects_outer_whitespace_so_a_pasted_uri_is_not_silently_changed() {
         assert!(validate_invitation_uri(" mirrormesh://pair?v=1").is_err());
         assert!(validate_invitation_uri("mirrormesh://pair?v=1 ").is_err());
+    }
+
+    #[test]
+    fn accepts_only_bounded_control_free_session_source_ids() {
+        assert!(validate_session_source_id("desktop-capture").is_ok());
+        assert!(validate_session_source_id("x".repeat(128).as_str()).is_ok());
+        assert!(validate_session_source_id("").is_err());
+        assert!(validate_session_source_id("x".repeat(129).as_str()).is_err());
+        assert!(validate_session_source_id("window\nname").is_err());
     }
 
     #[test]
