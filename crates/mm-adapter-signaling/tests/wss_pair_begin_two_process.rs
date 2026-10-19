@@ -11,7 +11,7 @@ use mm_domain::{DeviceId, PeerGrant, PeerPublicKey, TrustedPeerGrants};
 use mm_ports::{
     LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort,
 };
-use mm_protocol::parse_message;
+use mm_protocol::{MessagePayload, encode_session_offer, parse_message};
 use mm_runtime::{PairingRuntime, PairingRuntimeError};
 use mm_security::parse_pairing_qr;
 use mm_store::SqliteTrustedPeers;
@@ -365,18 +365,32 @@ fn run_client_parent(decision: TestDecision) {
                 TrustedPeerGrants::new(true, false, false).expect("view grant scope")
             );
             assert_eq!(approved.peer_fingerprint, qr.fingerprint());
+            let parsed_offer = parse_message(VALID_SESSION_OFFER.as_bytes())
+                .expect("shared sender offer fixture is valid");
+            let session_id = parsed_offer
+                .header
+                .session_id
+                .expect("session offer has a session ID");
+            let message_id = parsed_offer.header.message_id;
+            let sequence = parsed_offer.header.sequence;
+            let sent_at_ms = parsed_offer.header.sent_at_ms;
+            let offer = match parsed_offer.payload {
+                MessagePayload::SessionOffer(offer) => offer,
+                _ => panic!("golden offer fixture has a different payload"),
+            };
+            let encoded_offer =
+                encode_session_offer(message_id, session_id, sequence, sent_at_ms, &offer)
+                    .expect("shared sender offer encoder accepts the fixture");
             approved
                 .connection
-                .send_control_message(VALID_SESSION_OFFER.as_bytes())
+                .send_control_message(&encoded_offer)
                 .expect("send a session offer over the approved WSS channel");
             let answer = approved
                 .connection
                 .receive_control_message()
                 .expect("receive a session answer over the approved WSS channel");
-            let parsed_offer = parse_message(VALID_SESSION_OFFER.as_bytes())
-                .expect("client offer uses the shared v1 protocol");
             assert_eq!(answer.header.kind, mm_protocol::MessageKind::SessionAnswer);
-            assert_eq!(answer.header.session_id, parsed_offer.header.session_id);
+            assert_eq!(answer.header.session_id, Some(session_id));
             let exchanged_line =
                 read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
             assert_eq!(exchanged_line, "session.offer/session.answer");

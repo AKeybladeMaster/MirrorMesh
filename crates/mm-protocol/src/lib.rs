@@ -170,7 +170,7 @@ pub enum MessagePayload {
     AnnotationClear(AnnotationClear),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
     pub video: Vec<String>,
@@ -219,7 +219,7 @@ pub struct PairRevoke {
     pub peer_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionOffer {
     pub role: String,
@@ -527,6 +527,29 @@ pub fn encode_session_answer(
 ) -> Result<Vec<u8>, ProtocolError> {
     encode_session_control(
         "session.answer",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes a sender's H.264-capable session offer in the common v1 control envelope.
+pub fn encode_session_offer(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionOffer,
+) -> Result<Vec<u8>, ProtocolError> {
+    if payload.role != "sender" {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_capabilities(&payload.capabilities)?;
+    bounded_sdp(&payload.sdp)?;
+    encode_session_control(
+        "session.offer",
         message_id,
         session_id,
         sequence,
@@ -972,10 +995,11 @@ impl SequenceTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairApprove, PairBegin,
-        PairReject, ProtocolError, SequenceTracker, SessionAnswer, SessionIce, encode_pair_approve,
-        encode_pair_begin, encode_pair_reject, encode_session_answer, encode_session_ice,
-        parse_message, preflight_json, validate_version,
+        Capabilities, MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairApprove,
+        PairBegin, PairReject, ProtocolError, SequenceTracker, SessionAnswer, SessionIce,
+        SessionOffer, encode_pair_approve, encode_pair_begin, encode_pair_reject,
+        encode_session_answer, encode_session_ice, encode_session_offer, parse_message,
+        preflight_json, validate_version,
     };
     use mm_domain::{DeviceId, MessageId, SessionId};
 
@@ -1131,6 +1155,80 @@ mod tests {
         assert_eq!(parsed_ice.header.kind, super::MessageKind::SessionIce);
         assert_eq!(parsed_ice.header.session_id, Some(session_id));
         assert_eq!(parsed_ice.header.sequence, 2);
+    }
+
+    #[test]
+    fn encodes_sender_session_offers_with_the_shared_v1_schema() {
+        let session_id = SessionId::parse("8b3d8788-1476-4aae-a287-334a428b5b6f").unwrap();
+        let offer = SessionOffer {
+            role: "sender".to_owned(),
+            capabilities: Capabilities {
+                video: vec!["H264".to_owned()],
+                audio: Vec::new(),
+                max_width: 1920,
+                max_height: 1080,
+                max_fps: 60,
+            },
+            sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=MirrorMesh test offer\r\nt=0 0\r\n"
+                .to_owned(),
+        };
+
+        let frame =
+            encode_session_offer(MessageId::from_bytes(id(0x31)), session_id, 1, 300, &offer)
+                .unwrap();
+        let parsed = parse_message(&frame).unwrap();
+        assert_eq!(parsed.header.kind, super::MessageKind::SessionOffer);
+        assert_eq!(parsed.header.session_id, Some(session_id));
+        assert_eq!(parsed.header.sequence, 1);
+        match parsed.payload {
+            MessagePayload::SessionOffer(parsed) => {
+                assert_eq!(parsed.role, "sender");
+                assert_eq!(parsed.capabilities.video, ["H264"]);
+                assert!(parsed.capabilities.audio.is_empty());
+                assert_eq!(parsed.sdp, offer.sdp);
+            }
+            _ => panic!("encoded sender offer parsed as a different message"),
+        }
+    }
+
+    #[test]
+    fn refuses_invalid_sender_offer_role_sequence_capabilities_and_sdp() {
+        let session_id = SessionId::parse("8b3d8788-1476-4aae-a287-334a428b5b6f").unwrap();
+        let make_offer = |role: &str, codec: &str, sdp: &str| SessionOffer {
+            role: role.to_owned(),
+            capabilities: Capabilities {
+                video: vec![codec.to_owned()],
+                audio: Vec::new(),
+                max_width: 1920,
+                max_height: 1080,
+                max_fps: 60,
+            },
+            sdp: sdp.to_owned(),
+        };
+        let valid_offer = make_offer("sender", "H264", "v=0\r\n");
+        let encode = |sequence, offer: &SessionOffer| {
+            encode_session_offer(
+                MessageId::from_bytes(id(0x32)),
+                session_id,
+                sequence,
+                300,
+                offer,
+            )
+        };
+
+        assert_eq!(encode(0, &valid_offer), Err(ProtocolError::InvalidSequence));
+        assert_eq!(
+            encode(1, &make_offer("receiver", "H264", "v=0\r\n")),
+            Err(ProtocolError::InvalidPayload)
+        );
+        assert_eq!(
+            encode(1, &make_offer("sender", "H264", "v=0\n")),
+            Err(ProtocolError::InvalidPayload)
+        );
+        assert_eq!(
+            encode(1, &make_offer("sender", "VP9", "v=0\r\n")),
+            Err(ProtocolError::InvalidPayload)
+        );
     }
 
     #[test]

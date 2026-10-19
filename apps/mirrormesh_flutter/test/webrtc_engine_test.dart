@@ -73,6 +73,22 @@ void main() {
     },
   );
 
+  test(
+    'configures a send-only video transceiver through the native adapter',
+    () async {
+      final factory = _FakeFactory();
+      final engine = FlutterWebRtcEngine(factory: factory);
+
+      await expectLater(engine.addSendOnlyVideoTransceiver(), throwsStateError);
+      expect(factory.peer.addSendOnlyVideoTransceiverCalls, 0);
+      await engine.initialize();
+      await engine.addSendOnlyVideoTransceiver();
+
+      expect(factory.peer.addSendOnlyVideoTransceiverCalls, 1);
+      await engine.close();
+    },
+  );
+
   test('close tears down the peer once and ends the event stream', () async {
     final factory = _FakeFactory();
     final engine = FlutterWebRtcEngine(factory: factory);
@@ -167,6 +183,7 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   final StreamController<String> _remoteTracks =
       StreamController<String>.broadcast();
   final List<WebRtcIceCandidate> addedCandidates = [];
+  int addSendOnlyVideoTransceiverCalls = 0;
   int closeCalls = 0;
   String? remoteDescription;
   Object? closeFailure;
@@ -186,6 +203,11 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   void emitState(WebRtcConnectionState state) => _states.add(state);
 
   void emitRemoteTrack(String id) => _remoteTracks.add(id);
+
+  @override
+  Future<void> addSendOnlyVideoTransceiver() async {
+    addSendOnlyVideoTransceiverCalls++;
+  }
 
   @override
   Future<String> createOffer() async => 'offer-sdp';

@@ -1234,6 +1234,7 @@ dependencies = [
  "mm-adapter-signaling",
  "mm-domain",
  "mm-ports",
+ "mm-protocol",
  "mm-runtime",
  "mm-store",
  "windows-sys 0.61.2",

@@ -11,6 +11,7 @@ crate-type = ["cdylib", "staticlib", "lib"]
 flutter_rust_bridge.workspace = true
 mm-domain.workspace = true
 mm-runtime.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 mm-adapter-android.workspace = true
@@ -19,7 +20,6 @@ getrandom.workspace = true
 jni.workspace = true
 mm-protocol.workspace = true
 ndk-context.workspace = true
-serde_json.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mm-adapter-linux.workspace = true

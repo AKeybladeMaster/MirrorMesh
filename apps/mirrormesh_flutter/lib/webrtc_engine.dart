@@ -91,6 +91,7 @@ abstract interface class WebRtcPeerConnectionPort {
   Stream<WebRtcConnectionState> get connectionStates;
   Stream<String> get remoteVideoTrackIds;
 
+  Future<void> addSendOnlyVideoTransceiver();
   Future<String> createOffer();
   Future<String> createAnswer();
   Future<void> setLocalDescription({
@@ -154,6 +155,9 @@ final class FlutterWebRtcEngine {
   }
 
   Future<String> createOffer() async => _peerOrThrow().createOffer();
+
+  Future<void> addSendOnlyVideoTransceiver() async =>
+      _peerOrThrow().addSendOnlyVideoTransceiver();
 
   Future<String> createAnswer() async => _peerOrThrow().createAnswer();
 
@@ -257,6 +261,14 @@ final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
 
   @override
   Stream<String> get remoteVideoTrackIds => _remoteVideoTrackIds.stream;
+
+  @override
+  Future<void> addSendOnlyVideoTransceiver() async {
+    await _peer.addTransceiver(
+      kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+      init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendOnly),
+    );
+  }
 
   @override
   Future<String> createOffer() async =>

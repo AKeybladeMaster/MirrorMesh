@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <variant>
+#include <vector>
 
 #include <windows.h>
 
@@ -18,6 +19,9 @@ constexpr char kPreparePairingRuntimeMethod[] = "preparePairingRuntime";
 constexpr char kBeginSenderPairingMethod[] = "beginSenderPairing";
 constexpr char kPollSenderPairingMethod[] = "pollSenderPairing";
 constexpr char kCancelSenderPairingMethod[] = "cancelSenderPairing";
+constexpr char kBeginSenderSessionMethod[] = "beginSenderSession";
+constexpr char kSendSenderSessionIceMethod[] = "sendSenderSessionIce";
+constexpr char kPollSenderSessionEventMethod[] = "pollSenderSessionEvent";
 constexpr char kPreparePairingRuntimeSymbol[] =
     "mirrormesh_windows_prepare_pairing_runtime";
 constexpr char kBeginSenderPairingSymbol[] =
@@ -28,7 +32,14 @@ constexpr char kCancelSenderPairingSymbol[] =
     "mirrormesh_windows_cancel_sender_pairing";
 constexpr char kShutdownSenderPairingSymbol[] =
     "mirrormesh_windows_shutdown_sender_pairing";
+constexpr char kBeginSenderSessionSymbol[] =
+    "mirrormesh_windows_begin_sender_session";
+constexpr char kSendSenderSessionIceSymbol[] =
+    "mirrormesh_windows_send_sender_session_ice";
+constexpr char kPollSenderSessionEventSymbol[] =
+    "mirrormesh_windows_poll_sender_session_event";
 constexpr uint32_t kSenderPairingApprovedState = 3;
+constexpr size_t kMaxSessionEventJsonBytes = 256 * 1024;
 
 struct SenderPairingSnapshot {
   uint32_t state;
@@ -113,6 +124,74 @@ int32_t CancelSenderPairing(uint64_t request_id) {
   return cancel_pairing == nullptr ? 2 : cancel_pairing(request_id);
 }
 
+int32_t BeginSenderSession(uint64_t request_id, const std::string& sdp,
+                           std::string* session_id) {
+  HMODULE rust_bridge = ::GetModuleHandleW(L"mm_ffi.dll");
+  if (rust_bridge == nullptr) {
+    return 2;
+  }
+  using BeginSession = int32_t (*)(uint64_t, const uint8_t*, size_t, uint8_t*,
+                                   size_t, size_t*);
+  auto begin_session = reinterpret_cast<BeginSession>(
+      ::GetProcAddress(rust_bridge, kBeginSenderSessionSymbol));
+  if (begin_session == nullptr) {
+    return 2;
+  }
+  std::array<uint8_t, 36> output{};
+  size_t output_length = 0;
+  const int32_t status = begin_session(
+      request_id, reinterpret_cast<const uint8_t*>(sdp.data()), sdp.size(),
+      output.data(), output.size(), &output_length);
+  if (status == 0 && output_length == output.size()) {
+    session_id->assign(reinterpret_cast<const char*>(output.data()),
+                       output_length);
+  }
+  return status;
+}
+
+int32_t SendSenderSessionIce(uint64_t request_id,
+                             const std::string& media_id,
+                             uint32_t media_line_index,
+                             const std::string& candidate) {
+  HMODULE rust_bridge = ::GetModuleHandleW(L"mm_ffi.dll");
+  if (rust_bridge == nullptr) {
+    return 2;
+  }
+  using SendIce = int32_t (*)(uint64_t, const uint8_t*, size_t, uint32_t,
+                              const uint8_t*, size_t);
+  auto send_ice = reinterpret_cast<SendIce>(
+      ::GetProcAddress(rust_bridge, kSendSenderSessionIceSymbol));
+  if (send_ice == nullptr) {
+    return 2;
+  }
+  return send_ice(
+      request_id, reinterpret_cast<const uint8_t*>(media_id.data()),
+      media_id.size(), media_line_index,
+      reinterpret_cast<const uint8_t*>(candidate.data()), candidate.size());
+}
+
+int32_t PollSenderSessionEvent(uint64_t request_id, std::string* event_json) {
+  HMODULE rust_bridge = ::GetModuleHandleW(L"mm_ffi.dll");
+  if (rust_bridge == nullptr) {
+    return 2;
+  }
+  using PollSessionEvent = int32_t (*)(uint64_t, uint8_t*, size_t, size_t*);
+  auto poll_event = reinterpret_cast<PollSessionEvent>(
+      ::GetProcAddress(rust_bridge, kPollSenderSessionEventSymbol));
+  if (poll_event == nullptr) {
+    return 2;
+  }
+  std::vector<uint8_t> output(kMaxSessionEventJsonBytes);
+  size_t output_length = 0;
+  const int32_t status = poll_event(request_id, output.data(), output.size(),
+                                    &output_length);
+  if (status == 0 && output_length <= output.size()) {
+    event_json->assign(reinterpret_cast<const char*>(output.data()),
+                       output_length);
+  }
+  return status;
+}
+
 void ShutdownSenderPairing() {
   HMODULE rust_bridge = ::GetModuleHandleW(L"mm_ffi.dll");
   if (rust_bridge == nullptr) {
@@ -155,6 +234,45 @@ std::optional<uint64_t> ReadPairingRequestId(
                            : std::nullopt;
   }
   return std::nullopt;
+}
+
+std::optional<int64_t> ReadIntegerMapValue(
+    const flutter::EncodableValue* argument, const std::string& key) {
+  if (argument == nullptr) {
+    return std::nullopt;
+  }
+  const auto* values = std::get_if<flutter::EncodableMap>(argument);
+  if (values == nullptr) {
+    return std::nullopt;
+  }
+  const auto found = values->find(flutter::EncodableValue(key));
+  if (found == values->end()) {
+    return std::nullopt;
+  }
+  if (const auto* value = std::get_if<int32_t>(&found->second)) {
+    return *value;
+  }
+  if (const auto* value = std::get_if<int64_t>(&found->second)) {
+    return *value;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> ReadStringMapValue(
+    const flutter::EncodableValue* argument, const std::string& key) {
+  if (argument == nullptr) {
+    return std::nullopt;
+  }
+  const auto* values = std::get_if<flutter::EncodableMap>(argument);
+  if (values == nullptr) {
+    return std::nullopt;
+  }
+  const auto found = values->find(flutter::EncodableValue(key));
+  if (found == values->end()) {
+    return std::nullopt;
+  }
+  const auto* value = std::get_if<std::string>(&found->second);
+  return value == nullptr ? std::nullopt : std::optional<std::string>(*value);
 }
 
 }  // namespace
@@ -249,6 +367,83 @@ bool FlutterWindow::OnCreate() {
             return;
           }
           result->Success(flutter::EncodableValue(true));
+          return;
+        }
+
+        if (call.method_name() == kBeginSenderSessionMethod) {
+          const auto request_id = ReadIntegerMapValue(call.arguments(), "requestId");
+          const auto sdp = ReadStringMapValue(call.arguments(), "sdp");
+          if (!request_id.has_value() || *request_id <= 0 || !sdp.has_value()) {
+            result->Error("invalid_argument",
+                          "A pairing request ID and session offer are required.");
+            return;
+          }
+          std::string session_id;
+          const int32_t status = BeginSenderSession(
+              static_cast<uint64_t>(*request_id), *sdp, &session_id);
+          if (status != 0) {
+            result->Error(
+                status == 3 ? "session_busy"
+                            : (status == 5 ? "session_not_ready"
+                                           : "session_unavailable"),
+                status == 3
+                    ? "A sender session is already active."
+                    : (status == 5 ? "Pairing must be approved before streaming."
+                                   : "Windows could not start the sender session."));
+            return;
+          }
+          result->Success(flutter::EncodableValue(session_id));
+          return;
+        }
+
+        if (call.method_name() == kSendSenderSessionIceMethod) {
+          const auto request_id = ReadIntegerMapValue(call.arguments(), "requestId");
+          const auto candidate =
+              ReadStringMapValue(call.arguments(), "candidate");
+          const auto media_id = ReadStringMapValue(call.arguments(), "mediaId");
+          const auto media_line_index =
+              ReadIntegerMapValue(call.arguments(), "mediaLineIndex");
+          if (!request_id.has_value() || *request_id <= 0 ||
+              !candidate.has_value() || !media_id.has_value() ||
+              !media_line_index.has_value() || *media_line_index < 0 ||
+              *media_line_index > 1024) {
+            result->Error("invalid_argument",
+                          "A valid session request and ICE candidate are required.");
+            return;
+          }
+          const int32_t status = SendSenderSessionIce(
+              static_cast<uint64_t>(*request_id), *media_id,
+              static_cast<uint32_t>(*media_line_index), *candidate);
+          if (status != 0) {
+            result->Error(status == 5 ? "session_not_ready"
+                                     : "session_unavailable",
+                          status == 5
+                              ? "Start a sender session before sending ICE."
+                              : "Windows could not send the ICE candidate.");
+            return;
+          }
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
+
+        if (call.method_name() == kPollSenderSessionEventMethod) {
+          const auto request_id = ReadPairingRequestId(call.arguments());
+          if (!request_id.has_value()) {
+            result->Error("invalid_argument", "A valid pairing request ID is required.");
+            return;
+          }
+          std::string event_json;
+          const int32_t status =
+              PollSenderSessionEvent(*request_id, &event_json);
+          if (status != 0) {
+            result->Error(status == 5 ? "session_not_ready"
+                                     : "session_unavailable",
+                          status == 5
+                              ? "Start a sender session before polling events."
+                              : "Windows could not read the sender session channel.");
+            return;
+          }
+          result->Success(flutter::EncodableValue(event_json));
           return;
         }
 

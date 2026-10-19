@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/services.dart';
 
 /// Requests lazy Windows pairing-runtime initialization after explicit user action.
@@ -9,6 +11,9 @@ class WindowsPairingBootstrap {
   static const _beginSenderPairingMethod = 'beginSenderPairing';
   static const _pollSenderPairingMethod = 'pollSenderPairing';
   static const _cancelSenderPairingMethod = 'cancelSenderPairing';
+  static const _beginSenderSessionMethod = 'beginSenderSession';
+  static const _sendSenderSessionIceMethod = 'sendSenderSessionIce';
+  static const _pollSenderSessionEventMethod = 'pollSenderSessionEvent';
 
   final MethodChannel _channel;
 
@@ -61,6 +66,164 @@ class WindowsPairingBootstrap {
   Future<void> cancelSenderPairing(int requestId) async {
     await _channel.invokeMethod<bool>(_cancelSenderPairingMethod, requestId);
   }
+
+  Future<String> beginSenderSession({
+    required int requestId,
+    required String sdp,
+  }) async {
+    final sessionId = await _channel.invokeMethod<String>(
+      _beginSenderSessionMethod,
+      <String, Object?>{'requestId': requestId, 'sdp': sdp},
+    );
+    if (sessionId == null || sessionId.isEmpty) {
+      throw PlatformException(
+        code: 'session_unavailable',
+        message: 'Windows did not start the sender session.',
+      );
+    }
+    return sessionId;
+  }
+
+  Future<void> sendSenderSessionIce({
+    required int requestId,
+    required String candidate,
+    required String mediaId,
+    required int mediaLineIndex,
+  }) async {
+    await _channel.invokeMethod<bool>(
+      _sendSenderSessionIceMethod,
+      <String, Object?>{
+        'requestId': requestId,
+        'candidate': candidate,
+        'mediaId': mediaId,
+        'mediaLineIndex': mediaLineIndex,
+      },
+    );
+  }
+
+  Future<WindowsSenderSessionEvent> pollSenderSessionEvent(
+    int requestId,
+  ) async {
+    final encoded = await _channel.invokeMethod<String>(
+      _pollSenderSessionEventMethod,
+      requestId,
+    );
+    if (encoded == null) {
+      throw PlatformException(
+        code: 'session_event_invalid',
+        message: 'Windows returned no sender session event.',
+      );
+    }
+    final decoded = jsonDecode(encoded);
+    if (decoded is! Map<String, dynamic> || decoded['pending'] is! bool) {
+      throw PlatformException(
+        code: 'session_event_invalid',
+        message: 'Windows returned an invalid sender session event.',
+      );
+    }
+    final pending = decoded['pending']! as bool;
+    if (pending) return const WindowsSenderSessionEvent.pending();
+
+    final kind = decoded['kind'];
+    final sessionId = decoded['sessionId'];
+    if (kind is! String) {
+      throw PlatformException(
+        code: 'session_event_invalid',
+        message: 'Windows returned an invalid sender session event kind.',
+      );
+    }
+    return switch (kind) {
+      'answer' when sessionId is String && decoded['sdp'] is String =>
+        WindowsSenderSessionEvent.answer(
+          sessionId: sessionId,
+          sdp: decoded['sdp']! as String,
+        ),
+      'ice'
+          when sessionId is String &&
+              decoded['candidate'] is String &&
+              decoded['mediaId'] is String &&
+              decoded['mediaLineIndex'] is int =>
+        WindowsSenderSessionEvent.ice(
+          sessionId: sessionId,
+          candidate: decoded['candidate']! as String,
+          mediaId: decoded['mediaId']! as String,
+          mediaLineIndex: decoded['mediaLineIndex']! as int,
+        ),
+      'stop' when sessionId is String && decoded['reason'] is String =>
+        WindowsSenderSessionEvent.stopped(
+          sessionId: sessionId,
+          reason: decoded['reason']! as String,
+        ),
+      'revoke' when decoded['peerId'] is String =>
+        WindowsSenderSessionEvent.revoked(peerId: decoded['peerId']! as String),
+      _ => throw PlatformException(
+        code: 'session_event_invalid',
+        message: 'Windows returned an invalid sender session event payload.',
+      ),
+    };
+  }
+}
+
+enum WindowsSenderSessionEventKind { pending, answer, ice, stopped, revoked }
+
+class WindowsSenderSessionEvent {
+  const WindowsSenderSessionEvent.pending()
+    : kind = WindowsSenderSessionEventKind.pending,
+      sessionId = null,
+      sdp = null,
+      candidate = null,
+      mediaId = null,
+      mediaLineIndex = null,
+      reason = null,
+      peerId = null;
+
+  const WindowsSenderSessionEvent.answer({
+    required this.sessionId,
+    required this.sdp,
+  }) : kind = WindowsSenderSessionEventKind.answer,
+       candidate = null,
+       mediaId = null,
+       mediaLineIndex = null,
+       reason = null,
+       peerId = null;
+
+  const WindowsSenderSessionEvent.ice({
+    required this.sessionId,
+    required this.candidate,
+    required this.mediaId,
+    required this.mediaLineIndex,
+  }) : kind = WindowsSenderSessionEventKind.ice,
+       sdp = null,
+       reason = null,
+       peerId = null;
+
+  const WindowsSenderSessionEvent.stopped({
+    required this.sessionId,
+    required this.reason,
+  }) : kind = WindowsSenderSessionEventKind.stopped,
+       sdp = null,
+       candidate = null,
+       mediaId = null,
+       mediaLineIndex = null,
+       peerId = null;
+
+  const WindowsSenderSessionEvent.revoked({required this.peerId})
+    : kind = WindowsSenderSessionEventKind.revoked,
+      sessionId = null,
+      sdp = null,
+      candidate = null,
+      mediaId = null,
+      mediaLineIndex = null,
+      reason = null;
+
+  final WindowsSenderSessionEventKind kind;
+  final String? sessionId;
+  final String? sdp;
+  final String? candidate;
+  final String? mediaId;
+  final int? mediaLineIndex;
+  final String? reason;
+  final String? peerId;
 }
 
 enum WindowsSenderPairingState {

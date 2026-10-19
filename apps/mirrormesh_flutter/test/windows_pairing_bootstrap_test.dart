@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -79,6 +80,70 @@ void main() {
       expect(calls.first.arguments, 'mirrormesh://pair?v=1');
       expect(status.state, WindowsSenderPairingState.approved);
       expect(status.receiverFingerprint, fingerprint);
+    },
+  );
+
+  test(
+    'sends an approved session offer and polls typed answer and ICE events',
+    () async {
+      final calls = <MethodCall>[];
+      final events = <String>[
+        jsonEncode(<String, Object?>{
+          'pending': false,
+          'kind': 'answer',
+          'sessionId': '8b3d8788-1476-4aae-a287-334a428b5b6f',
+          'sdp': 'v=0\r\n',
+        }),
+        jsonEncode(<String, Object?>{
+          'pending': false,
+          'kind': 'ice',
+          'sessionId': '8b3d8788-1476-4aae-a287-334a428b5b6f',
+          'candidate': 'candidate:1 1 UDP 1 192.0.2.1 5000 typ host',
+          'mediaId': '0',
+          'mediaLineIndex': 0,
+        }),
+      ];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return switch (call.method) {
+              'beginSenderSession' => '8b3d8788-1476-4aae-a287-334a428b5b6f',
+              'sendSenderSessionIce' => true,
+              'pollSenderSessionEvent' => events.removeAt(0),
+              _ => null,
+            };
+          });
+
+      const bootstrap = WindowsPairingBootstrap();
+      final sessionId = await bootstrap.beginSenderSession(
+        requestId: 41,
+        sdp: 'v=0\r\n',
+      );
+      await bootstrap.sendSenderSessionIce(
+        requestId: 41,
+        candidate: 'candidate:1 1 UDP 1 192.0.2.1 5000 typ host',
+        mediaId: '0',
+        mediaLineIndex: 0,
+      );
+      final answer = await bootstrap.pollSenderSessionEvent(41);
+      final candidate = await bootstrap.pollSenderSessionEvent(41);
+
+      expect(sessionId, '8b3d8788-1476-4aae-a287-334a428b5b6f');
+      expect(calls.map((call) => call.method), [
+        'beginSenderSession',
+        'sendSenderSessionIce',
+        'pollSenderSessionEvent',
+        'pollSenderSessionEvent',
+      ]);
+      expect(calls[0].arguments, <String, Object?>{
+        'requestId': 41,
+        'sdp': 'v=0\r\n',
+      });
+      expect(answer.kind, WindowsSenderSessionEventKind.answer);
+      expect(answer.sdp, 'v=0\r\n');
+      expect(candidate.kind, WindowsSenderSessionEventKind.ice);
+      expect(candidate.mediaId, '0');
+      expect(candidate.mediaLineIndex, 0);
     },
   );
 

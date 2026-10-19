@@ -8,6 +8,12 @@ At the Task 39 checkpoint, the shared WSS sender client gained bounded approval 
 
 The Windows adapter now runs the existing QR-pinned WSS sender client on a worker, asks only for `view`, reports bounded status/fingerprint snapshots, and retains the approved control connection until explicit disconnect or runner shutdown. The Devices page accepts pasted Android TV invitation text and requires approval on the TV. Proposed [ADR-0041](adr/0041-windows-sender-pairing-bridge.md) records the C ABI and method-channel boundary. Rust workspace checks and mocked Flutter analysis/tests pass. The Windows Flutter build stops at the platform plugin symlink requirement before producing an executable; no app-to-app WSS or WebRTC/media path has been verified.
 
+## Task 41 — Windows sender WebRTC signaling
+
+The shared protocol now encodes `session.offer` using the existing v1 schema. The Windows WSS worker owns the approved connection and processes bounded offer/ICE commands and answer/ICE/stop/revoke events off the Flutter UI thread. A Dart coordinator drives the pinned `flutter_webrtc` peer connection with a send-only H.264-capable video transceiver, applies SDP and trickled ICE, and closes the peer on stop, revoke or failure. The controller bounds early ICE queues to 128 candidates and 64 KiB.
+
+This is signaling and negotiation source only. No media track is attached, so no RTP video is sent. Rust protocol/WSS tests, fake-backed Flutter tests, Windows Rust-target checks, and a direct MSVC runner compile pass. The full Windows bundle, Android TV APK, app-to-app peer connection, ICE connectivity and media remain unverified. Proposed [ADR-0042](adr/0042-windows-sender-session-signaling.md) records the ownership boundary and limits.
+
 ## Task 25 Android explicit-action runtime assembly (2026-10-19)
 
 The Android phone app now opens `AndroidPairingIdentity` and `SqliteTrustedPeers` only after the user presses **Prepare pairing support**. JNI creates one process-owned `PairingRuntime`, stored beneath `noBackupFilesDir`, and returns a stable local UUIDv8 derived from the public-key fingerprint. The action opens local state only: it does not discover or contact peers, grant trust, request capture, or stream. Proposed [ADR-0030](adr/0030-android-pairing-runtime-assembly.md) records the assembly and its limits. Host Rust and Flutter gates pass; Android ARM64 compilation stops in `dart-sys` because NDK clang is unavailable, so no APK or device behavior is verified.

@@ -13,7 +13,9 @@ pub use identity::WindowsPairingIdentity;
 #[cfg(windows)]
 pub use sender_pairing::{
     MAX_PAIRING_INVITATION_BYTES, SenderPairingError, SenderPairingSnapshot, SenderPairingState,
-    begin_sender_pairing, cancel_sender_pairing, poll_sender_pairing, shutdown_sender_pairing,
+    SenderSessionEvent, begin_sender_pairing, begin_sender_session, cancel_sender_pairing,
+    poll_sender_pairing, poll_sender_session_event, send_sender_session_ice,
+    shutdown_sender_pairing,
 };
 
 #[cfg(windows)]
