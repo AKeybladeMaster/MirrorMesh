@@ -163,6 +163,19 @@ pub trait LocalPairingIdentityPort: Send + Sync {
     fn delete_identity(&self) -> Result<(), PortError>;
 }
 
+/// TLS 1.3 server-authentication signing boundary for a local device identity.
+///
+/// Implementations keep private material inside the platform identity adapter and must never
+/// export a private key. They must reject inputs that do not contain the TLS 1.3 server
+/// CertificateVerify context and transcript hash; this operation must not sign pairing proofs or
+/// arbitrary application messages. The public key must be the same Ed25519 key whose SHA-256
+/// fingerprint is placed in the pairing QR.
+pub trait LocalTlsIdentityPort: Send + Sync {
+    fn tls_server_public_key(&self) -> Result<PeerPublicKey, PortError>;
+
+    fn sign_tls13_certificate_verify(&self, message: &[u8]) -> Result<Vec<u8>, PortError>;
+}
+
 /// Cryptographic identity boundary for the first-time pairing proof.
 ///
 /// Implementations must compute SHA-256 over the agreed canonical public-key

@@ -6,6 +6,7 @@ members = [
     "crates/mm-ports",
     "crates/mm-security",
     "crates/mm-adapter-identity",
+    "crates/mm-adapter-tls",
     "crates/mm-adapter-discovery",
     "crates/mm-adapter-win",
     "crates/mm-adapter-linux",
@@ -46,5 +47,6 @@ mdns-sd = { version = "=0.21.5", default-features = false }
 curve25519-dalek = { version = "=5.0.0", default-features = false }
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
 sha2 = { version = "=0.11.0", default-features = false }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std"] }
 rusqlite = { version = "=0.39.0", default-features = false, features = ["bundled"] }
 
