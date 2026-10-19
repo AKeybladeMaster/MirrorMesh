@@ -23,6 +23,8 @@ Task 49 adds an Android instrumentation loopback test. A test-only native I420 c
 
 Task 52 keeps the same native synthetic media and receiver, but routes test signaling through the production `RustApprovedSignalingChannel`. A test-only native bridge supplies its JNI calls and exercises the Java offer/ICE mapping, answer/ICE writes, decoded frame, and explicit screenshot path. This still does not run Rust authentication or Windows interoperability. The emulator test and ARM64 APK build remain source-only until the Android workflow runs.
 
+Task 53 adds instrumentation tests for remote `session.stop`, pairing revocation, and malformed-control fail-closed cleanup through the same production Java channel. The test-only bridge verifies listener notification, one native close, and that the closed adapter no longer reports an approved connection. It does not verify Rust WSS authentication or Windows interoperability; Gradle/SDK/emulator evidence is pending.
+
 ## Next implementation slice
 
-Run the Task 52 emulator loopback and fix any adapter, H.264, screenshot, or ABI build failures. Then use the same native media fixture with real Rust WSS between the Windows sender and TV receiver; continue with Windows Graphics Capture and hardware encoder integration. Keep physical MediaCodec validation for final user testing.
+Run the Task 52–53 emulator tests and fix any adapter, lifecycle, H.264, screenshot, or ABI build failures. Then use the same native media fixture with real Rust WSS between the Windows sender and TV receiver; continue with Windows Graphics Capture and hardware encoder integration. Keep physical MediaCodec validation for final user testing.

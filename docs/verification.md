@@ -215,6 +215,20 @@ Task 51 changes the Windows Dart state enum/controller but no signaling schema, 
 
 Task 52 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` remain pending. It changes no wire protocol or shared session engine. See the [Task 52 brief](../codex/52-android-tv-production-signaling-loopback.md).
 
+## Task 53 verification — Android TV signaling lifecycle cleanup
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `gradle :app:connectedDebugAndroidTest -PmmAndroidAbi=x86_64` | unavailable (exit 1) | The command could not start because `gradle` is not installed. Android SDK/emulator are also unavailable. The emulator workflow runs the channel lifecycle and H.264 loopback tests together. |
+| `gradle :app:assembleDebug` | unavailable (exit 1) | The command could not start because `gradle` is not installed; no APK was produced here. |
+| Lifecycle instrumentation source | authored only | Covers remote stop, revocation, malformed control input, listener notification, one close, and fail-closed approved state via the production Java channel and fake native bridge. |
+| `cargo fmt --all -- --check` | pass (exit 0) | No Rust source changed in this task. |
+| `git diff --check` | pass (exit 0) | No whitespace errors; Git reports only configured LF-to-CRLF working-copy notices. |
+| Direct JDK TV state/policy/screenshot tests | pass (exit 0) | Six existing Java test classes compiled with `javac --release 17` and passed. They do not compile the Android instrumentation source. |
+| Rust WSS authentication / Windows interoperability / hardware | not verified | The lifecycle test uses a fake native bridge and does not run an app-to-app session or physical TV. |
+
+Task 53 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` remain pending. See the [Task 53 brief](../codex/53-android-tv-signaling-lifecycle-tests.md).
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

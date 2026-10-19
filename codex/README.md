@@ -73,3 +73,4 @@ Update device-matrix.md and verification.md with truthful statuses only.
 | 50 | Windows first-encoded-frame gate | [50-windows-first-encoded-frame-gate.md](50-windows-first-encoded-frame-gate.md) |
 | 51 | Windows peer reconnect | [51-windows-peer-reconnect.md](51-windows-peer-reconnect.md) |
 | 52 | Android TV production signaling adapter loopback | [52-android-tv-production-signaling-loopback.md](52-android-tv-production-signaling-loopback.md) |
+| 53 | Android TV signaling lifecycle tests | [53-android-tv-signaling-lifecycle-tests.md](53-android-tv-signaling-lifecycle-tests.md) |

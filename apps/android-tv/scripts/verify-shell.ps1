@@ -147,9 +147,10 @@ if ($appGradle -notmatch 'androidx\.test:runner:1\.7\.0' -or
     throw 'The Android TV native WebRTC instrumentation runner and pinned emulator ABI build must remain configured.'
 }
 $loopbackTestPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/TvWebRtcLoopbackIntegrationTest.java'
+$lifecycleTestPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/RustApprovedSignalingChannelLifecycleTest.java'
 $syntheticCapturerPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/SyntheticVideoCapturer.java'
 $loopbackBridgePath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/LoopbackNativeApprovedControlBridge.java'
-foreach ($testFile in @($loopbackTestPath, $syntheticCapturerPath, $loopbackBridgePath)) {
+foreach ($testFile in @($loopbackTestPath, $lifecycleTestPath, $syntheticCapturerPath, $loopbackBridgePath)) {
     if (!(Test-Path -LiteralPath $testFile)) {
         throw "The Android native WebRTC loopback test source is missing: $testFile."
     }
@@ -165,6 +166,12 @@ if ($loopbackTest -notmatch 'createWithDecoderFactoryForTest' -or
     $loopbackTest -notmatch 'requestScreenshotCapture\(' -or
     $loopbackTest -notmatch 'frameReceived\.await\(') {
     throw 'The Android instrumentation test must exercise the production signaling adapter, H.264, a decoded receiver frame, and explicit screenshot capture.'
+}
+$lifecycleTest = Get-Content -LiteralPath $lifecycleTestPath -Raw
+if ($lifecycleTest -notmatch 'remoteSessionStopNotifiesListenerAndClosesControlChannelOnce' -or
+    $lifecycleTest -notmatch 'pairingRevocationNotifiesListenerAndClosesControlChannelOnce' -or
+    $lifecycleTest -notmatch 'malformedControlMessageFailsClosedAndReportsFailure') {
+    throw 'The Android signaling lifecycle test must cover remote stop, revocation, and fail-closed behavior.'
 }
 $syntheticCapturer = Get-Content -LiteralPath $syntheticCapturerPath -Raw
 if ($syntheticCapturer -notmatch 'JavaI420Buffer\.allocate\(' -or
