@@ -3,6 +3,9 @@
 
 mod frb_generated;
 
+#[cfg(target_os = "android")]
+mod android_context;
+
 pub mod bridge_api;
 
 use mm_domain::{DomainError, SessionEvent, SessionId, SessionState};

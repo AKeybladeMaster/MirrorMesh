@@ -1232,8 +1232,10 @@ name = "mm-ffi"
 version = "0.1.0"
 dependencies = [
  "flutter_rust_bridge",
+ "jni",
  "mm-domain",
  "mm-runtime",
+ "ndk-context",
 ]
 
 [[package]]
