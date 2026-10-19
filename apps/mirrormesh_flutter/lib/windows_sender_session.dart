@@ -57,6 +57,7 @@ final class WindowsSenderSessionController {
   Timer? _statsTimer;
   Timer? _firstEncodedFrameTimer;
   Timer? _reconnectTimer;
+  Timer? _negotiationTimer;
   Completer<void>? _localIceDrainComplete;
   Future<void>? _stopOperation;
   Future<void>? _failureOperation;
@@ -144,6 +145,17 @@ final class WindowsSenderSessionController {
         sdp: offer,
       );
       await _drainLocalIce();
+      _negotiationTimer = Timer(const Duration(seconds: 30), () {
+        if (!_transportWasConnected && !_closed) {
+          unawaited(
+            _fail(
+              StateError(
+                'The receiver did not establish video within 30 seconds. Check the LAN and pair again.',
+              ),
+            ),
+          );
+        }
+      });
       _pollTimer = Timer.periodic(
         const Duration(milliseconds: 100),
         (_) => unawaited(_pollSessionEvent()),
@@ -241,6 +253,8 @@ final class WindowsSenderSessionController {
     } else if (event is WebRtcConnectionStateEvent) {
       switch (event.state) {
         case WebRtcConnectionState.connected:
+          _negotiationTimer?.cancel();
+          _negotiationTimer = null;
           _reconnectTimer?.cancel();
           _reconnectTimer = null;
           _transportReady = true;
@@ -446,9 +460,11 @@ final class WindowsSenderSessionController {
             throw StateError('The TV stop belongs to a different session.');
           }
           await _closePeer();
+          await _closePairingChannel();
           _setState(WindowsSenderSessionState.stopped);
         case WindowsSenderSessionEventKind.revoked:
           await _closePeer();
+          await _closePairingChannel();
           _setState(WindowsSenderSessionState.revoked);
       }
     } catch (error) {
@@ -522,6 +538,8 @@ final class WindowsSenderSessionController {
   }
 
   Future<void> _closePeer() async {
+    _negotiationTimer?.cancel();
+    _negotiationTimer = null;
     _pollTimer?.cancel();
     _pollTimer = null;
     _statsTimer?.cancel();

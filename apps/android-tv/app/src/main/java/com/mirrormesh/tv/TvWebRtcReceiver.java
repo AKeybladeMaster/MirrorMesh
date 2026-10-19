@@ -154,8 +154,7 @@ public final class TvWebRtcReceiver implements AutoCloseable {
             Context context,
             SurfaceViewRenderer renderer,
             Listener listener,
-            TvReceiverState state,
-            VideoDecoderFactory testDecoderFactory) {
+            TvReceiverState state) {
         this.renderer = renderer;
         this.listener = listener;
         this.state = state;
@@ -164,11 +163,8 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         initializeFactory(applicationContext);
 
         eglBase = EglBase.create();
-        decoderFactory = testDecoderFactory == null
-                ? new HardwareVideoDecoderFactory(eglBase.getEglBaseContext())
-                : testDecoderFactory;
-        if (testDecoderFactory == null
-                && !supportsHardwareH264(decoderFactory.getSupportedCodecs())) {
+        decoderFactory = new HardwareVideoDecoderFactory(eglBase.getEglBaseContext());
+        if (!supportsHardwareH264(decoderFactory.getSupportedCodecs())) {
             eglBase.release();
             throw new IllegalStateException("No hardware H.264 decoder is available.");
         }
@@ -234,20 +230,7 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         if (context == null || renderer == null || listener == null || state == null) {
             throw new IllegalArgumentException("TV receiver dependencies are required.");
         }
-        return new TvWebRtcReceiver(context, renderer, listener, state, null);
-    }
-
-    static TvWebRtcReceiver createWithDecoderFactoryForTest(
-            Context context,
-            SurfaceViewRenderer renderer,
-            Listener listener,
-            TvReceiverState state,
-            VideoDecoderFactory decoderFactory) {
-        if (context == null || renderer == null || listener == null || state == null
-                || decoderFactory == null) {
-            throw new IllegalArgumentException("TV receiver test dependencies are required.");
-        }
-        return new TvWebRtcReceiver(context, renderer, listener, state, decoderFactory);
+        return new TvWebRtcReceiver(context, renderer, listener, state);
     }
 
     public void start(ApprovedSignalingChannel approvedSignaling, String remoteOfferSdp) {

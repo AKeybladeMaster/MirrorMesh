@@ -44,4 +44,7 @@ final class NativePairingBridge {
 
     /** Releases an approved signaling connection when the TV session ends. */
     static native boolean closeControlChannel(long connectionId);
+
+    /** Persists peer revocation and closes the authenticated channel, even on a send failure. */
+    static native String revokeControlChannel(long connectionId);
 }

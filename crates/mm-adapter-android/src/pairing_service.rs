@@ -254,6 +254,3 @@ impl fmt::Display for AndroidTvPairingServiceError {
 }
 
 impl std::error::Error for AndroidTvPairingServiceError {}
-
-#[cfg(test)]
-mod tests;

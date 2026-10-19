@@ -1136,7 +1136,6 @@ dependencies = [
  "mm-application",
  "mm-domain",
  "mm-ports",
- "mm-protocol",
  "mm-runtime",
  "mm-store",
  "ndk-context",
@@ -1197,9 +1196,7 @@ dependencies = [
 name = "mm-adapter-signaling"
 version = "0.1.0"
 dependencies = [
- "ed25519-dalek",
  "getrandom 0.4.3",
- "mm-adapter-identity",
  "mm-adapter-tls",
  "mm-application",
  "mm-domain",
@@ -1207,9 +1204,7 @@ dependencies = [
  "mm-protocol",
  "mm-runtime",
  "mm-security",
- "mm-store",
  "rustls",
- "sha2 0.11.0",
  "tungstenite",
 ]
 
@@ -1217,7 +1212,6 @@ dependencies = [
 name = "mm-adapter-tls"
 version = "0.1.0"
 dependencies = [
- "ed25519-dalek",
  "mm-domain",
  "mm-ports",
  "rustls",
@@ -1294,14 +1288,11 @@ dependencies = [
 name = "mm-runtime"
 version = "0.1.0"
 dependencies = [
- "ed25519-dalek",
- "mm-adapter-identity",
  "mm-application",
  "mm-domain",
  "mm-ports",
  "mm-protocol",
  "mm-security",
- "mm-store",
 ]
 
 [[package]]

@@ -10,5 +10,3 @@ mm-ports.workspace = true
 rustls.workspace = true
 sha2.workspace = true
 
-[dev-dependencies]
-ed25519-dalek.workspace = true

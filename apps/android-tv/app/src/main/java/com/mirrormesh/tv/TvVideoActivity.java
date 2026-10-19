@@ -44,6 +44,20 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
         Button disconnectButton = findViewById(R.id.video_disconnect_button);
         screenshotButton.setOnClickListener(view -> requestScreenshotCapture());
         disconnectButton.setOnClickListener(view -> endSession());
+        Button revokeButton = findViewById(R.id.video_revoke_button);
+        revokeButton.setOnClickListener(view -> {
+            if (ended || pendingOffer == null) return;
+            revokeButton.setEnabled(false);
+            pendingOffer.signaling.revoke(message -> runOnUiThread(() -> {
+                if (isDestroyed()) return;
+                if (message.isEmpty()) {
+                    pendingOffer.state.revoke();
+                    finish();
+                }
+                else diagnosticsText.setText(message);
+            }));
+            closeReceiver();
+        });
 
         pendingOffer = TvApprovedSessionLauncher.takePending();
         if (pendingOffer == null

@@ -16,8 +16,3 @@ mm-security.workspace = true
 rustls.workspace = true
 tungstenite.workspace = true
 
-[dev-dependencies]
-ed25519-dalek.workspace = true
-mm-adapter-identity.workspace = true
-mm-store.workspace = true
-sha2.workspace = true

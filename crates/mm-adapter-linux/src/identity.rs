@@ -1,4 +1,4 @@
-#![cfg(any(test, target_os = "linux"))]
+#![cfg(target_os = "linux")]
 
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;

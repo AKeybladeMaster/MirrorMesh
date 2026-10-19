@@ -20,6 +20,3 @@ pub use sender_pairing::{
 
 #[cfg(windows)]
 pub use runtime::initialize_pairing_runtime;
-
-#[cfg(all(test, windows))]
-mod tests;

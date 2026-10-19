@@ -1,5 +1,4 @@
 <resources>
-    <string name="app_name">MirrorMesh TV</string>
     <string name="session_standby">No active session</string>
     <string name="session_request_pending">Request from Demo Sender (local)</string>
     <string name="session_demo_connected">Connected to Demo Sender (local demo)</string>

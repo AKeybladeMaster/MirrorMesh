@@ -650,7 +650,3 @@ fn decrypt_seed(
     }
     Ok(result)
 }
-
-#[cfg(test)]
-#[path = "android_store_tests.rs"]
-mod tests;

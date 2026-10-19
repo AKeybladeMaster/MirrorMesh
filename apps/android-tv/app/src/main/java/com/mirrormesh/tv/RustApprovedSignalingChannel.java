@@ -212,15 +212,44 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
 
     @Override
     public void close() {
-        closeForUser();
+        if (!beginClose()) return;
+        // JNI waits for bounded socket I/O; never hold the Android UI thread for it.
+        new Thread(this::closeNative, "mirrormesh-close").start();
     }
 
-    boolean closeForUser() {
+    @Override
+    public void revoke(TextListener completion) {
         if (!closed.compareAndSet(false, true)) {
-            return true;
+            completion.onText("The connection has already closed; revocation was not saved.");
+            return;
         }
         receiveWorker.shutdownNow();
         clearListeners();
+        Thread worker = new Thread(() -> {
+            try {
+                requireSuccess(NativePairingBridge.revokeControlChannel(connectionId));
+                completion.onText("");
+            } catch (Exception | LinkageError error) {
+                completion.onText("Video stopped, but revocation could not be saved.");
+            }
+        }, "mirrormesh-revoke");
+        worker.start();
+    }
+
+    boolean closeForUser() {
+        return !beginClose() || closeNative();
+    }
+
+    private boolean beginClose() {
+        if (!closed.compareAndSet(false, true)) {
+            return false;
+        }
+        receiveWorker.shutdownNow();
+        clearListeners();
+        return true;
+    }
+
+    private boolean closeNative() {
         try {
             return nativeBridge.closeControlChannel(connectionId);
         } catch (LinkageError error) {

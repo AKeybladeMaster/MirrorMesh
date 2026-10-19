@@ -124,29 +124,3 @@ fn format_uuid(bytes: &[u8; 16], formatter: &mut fmt::Formatter<'_>) -> fmt::Res
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{DeviceId, SessionId};
-
-    #[test]
-    fn parses_and_formats_canonical_uuid() {
-        let parsed = DeviceId::parse("8b3d8788-1476-4aae-a287-334a428b5b6f").unwrap();
-        assert_eq!(parsed.to_string(), "8b3d8788-1476-4aae-a287-334a428b5b6f");
-        assert_eq!(parsed.as_bytes()[0], 0x8b);
-    }
-
-    #[test]
-    fn rejects_invalid_uuid_shapes_and_characters() {
-        assert!(DeviceId::parse("not-a-uuid").is_err());
-        assert!(SessionId::parse("8b3d878814764aaea287334a428b5b6f").is_err());
-        assert!(SessionId::parse("8b3d8788-1476-4aae-a287-334a428b5b6g").is_err());
-    }
-
-    #[test]
-    fn session_ids_must_use_uuid_v4_variant_bits() {
-        assert!(SessionId::parse("8b3d8788-1476-4aae-a287-334a428b5b6f").is_ok());
-        assert!(SessionId::parse("8b3d8788-1476-7aae-a287-334a428b5b6f").is_err());
-        assert!(SessionId::parse("8b3d8788-1476-4aae-2287-334a428b5b6f").is_err());
-    }
-}

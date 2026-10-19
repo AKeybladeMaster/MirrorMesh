@@ -4,1611 +4,485 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'android_pairing_bootstrap.dart';
-import 'annotation_geometry.dart';
-import 'annotation_overlay.dart';
-import 'ios_pairing_bootstrap.dart';
-import 'linux_pairing_bootstrap.dart';
 import 'rust_session_status.dart';
-import 'synthetic_video_test_pattern.dart';
 import 'webrtc_engine.dart';
 import 'windows_pairing_bootstrap.dart';
 import 'windows_sender_session.dart';
 
-enum _DemoReceiverState { undiscovered, discovered, pairing }
-
-const _demoAnnotationColors = <({String id, String label, Color color})>[
-  (id: 'teal', label: 'Teal', color: Color(0xFF61D7C5)),
-  (id: 'amber', label: 'Amber', color: Color(0xFFFFC857)),
-  (id: 'coral', label: 'Coral', color: Color(0xFFFF7A90)),
-  (id: 'white', label: 'White', color: Color(0xFFF5F7FA)),
-];
-
-const _demoAnnotationWidths = <({String id, String label, double width})>[
-  (id: 'fine', label: 'Fine', width: 2),
-  (id: 'medium', label: 'Medium', width: 4),
-  (id: 'bold', label: 'Bold', width: 8),
-];
-
 class MirrorMeshApp extends StatelessWidget {
   const MirrorMeshApp({super.key, this.rustSessionStatus});
-
   final RustSessionStatus? rustSessionStatus;
 
   @override
-  Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF61D7C5),
-      brightness: Brightness.dark,
-      surface: const Color(0xFF111923),
-    );
-
-    return MaterialApp(
-      title: 'MirrorMesh',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: colorScheme,
-        scaffoldBackgroundColor: const Color(0xFF0A1017),
-        cardTheme: const CardThemeData(
-          color: Color(0xFF111923),
-          margin: EdgeInsets.zero,
-        ),
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-        ),
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'MirrorMesh',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xFF61D7C5),
+        brightness: Brightness.dark,
+        surface: const Color(0xFF111923),
       ),
-      home: MirrorMeshHome(rustSessionStatus: rustSessionStatus),
-    );
-  }
+      scaffoldBackgroundColor: const Color(0xFF0A1017),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(),
+      ),
+    ),
+    home: const MirrorMeshHome(),
+  );
 }
 
+/// Release UI connected to the native pairing and media adapters.
 class MirrorMeshHome extends StatefulWidget {
-  const MirrorMeshHome({super.key, this.rustSessionStatus});
-
-  final RustSessionStatus? rustSessionStatus;
-
+  const MirrorMeshHome({super.key});
   @override
   State<MirrorMeshHome> createState() => _MirrorMeshHomeState();
 }
 
 class _MirrorMeshHomeState extends State<MirrorMeshHome> {
-  int _selectedIndex = 0;
-  _DemoReceiverState _demoReceiverState = _DemoReceiverState.undiscovered;
-  bool _annotationEnabled = false;
-  bool _pairingRuntimePreparing = false;
-  String? _pairingRuntimeDeviceId;
-  String? _pairingRuntimeError;
-  bool _senderPairingStarting = false;
-  bool _senderPairingPollInProgress = false;
-  int? _senderPairingRequestId;
-  Timer? _senderPairingPollTimer;
-  WindowsSenderPairingStatus? _senderPairingStatus;
-  String? _senderPairingError;
-  bool _senderSessionStarting = false;
-  WindowsSenderSessionController? _windowsSenderSession;
-  StreamSubscription<WindowsSenderSessionState>? _senderSessionSubscription;
-  StreamSubscription<WebRtcOutboundVideoStats>? _senderVideoStatsSubscription;
-  WindowsSenderSessionState? _senderSessionState;
-  WebRtcOutboundVideoStats? _senderVideoStats;
-  String? _senderSessionError;
-  List<AnnotationStroke> _demoStrokes = [];
-  Color _demoStrokeColor = const Color(0xFF61D7C5);
-  double _demoStrokeWidth = 4;
+  static const _pairing = WindowsPairingBootstrap();
+  final _invitation = TextEditingController();
+  String? _deviceId, _error, _sourceName;
+  int? _requestId;
+  bool _busy = false, _polling = false;
+  Timer? _pairingTimer;
+  WindowsSenderPairingStatus? _pairingStatus;
+  WindowsSenderSessionController? _session;
+  WindowsSenderSessionState? _sessionState;
+  WebRtcOutboundVideoStats? _stats;
+  StreamSubscription<WindowsSenderSessionState>? _stateSubscription;
+  StreamSubscription<WebRtcOutboundVideoStats>? _statsSubscription;
+  bool get _approved =>
+      _pairingStatus?.state == WindowsSenderPairingState.approved;
 
-  static const _destinations = [
-    NavigationDestination(
-      icon: Icon(Icons.cast_connected_outlined),
-      selectedIcon: Icon(Icons.cast_connected),
-      label: 'Connect',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.monitor_outlined),
-      selectedIcon: Icon(Icons.monitor),
-      label: 'Session',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.devices_outlined),
-      selectedIcon: Icon(Icons.devices),
-      label: 'Devices',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.tune_outlined),
-      selectedIcon: Icon(Icons.tune),
-      label: 'Settings',
-    ),
-  ];
-
-  bool get _demoPairing => _demoReceiverState == _DemoReceiverState.pairing;
+  String get _status {
+    if (_sessionState case final state?) {
+      return switch (state) {
+        WindowsSenderSessionState.idle => 'Ready to share',
+        WindowsSenderSessionState.negotiating => 'Connecting video…',
+        WindowsSenderSessionState.transportConnected =>
+          'Connected · waiting for the first encoded frame',
+        WindowsSenderSessionState.streaming => 'Sharing your screen',
+        WindowsSenderSessionState.reconnecting =>
+          'Connection interrupted · reconnecting…',
+        WindowsSenderSessionState.stopped => 'Screen share ended',
+        WindowsSenderSessionState.revoked => 'The receiver revoked access',
+        WindowsSenderSessionState.failed => 'Screen share failed',
+      };
+    }
+    return switch (_pairingStatus?.state) {
+      WindowsSenderPairingState.connecting => 'Checking the receiver identity…',
+      WindowsSenderPairingState.awaitingApproval =>
+        'Approve this PC on the receiver',
+      WindowsSenderPairingState.approved =>
+        'Paired · choose a screen or window',
+      WindowsSenderPairingState.rejected =>
+        'The receiver rejected this request',
+      WindowsSenderPairingState.failed =>
+        'Pairing failed · refresh the receiver code and retry',
+      WindowsSenderPairingState.cancelling => 'Disconnecting…',
+      WindowsSenderPairingState.cancelled => 'Disconnected',
+      null => 'Connect your PC to an Android receiver',
+    };
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final useRail = constraints.maxWidth >= 760;
-        final currentPage = switch (_selectedIndex) {
-          0 => _ConnectPage(
-            demoReceiverState: _demoReceiverState,
-            onScanDemo: _scanDemoReceiver,
-          ),
-          1 => _SessionPage(
-            demoPairing: _demoPairing,
-            annotationEnabled: _annotationEnabled,
-            strokes: _demoStrokes,
-            annotationColor: _demoStrokeColor,
-            annotationStrokeWidth: _demoStrokeWidth,
-            onStopDemo: _disconnectDemoReceiver,
-            onToggleAnnotation: _toggleAnnotation,
-            onStrokePoint: _addDemoStrokePoint,
-            onUndo: _undoDemoStroke,
-            onClear: _clearDemoStrokes,
-            onSelectAnnotationColor: _selectDemoStrokeColor,
-            onSelectAnnotationWidth: _selectDemoStrokeWidth,
-          ),
-          2 => _DevicesPage(
-            demoReceiverState: _demoReceiverState,
-            onConnectDemo: _connectDemoReceiver,
-            pairingRuntimePreparing: _pairingRuntimePreparing,
-            localDeviceId: _pairingRuntimeDeviceId,
-            pairingRuntimeError: _pairingRuntimeError,
-            onPreparePairing: _preparePairingRuntime,
-            senderPairingStarting: _senderPairingStarting,
-            senderPairingStatus: _senderPairingStatus,
-            senderPairingError: _senderPairingError,
-            onBeginSenderPairing: _beginWindowsSenderPairing,
-            onCancelSenderPairing: _cancelWindowsSenderPairing,
-            senderSessionStarting: _senderSessionStarting,
-            senderSessionState: _senderSessionState,
-            senderSessionStats: _senderVideoStats,
-            senderSessionError: _senderSessionError,
-            onStartSenderSession: _startWindowsSenderSession,
-            onStopSenderSession: _stopWindowsSenderSession,
-          ),
-          _ => _SettingsPage(rustSessionStatus: widget.rustSessionStatus),
-        };
-        final page = SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1000),
-              child: currentPage,
-            ),
-          ),
-        );
-        final pageWithSessionShortcuts = _selectedIndex == 1
-            ? Focus(
-                autofocus: true,
-                onKeyEvent: _handleSessionKeyEvent,
-                child: page,
-              )
-            : page;
-
-        return Scaffold(
-          body: useRail
-              ? Row(
-                  children: [
-                    NavigationRail(
-                      selectedIndex: _selectedIndex,
-                      onDestinationSelected: _selectPage,
-                      labelType: NavigationRailLabelType.all,
-                      destinations: [
-                        for (final destination in _destinations)
-                          NavigationRailDestination(
-                            icon: destination.icon,
-                            selectedIcon: destination.selectedIcon,
-                            label: Text(destination.label),
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('MirrorMesh')),
+    body: SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900),
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              Text(
+                'Your screen. Your devices.',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Windows sender → Android phone, tablet or TV receiver',
+              ),
+              const SizedBox(height: 24),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.cast),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _status,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
                           ),
+                        ],
+                      ),
+                      if (_busy) ...[
+                        const SizedBox(height: 16),
+                        const LinearProgressIndicator(),
                       ],
-                    ),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: pageWithSessionShortcuts),
-                  ],
-                )
-              : pageWithSessionShortcuts,
-          bottomNavigationBar: useRail
-              ? null
-              : NavigationBar(
-                  selectedIndex: _selectedIndex,
-                  onDestinationSelected: _selectPage,
-                  destinations: _destinations,
+                      const SizedBox(height: 24),
+                      TextField(
+                        controller: _invitation,
+                        enabled: !_busy && _requestId == null,
+                        maxLines: 3,
+                        maxLength: 4096,
+                        autocorrect: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Receiver invitation',
+                          hintText:
+                              'Paste the complete mirrormesh:// invitation',
+                          helperText: 'Start the Android receiver, then copy or share its invitation.',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          FilledButton.icon(
+                            onPressed:
+                                Platform.isWindows &&
+                                    !_busy &&
+                                    _requestId == null
+                                ? _connect
+                                : null,
+                            icon: const Icon(Icons.link),
+                            label: const Text('Pair with receiver'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: !_busy && _requestId == null
+                                ? _pasteInvitation
+                                : null,
+                            icon: const Icon(Icons.content_paste),
+                            label: const Text('Paste'),
+                          ),
+                          if (_requestId != null)
+                            OutlinedButton.icon(
+                              onPressed: _busy ? null : _disconnect,
+                              icon: const Icon(Icons.link_off),
+                              label: const Text('Disconnect'),
+                            ),
+                        ],
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                      if (_approved || _session != null) ...[
+                        const Divider(height: 40),
+                        Text(
+                          'Share a screen or window',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Capture begins only after you select a source. Everything visible in that source may be shared.',
+                        ),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: _busy || _session != null || !_approved
+                                  ? null
+                                  : _startSharing,
+                              icon: const Icon(Icons.screen_share),
+                              label: const Text('Choose what to share'),
+                            ),
+                            if (_session != null)
+                              FilledButton.tonalIcon(
+                                onPressed: _busy ? null : _disconnect,
+                                icon: const Icon(Icons.stop_screen_share),
+                                label: const Text('Stop sharing'),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-        );
-      },
-    );
-  }
-
-  void _selectPage(int index) {
-    setState(() => _selectedIndex = index);
-  }
-
-  KeyEventResult _handleSessionKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || !_demoPairing) {
-      return KeyEventResult.ignored;
-    }
-
-    final keyboard = HardwareKeyboard.instance;
-    if (event.logicalKey == LogicalKeyboardKey.keyP &&
-        !keyboard.isControlPressed &&
-        !keyboard.isMetaPressed &&
-        !keyboard.isAltPressed) {
-      _toggleAnnotation();
-      return KeyEventResult.handled;
-    }
-
-    if (event.logicalKey == LogicalKeyboardKey.keyZ &&
-        (keyboard.isControlPressed || keyboard.isMetaPressed)) {
-      _undoDemoStroke();
-      return KeyEventResult.handled;
-    }
-
-    return KeyEventResult.ignored;
-  }
-
-  void _scanDemoReceiver() {
-    final status = widget.rustSessionStatus;
-    final nextState = status?.isAvailable == true
-        ? status!.discoverDemoReceiver()
-        : 'Discovered';
-    if (nextState != 'Discovered') {
-      _showDemoTransitionError();
-      return;
-    }
-    setState(() => _demoReceiverState = _DemoReceiverState.discovered);
-  }
-
-  void _connectDemoReceiver() {
-    if (_demoReceiverState != _DemoReceiverState.discovered) return;
-    final status = widget.rustSessionStatus;
-    final nextState = status?.isAvailable == true
-        ? status!.beginDemoPairing()
-        : 'Pairing';
-    if (nextState != 'Pairing') {
-      _showDemoTransitionError();
-      return;
-    }
-    setState(() => _demoReceiverState = _DemoReceiverState.pairing);
-  }
-
-  Future<void> _preparePairingRuntime() async {
-    if (_pairingRuntimePreparing || _pairingRuntimeDeviceId != null) return;
-    setState(() {
-      _pairingRuntimePreparing = true;
-      _pairingRuntimeError = null;
-    });
-    try {
-      final deviceId = switch (Platform.operatingSystem) {
-        'android' => await const AndroidPairingBootstrap().prepare(),
-        'ios' => await const IosPairingBootstrap().prepare(),
-        'linux' => await const LinuxPairingBootstrap().prepare(),
-        'windows' => await const WindowsPairingBootstrap().prepare(),
-        _ => throw PlatformException(
-          code: 'pairing_runtime_unsupported',
-          message: 'This platform cannot prepare local pairing support.',
+              ),
+              const SizedBox(height: 20),
+              ExpansionTile(
+                title: const Text('Identity and session diagnostics'),
+                childrenPadding: const EdgeInsets.all(16),
+                expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    'PC identity: ${_deviceId ?? 'Created when you pair'}',
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    'Receiver fingerprint: ${_pairingStatus?.receiverFingerprint.isNotEmpty == true ? _pairingStatus!.receiverFingerprint : 'Not verified yet'}',
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Source: ${_sourceName ?? 'None'}'),
+                  Text(
+                    'Encoded frames: ${_stats?.framesEncoded ?? 0} · bytes sent: ${_stats?.bytesSent ?? 0}',
+                  ),
+                  Text(
+                    'Codec: ${_stats?.codecMimeType ?? 'Waiting'} · encoder: ${_stats?.encoderImplementation ?? 'Not reported'}',
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Sender statistics confirm encoding and transmission only. Check the receiver for rendered video.',
+                  ),
+                  TextButton.icon(
+                    onPressed: _copyDiagnostics,
+                    icon: const Icon(Icons.copy),
+                    label: const Text('Copy diagnostics'),
+                  ),
+                ],
+              ),
+              const ExpansionTile(
+                title: Text('How to connect'),
+                childrenPadding: EdgeInsets.all(16),
+                children: [
+                  Text(
+                    '1. Connect both devices to the same trusted LAN.\n\n2. Start the Android receiver on its Wi-Fi or Ethernet address. Copy or share its invitation, or scan the TV QR with your phone.\n\n3. Paste the full invitation here. On the receiver, review this PC, select Allow view and approve.\n\n4. Choose a source to begin sharing. Stop sharing on the PC or Disconnect on the receiver ends capture.\n\nInvitations expire and are single use. Refresh the receiver code before pairing again. Guest Wi-Fi or client isolation may prevent connections. Audio and Internet relays are not configured in this release candidate.',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Text(
+                Platform.isWindows
+                    ? 'Local encrypted screen sharing · receiver approval · no account required'
+                    : 'This Flutter release sends screens on Windows. Use the native Android receiver APK on phones and TVs.',
+              ),
+            ],
+          ),
         ),
-      };
-      if (!mounted) return;
-      setState(() => _pairingRuntimeDeviceId = deviceId);
-    } on PlatformException {
-      if (!mounted) return;
-      setState(
-        () => _pairingRuntimeError =
-            '${Platform.operatingSystem} could not prepare local pairing support. Try again later.',
-      );
-    } on MissingPluginException {
-      if (!mounted) return;
-      setState(
-        () => _pairingRuntimeError =
-            'The ${Platform.operatingSystem} pairing service is unavailable in this build.',
-      );
-    } finally {
-      if (mounted) setState(() => _pairingRuntimePreparing = false);
-    }
+      ),
+    ),
+  );
+
+  Future<void> _pasteInvitation() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (mounted && data?.text != null) _invitation.text = data!.text!.trim();
   }
 
-  Future<void> _beginWindowsSenderPairing(String invitationUri) async {
-    if (!Platform.isWindows ||
-        _pairingRuntimeDeviceId == null ||
-        _senderPairingStarting ||
-        _senderPairingStatus?.state.isActive == true) {
-      return;
-    }
-
+  Future<void> _connect() async {
+    if (_busy || _requestId != null) return;
     setState(() {
-      _senderPairingStarting = true;
-      _senderPairingError = null;
-      _senderPairingStatus = null;
+      _busy = true;
+      _error = null;
+      _sessionState = null;
+      _stats = null;
     });
     try {
-      final requestId = await const WindowsPairingBootstrap()
-          .beginSenderPairing(invitationUri);
-      if (!mounted) return;
-      _senderPairingRequestId = requestId;
-      setState(() {
-        _senderPairingStatus = const WindowsSenderPairingStatus(
-          state: WindowsSenderPairingState.connecting,
-          errorCode: 0,
-          receiverFingerprint: '',
-        );
-      });
-      _senderPairingPollTimer?.cancel();
-      _senderPairingPollTimer = Timer.periodic(
+      final text = _invitation.text.trim();
+      if (text.isEmpty || text.length > 4096) {
+        throw StateError('Paste a complete receiver invitation first.');
+      }
+      _deviceId ??= await _pairing.prepare();
+      final id = await _pairing.beginSenderPairing(text);
+      if (!mounted) {
+        await _pairing.cancelSenderPairing(id);
+        return;
+      }
+      _requestId = id;
+      _pairingStatus = const WindowsSenderPairingStatus(
+        state: WindowsSenderPairingState.connecting,
+        errorCode: 0,
+        receiverFingerprint: '',
+      );
+      _pairingTimer = Timer.periodic(
         const Duration(milliseconds: 300),
-        (_) => unawaited(_pollWindowsSenderPairing(requestId)),
+        (_) => unawaited(_pollPairing(id)),
       );
-      await _pollWindowsSenderPairing(requestId);
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      setState(() => _senderPairingError = _senderPairingErrorMessage(error));
-    } on MissingPluginException {
-      if (!mounted) return;
-      setState(
-        () => _senderPairingError =
-            'The Windows sender pairing service is unavailable in this build.',
-      );
+      await _pollPairing(id);
+    } catch (error) {
+      if (mounted) setState(() => _error = _describe(error));
     } finally {
-      if (mounted) setState(() => _senderPairingStarting = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _pollWindowsSenderPairing(int requestId) async {
-    if (!mounted ||
-        requestId != _senderPairingRequestId ||
-        _senderPairingPollInProgress) {
-      return;
-    }
-    _senderPairingPollInProgress = true;
+  Future<void> _pollPairing(int id) async {
+    if (_polling || !mounted || id != _requestId) return;
+    _polling = true;
     try {
-      final status = await const WindowsPairingBootstrap().pollSenderPairing(
-        requestId,
-      );
-      if (!mounted || requestId != _senderPairingRequestId) return;
-      setState(() => _senderPairingStatus = status);
-      if (!status.state.isActive) _senderPairingPollTimer?.cancel();
-    } on PlatformException catch (error) {
-      if (!mounted || requestId != _senderPairingRequestId) return;
-      _senderPairingPollTimer?.cancel();
-      setState(() => _senderPairingError = _senderPairingErrorMessage(error));
-    } on MissingPluginException {
-      if (!mounted || requestId != _senderPairingRequestId) return;
-      _senderPairingPollTimer?.cancel();
-      setState(
-        () => _senderPairingError =
-            'The Windows sender pairing service is unavailable in this build.',
-      );
+      final status = await _pairing.pollSenderPairing(id);
+      if (!mounted || id != _requestId) return;
+      setState(() => _pairingStatus = status);
+      if (!status.state.isActive) {
+        _pairingTimer?.cancel();
+        if (_session == null) setState(() => _requestId = null);
+      } else if (status.state == WindowsSenderPairingState.approved) {
+        _pairingTimer?.cancel();
+      }
+    } catch (error) {
+      _pairingTimer?.cancel();
+      if (mounted && id == _requestId) {
+        setState(() => _error = _describe(error));
+      }
     } finally {
-      _senderPairingPollInProgress = false;
+      _polling = false;
     }
   }
 
-  Future<void> _cancelWindowsSenderPairing() async {
-    final requestId = _senderPairingRequestId;
-    if (requestId == null) return;
-    try {
-      await _stopWindowsSenderSession();
-      await const WindowsPairingBootstrap().cancelSenderPairing(requestId);
-      if (mounted) await _pollWindowsSenderPairing(requestId);
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      setState(() => _senderPairingError = _senderPairingErrorMessage(error));
-    } on MissingPluginException {
-      if (!mounted) return;
-      setState(
-        () => _senderPairingError =
-            'The Windows sender pairing service is unavailable in this build.',
-      );
-    }
-  }
-
-  Future<void> _startWindowsSenderSession() async {
-    final requestId = _senderPairingRequestId;
-    if (!Platform.isWindows ||
-        requestId == null ||
-        _senderPairingStatus?.state != WindowsSenderPairingState.approved ||
-        _senderSessionStarting ||
-        _windowsSenderSession != null) {
-      return;
-    }
-
+  Future<void> _startSharing() async {
+    final id = _requestId;
+    if (_busy || !_approved || id == null || _session != null) return;
     setState(() {
-      _senderSessionStarting = true;
-      _senderSessionError = null;
+      _busy = true;
+      _error = null;
     });
     try {
       final sources = await const FlutterWebRtcPeerConnectionFactory()
           .listDesktopCaptureSources();
       if (!mounted) return;
       if (sources.isEmpty) {
-        setState(
-          () => _senderSessionError =
-              'Windows did not report an available screen or window source.',
-        );
-        return;
+        throw StateError('No screens or windows are available for capture.');
       }
-
       final source = await showDialog<WebRtcDesktopCaptureSource>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Choose a screen or window'),
+          title: const Text('Choose what to share'),
           content: SizedBox(
             width: 480,
             child: ListView(
               shrinkWrap: true,
               children: [
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'The selected source will be captured and sent to the approved Android TV. Capture starts only after you choose a source.',
-                  ),
+                const Text(
+                  'Only the source you select will be sent to the approved receiver.',
                 ),
+                const SizedBox(height: 12),
                 for (final source in sources)
                   ListTile(
                     leading: Icon(
                       source.type == WebRtcDesktopCaptureSourceType.screen
-                          ? Icons.desktop_windows_outlined
-                          : Icons.web_asset_outlined,
+                          ? Icons.desktop_windows
+                          : Icons.web_asset,
                     ),
                     title: Text(source.name),
-                    subtitle: Text(
-                      source.type == WebRtcDesktopCaptureSourceType.screen
-                          ? 'Screen'
-                          : 'Window',
-                    ),
-                    onTap: () => Navigator.of(context).pop(source),
+                    subtitle: Text(source.type.name),
+                    onTap: () => Navigator.pop(context, source),
                   ),
               ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
           ],
         ),
       );
-      if (!mounted || source == null) return;
-
-      final controller = WindowsSenderSessionController(
-        pairing: const WindowsPairingBootstrap(),
-      );
-      _windowsSenderSession = controller;
-      _senderVideoStats = null;
-      _senderSessionSubscription = controller.states.listen((state) {
-        if (mounted) setState(() => _senderSessionState = state);
+      if (!mounted || source == null || id != _requestId) return;
+      final session = WindowsSenderSessionController(pairing: _pairing);
+      _session = session;
+      _sourceName = source.name;
+      _stateSubscription = session.states.listen((state) {
+        if (!mounted || !identical(_session, session)) return;
+        setState(() {
+          _sessionState = state;
+          if (state == WindowsSenderSessionState.failed) {
+            _error = _describe(
+              session.lastError ?? StateError('The media connection failed.'),
+            );
+          }
+        });
+        if (state == WindowsSenderSessionState.failed ||
+            state == WindowsSenderSessionState.stopped ||
+            state == WindowsSenderSessionState.revoked) {
+          unawaited(_releaseSession(session));
+        }
       });
-      _senderVideoStatsSubscription = controller.videoStats.listen((stats) {
-        if (mounted) setState(() => _senderVideoStats = stats);
+      _statsSubscription = session.videoStats.listen((stats) {
+        if (mounted && identical(_session, session)) {
+          setState(() => _stats = stats);
+        }
       });
-      await controller.start(requestId: requestId, sourceId: source.id);
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      setState(
-        () => _senderSessionError =
-            error.message ??
-            'Windows could not start the selected video source.',
-      );
-    } on MissingPluginException {
-      if (!mounted) return;
-      setState(
-        () => _senderSessionError =
-            'The Windows WebRTC capture service is unavailable in this build.',
-      );
-    } on Object {
-      if (!mounted) return;
-      setState(
-        () => _senderSessionError =
-            'The screen share could not start. No video is being sent.',
-      );
+      await session.start(requestId: id, sourceId: source.id);
+    } catch (error) {
+      if (mounted) setState(() => _error = _describe(error));
     } finally {
-      if (mounted) setState(() => _senderSessionStarting = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _stopWindowsSenderSession() async {
-    final subscription = _senderSessionSubscription;
-    _senderSessionSubscription = null;
-    await subscription?.cancel();
-    final statsSubscription = _senderVideoStatsSubscription;
-    _senderVideoStatsSubscription = null;
-    await statsSubscription?.cancel();
-    final controller = _windowsSenderSession;
-    _windowsSenderSession = null;
-    if (controller != null) await controller.dispose();
+  Future<void> _releaseSession(WindowsSenderSessionController session) async {
+    if (!identical(_session, session)) return;
+    _session = null;
+    await _stateSubscription?.cancel();
+    await _statsSubscription?.cancel();
+    _stateSubscription = null;
+    _statsSubscription = null;
+    try {
+      await session.dispose();
+    } catch (error) {
+      if (mounted) setState(() => _error = _describe(error));
+    }
     if (mounted) {
       setState(() {
-        _senderSessionState = null;
-        _senderVideoStats = null;
-        _senderSessionStarting = false;
+        _requestId = null;
+        _pairingStatus = null;
       });
     }
   }
 
-  String _senderPairingErrorMessage(PlatformException error) =>
-      switch (error.code) {
-        'pairing_busy' => 'A sender pairing attempt is already active.',
-        'invalid_argument' =>
-          'Paste the invitation text exactly as shown on the TV.',
-        'pairing_status_invalid' => 'Windows returned invalid pairing status.',
-        _ => error.message ?? 'Windows could not complete sender pairing.',
-      };
-
-  @override
-  void dispose() {
-    _senderPairingPollTimer?.cancel();
-    unawaited(_senderSessionSubscription?.cancel());
-    unawaited(_senderVideoStatsSubscription?.cancel());
-    unawaited(_windowsSenderSession?.dispose());
-    final requestId = _senderPairingRequestId;
-    if (requestId != null && _senderPairingStatus?.state.isActive == true) {
-      unawaited(const WindowsPairingBootstrap().cancelSenderPairing(requestId));
-    }
-    super.dispose();
-  }
-
-  void _disconnectDemoReceiver() {
-    if (!_demoPairing) return;
-    final status = widget.rustSessionStatus;
-    final nextState = status?.isAvailable == true
-        ? status!.disconnectDemoReceiver()
-        : 'Stopped';
-    if (nextState != 'Stopped') {
-      _showDemoTransitionError();
-      return;
-    }
-    setState(() {
-      _demoReceiverState = _DemoReceiverState.undiscovered;
-      _annotationEnabled = false;
-      _demoStrokes = [];
-    });
-  }
-
-  void _showDemoTransitionError() {
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      const SnackBar(
-        content: Text('The local demo session could not change state.'),
-      ),
-    );
-  }
-
-  void _toggleAnnotation() {
-    if (!_demoPairing) return;
-    setState(() => _annotationEnabled = !_annotationEnabled);
-  }
-
-  void _selectDemoStrokeColor(Color color) {
-    setState(() => _demoStrokeColor = color);
-  }
-
-  void _selectDemoStrokeWidth(double width) {
-    setState(() => _demoStrokeWidth = width);
-  }
-
-  void _addDemoStrokePoint(
-    Offset localPosition,
-    AnnotationCoordinateMapper mapper, {
-    required bool startsStroke,
-  }) {
-    if (!_demoPairing || !_annotationEnabled) return;
-    final point = mapper.toVideoPoint(localPosition);
-    if (point == null) return;
-    setState(() {
-      if (startsStroke || _demoStrokes.isEmpty) {
-        _demoStrokes = [
-          ..._demoStrokes,
-          AnnotationStroke(
-            points: [point],
-            color: _demoStrokeColor,
-            strokeWidth: _demoStrokeWidth,
-          ),
-        ];
-      } else {
-        final currentStroke = _demoStrokes.last;
-        _demoStrokes = [
-          ..._demoStrokes.take(_demoStrokes.length - 1),
-          AnnotationStroke(
-            points: [...currentStroke.points, point],
-            color: currentStroke.color,
-            strokeWidth: currentStroke.strokeWidth,
-          ),
-        ];
+  Future<void> _disconnect() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    _pairingTimer?.cancel();
+    final id = _requestId;
+    final session = _session;
+    try {
+      if (session != null) await _releaseSession(session);
+      if (id != null) await _pairing.cancelSenderPairing(id);
+    } catch (error) {
+      if (mounted) setState(() => _error = _describe(error));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _requestId = null;
+          _pairingStatus = null;
+          _sessionState = WindowsSenderSessionState.stopped;
+        });
       }
-    });
-  }
-
-  void _undoDemoStroke() {
-    if (_demoStrokes.isEmpty) return;
-    setState(() => _demoStrokes = [..._demoStrokes]..removeLast());
-  }
-
-  void _clearDemoStrokes() {
-    if (_demoStrokes.isEmpty) return;
-    setState(() => _demoStrokes = []);
-  }
-}
-
-class _ConnectPage extends StatelessWidget {
-  const _ConnectPage({
-    required this.demoReceiverState,
-    required this.onScanDemo,
-  });
-
-  final _DemoReceiverState demoReceiverState;
-  final VoidCallback onScanDemo;
-
-  @override
-  Widget build(BuildContext context) {
-    final demoAvailable = demoReceiverState != _DemoReceiverState.undiscovered;
-    final demoPairing = demoReceiverState == _DemoReceiverState.pairing;
-
-    return ListView(
-      padding: const EdgeInsets.all(28),
-      children: [
-        const _PageHeading(
-          eyebrow: 'MIRRORMESH',
-          title: 'Connect devices',
-          subtitle: 'Private screen sharing starts with an explicit pairing.',
-        ),
-        const SizedBox(height: 24),
-        const _StatusCard(
-          icon: Icons.hourglass_top_rounded,
-          title: 'Pairing service is not connected',
-          message: 'This build has no signaling transport yet. A connection cannot be started until the service and identity checks are available.',
-        ),
-        const SizedBox(height: 20),
-        const TextField(
-          enabled: false,
-          decoration: InputDecoration(
-            labelText: 'Pairing code',
-            hintText: 'Available when pairing service is ready',
-            prefixIcon: Icon(Icons.key_outlined),
-          ),
-        ),
-        const SizedBox(height: 14),
-        FilledButton.icon(
-          key: const Key('connect-button'),
-          onPressed: null,
-          icon: const Icon(Icons.link),
-          label: const Text('Connect'),
-        ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          key: const Key('scan-demo-button'),
-          onPressed: demoPairing ? null : onScanDemo,
-          icon: const Icon(Icons.science_outlined),
-          label: Text(
-            demoPairing
-                ? 'Demo pairing in progress'
-                : demoAvailable
-                ? 'Demo receiver available'
-                : 'Scan local demo devices',
-          ),
-        ),
-        const SizedBox(height: 10),
-        const Text(
-          'The demo tracks discovery and pairing state locally. It does not verify a peer, use the network, or start capture or video.',
-        ),
-        const SizedBox(height: 18),
-        const _PrivacyNote(
-          text: 'Screen capture will only be requested through the operating system after pairing and your confirmation.',
-        ),
-      ],
-    );
-  }
-}
-
-class _SessionPage extends StatelessWidget {
-  const _SessionPage({
-    required this.demoPairing,
-    required this.annotationEnabled,
-    required this.strokes,
-    required this.annotationColor,
-    required this.annotationStrokeWidth,
-    required this.onStopDemo,
-    required this.onToggleAnnotation,
-    required this.onStrokePoint,
-    required this.onUndo,
-    required this.onClear,
-    required this.onSelectAnnotationColor,
-    required this.onSelectAnnotationWidth,
-  });
-
-  final bool demoPairing;
-  final bool annotationEnabled;
-  final List<AnnotationStroke> strokes;
-  final Color annotationColor;
-  final double annotationStrokeWidth;
-  final VoidCallback onStopDemo;
-  final VoidCallback onToggleAnnotation;
-  final void Function(
-    Offset position,
-    AnnotationCoordinateMapper mapper, {
-    required bool startsStroke,
-  })
-  onStrokePoint;
-  final VoidCallback onUndo;
-  final VoidCallback onClear;
-  final ValueChanged<Color> onSelectAnnotationColor;
-  final ValueChanged<double> onSelectAnnotationWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(28),
-      children: [
-        _PageHeading(
-          eyebrow: 'CURRENT SESSION',
-          title: demoPairing ? 'Demo pairing preview' : 'No active session',
-          subtitle: demoPairing
-              ? 'Pairing state only; no peer is verified and no media stream is active.'
-              : 'Session controls appear here after the local demo pairing starts.',
-        ),
-        const SizedBox(height: 24),
-        if (demoPairing) ...[
-          const _StatusCard(
-            icon: Icons.science_outlined,
-            title: 'Demo pairing active',
-            message: 'Local simulation only; no peer is verified, no network or media stream is active, and no capture permission was requested.',
-          ),
-          const SizedBox(height: 20),
-          _DemoPreview(
-            strokes: strokes,
-            annotationEnabled: annotationEnabled,
-            onStrokePoint: onStrokePoint,
-          ),
-          const SizedBox(height: 16),
-          Text('Pen color', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final option in _demoAnnotationColors)
-                ChoiceChip(
-                  key: Key('annotation-color-${option.id}'),
-                  label: Text(option.label),
-                  avatar: CircleAvatar(
-                    radius: 8,
-                    backgroundColor: option.color,
-                  ),
-                  selected: annotationColor == option.color,
-                  onSelected: (selected) {
-                    if (selected) onSelectAnnotationColor(option.color);
-                  },
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text('Pen width', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          SegmentedButton<double>(
-            segments: [
-              for (final option in _demoAnnotationWidths)
-                ButtonSegment<double>(
-                  value: option.width,
-                  label: KeyedSubtree(
-                    key: Key('annotation-width-${option.id}'),
-                    child: Text(option.label),
-                  ),
-                  enabled: demoPairing,
-                ),
-            ],
-            selected: {annotationStrokeWidth},
-            showSelectedIcon: false,
-            onSelectionChanged: demoPairing
-                ? (selection) => onSelectAnnotationWidth(selection.single)
-                : null,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '${strokes.length} local annotation ${strokes.length == 1 ? 'stroke' : 'strokes'}',
-            key: const Key('annotation-count'),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              OutlinedButton.icon(
-                key: const Key('toggle-annotation-button'),
-                onPressed: onToggleAnnotation,
-                icon: Icon(
-                  annotationEnabled
-                      ? Icons.edit_off_outlined
-                      : Icons.edit_outlined,
-                ),
-                label: Text(
-                  annotationEnabled ? 'Turn pen off (P)' : 'Draw locally (P)',
-                ),
-              ),
-              OutlinedButton.icon(
-                key: const Key('undo-annotation-button'),
-                onPressed: strokes.isEmpty ? null : onUndo,
-                icon: const Icon(Icons.undo),
-                label: const Text('Undo (Ctrl/⌘+Z)'),
-              ),
-              OutlinedButton.icon(
-                key: const Key('clear-annotations-button'),
-                onPressed: strokes.isEmpty ? null : onClear,
-                icon: const Icon(Icons.delete_sweep_outlined),
-                label: const Text('Clear'),
-              ),
-              OutlinedButton.icon(
-                key: const Key('screenshot-button'),
-                onPressed: null,
-                icon: const Icon(Icons.screenshot_outlined),
-                label: const Text('Screenshot'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Screenshot export is unavailable because this preview has no received video frame. Nothing is saved.',
-          ),
-          const SizedBox(height: 16),
-          const _StatusCard(
-            icon: Icons.query_stats_outlined,
-            title: 'Live diagnostics unavailable',
-            message: 'FPS, bitrate, and latency require an active media transport; this demo reports no measured values.',
-          ),
-        ] else ...[
-          const _StatusCard(
-            icon: Icons.monitor_heart_outlined,
-            title: 'Ready when you are',
-            message: 'No capture permission has been requested. Nothing is being recorded or streamed.',
-          ),
-        ],
-        const SizedBox(height: 20),
-        OutlinedButton.icon(
-          key: const Key('stop-session-button'),
-          onPressed: demoPairing ? onStopDemo : null,
-          icon: const Icon(Icons.stop_circle_outlined),
-          label: Text(demoPairing ? 'End demo pairing' : 'Stop session'),
-        ),
-      ],
-    );
-  }
-}
-
-class _DemoPreview extends StatelessWidget {
-  const _DemoPreview({
-    required this.strokes,
-    required this.annotationEnabled,
-    required this.onStrokePoint,
-  });
-
-  final List<AnnotationStroke> strokes;
-  final bool annotationEnabled;
-  final void Function(
-    Offset position,
-    AnnotationCoordinateMapper mapper, {
-    required bool startsStroke,
-  })
-  onStrokePoint;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Preview placeholder',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        AspectRatio(
-          aspectRatio: 16 / 9,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final size = Size(constraints.maxWidth, constraints.maxHeight);
-              final mapper = AnnotationCoordinateMapper(
-                viewportSize: size,
-                videoSize: const Size(16, 9),
-              );
-              return GestureDetector(
-                key: const Key('demo-preview'),
-                behavior: HitTestBehavior.opaque,
-                onPanStart: annotationEnabled
-                    ? (details) => onStrokePoint(
-                        details.localPosition,
-                        mapper,
-                        startsStroke: true,
-                      )
-                    : null,
-                onPanUpdate: annotationEnabled
-                    ? (details) => onStrokePoint(
-                        details.localPosition,
-                        mapper,
-                        startsStroke: false,
-                      )
-                    : null,
-                child: CustomPaint(
-                  key: const Key('annotation-overlay'),
-                  painter: const _DemoPreviewBackgroundPainter(),
-                  foregroundPainter: AnnotationOverlayPainter(
-                    strokes: strokes,
-                    mapper: mapper,
-                  ),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.smart_display_outlined,
-                          size: 42,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(height: 8),
-                        const Text('No live frame received'),
-                        Text(
-                          annotationEnabled
-                              ? 'Draw on this local placeholder'
-                              : 'Enable Draw locally to try annotations',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DemoPreviewBackgroundPainter extends CustomPainter {
-  const _DemoPreviewBackgroundPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.save();
-    canvas.clipRect(Offset.zero & size);
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xFF172531),
-    );
-    final gridPaint = Paint()
-      ..color = const Color(0xFF243846)
-      ..strokeWidth = 1;
-    for (var fraction = 0.2; fraction < 1; fraction += 0.2) {
-      canvas.drawLine(
-        Offset(size.width * fraction, 0),
-        Offset(size.width * fraction, size.height),
-        gridPaint,
-      );
-      canvas.drawLine(
-        Offset(0, size.height * fraction),
-        Offset(size.width, size.height * fraction),
-        gridPaint,
-      );
     }
-
-    canvas.restore();
   }
 
-  @override
-  bool shouldRepaint(covariant _DemoPreviewBackgroundPainter oldDelegate) =>
-      false;
-}
+  String _describe(Object error) => error is PlatformException
+      ? '${error.message ?? 'The native connection failed.'} (${error.code})'
+      : error.toString();
 
-class _DevicesPage extends StatefulWidget {
-  const _DevicesPage({
-    required this.demoReceiverState,
-    required this.onConnectDemo,
-    required this.pairingRuntimePreparing,
-    required this.localDeviceId,
-    required this.pairingRuntimeError,
-    required this.onPreparePairing,
-    required this.senderPairingStarting,
-    required this.senderPairingStatus,
-    required this.senderPairingError,
-    required this.onBeginSenderPairing,
-    required this.onCancelSenderPairing,
-    required this.senderSessionStarting,
-    required this.senderSessionState,
-    required this.senderSessionStats,
-    required this.senderSessionError,
-    required this.onStartSenderSession,
-    required this.onStopSenderSession,
-  });
-
-  final _DemoReceiverState demoReceiverState;
-  final VoidCallback onConnectDemo;
-  final bool pairingRuntimePreparing;
-  final String? localDeviceId;
-  final String? pairingRuntimeError;
-  final VoidCallback onPreparePairing;
-  final bool senderPairingStarting;
-  final WindowsSenderPairingStatus? senderPairingStatus;
-  final String? senderPairingError;
-  final ValueChanged<String> onBeginSenderPairing;
-  final VoidCallback onCancelSenderPairing;
-  final bool senderSessionStarting;
-  final WindowsSenderSessionState? senderSessionState;
-  final WebRtcOutboundVideoStats? senderSessionStats;
-  final String? senderSessionError;
-  final VoidCallback onStartSenderSession;
-  final VoidCallback onStopSenderSession;
-
-  @override
-  State<_DevicesPage> createState() => _DevicesPageState();
-}
-
-class _DevicesPageState extends State<_DevicesPage> {
-  final _invitationController = TextEditingController();
+  Future<void> _copyDiagnostics() => Clipboard.setData(
+    ClipboardData(
+      text:
+          'MirrorMesh Windows\nStatus: $_status\nSource: ${_sourceName ?? 'none'}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
+    ),
+  );
 
   @override
   void dispose() {
-    _invitationController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final demoDiscovered =
-        widget.demoReceiverState != _DemoReceiverState.undiscovered;
-    final demoPairing = widget.demoReceiverState == _DemoReceiverState.pairing;
-    final senderStatus = widget.senderPairingStatus;
-    final senderPairingActive = senderStatus?.state.isActive == true;
-
-    return ListView(
-      padding: const EdgeInsets.all(28),
-      children: [
-        _PageHeading(
-          eyebrow: 'YOUR DEVICES',
-          title: demoDiscovered ? 'Devices' : 'No discovered devices',
-          subtitle: demoDiscovered
-              ? 'The listed receiver is a local UI simulation.'
-              : 'Run the local demo scan to preview the device flow.',
-        ),
-        const SizedBox(height: 24),
-        if (demoDiscovered) ...[
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.desktop_windows_outlined),
-                    title: const Text('Demo receiver'),
-                    subtitle: Text(
-                      demoPairing
-                          ? 'Pairing state only; not verified or connected on a network.'
-                          : 'Local simulation only; not discovered on a network.',
-                    ),
-                    trailing: Icon(
-                      demoPairing
-                          ? Icons.check_circle_outline
-                          : Icons.science_outlined,
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton.icon(
-                      key: const Key('connect-demo-button'),
-                      onPressed: demoPairing ? null : widget.onConnectDemo,
-                      icon: Icon(
-                        demoPairing ? Icons.hourglass_top : Icons.link_outlined,
-                      ),
-                      label: Text(
-                        demoPairing
-                            ? 'Pairing in progress'
-                            : 'Start demo pairing',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
-        if (!Platform.isWindows || widget.localDeviceId == null)
-          const _StatusCard(
-            icon: Icons.devices_other_outlined,
-            title: 'Live pairing is not available yet',
-            message: 'Network discovery, identity verification, trusted-device storage, and revocation are not implemented in this shell.',
-          ),
-        if (Platform.isLinux ||
-            Platform.isWindows ||
-            Platform.isAndroid ||
-            Platform.isIOS) ...[
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Prepare this device for pairing',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'This opens the local ${Platform.isLinux
-                        ? 'Linux'
-                        : Platform.isWindows
-                        ? 'Windows'
-                        : Platform.isIOS
-                        ? 'iOS'
-                        : 'Android'} identity and trusted-peer database. It does not contact another device, grant trust, or start screen capture.',
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    key: Key(
-                      Platform.isLinux
-                          ? 'prepare-linux-pairing-button'
-                          : Platform.isWindows
-                          ? 'prepare-windows-pairing-button'
-                          : Platform.isIOS
-                          ? 'prepare-ios-pairing-button'
-                          : 'prepare-android-pairing-button',
-                    ),
-                    onPressed:
-                        widget.pairingRuntimePreparing ||
-                            widget.localDeviceId != null
-                        ? null
-                        : widget.onPreparePairing,
-                    icon: widget.pairingRuntimePreparing
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.shield_outlined),
-                    label: Text(
-                      widget.localDeviceId != null
-                          ? 'Pairing support ready'
-                          : widget.pairingRuntimePreparing
-                          ? 'Preparing…'
-                          : 'Prepare pairing support',
-                    ),
-                  ),
-                  if (widget.localDeviceId != null) ...[
-                    const SizedBox(height: 8),
-                    SelectableText('Local device ID: ${widget.localDeviceId}'),
-                  ],
-                  if (widget.pairingRuntimeError != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      widget.pairingRuntimeError!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                  if (Platform.isWindows && widget.localDeviceId != null) ...[
-                    const Divider(height: 28),
-                    const Text(
-                      'Pair with Android TV',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Paste the TV invitation text. Windows verifies its QR fingerprint and asks only for view access. Approve the request on the TV.',
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const Key('windows-pairing-invitation-field'),
-                      controller: _invitationController,
-                      minLines: 1,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Android TV invitation',
-                        hintText: 'mirrormesh://pair?...',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        FilledButton.icon(
-                          key: const Key('begin-windows-sender-pairing-button'),
-                          onPressed:
-                              widget.senderPairingStarting ||
-                                  senderPairingActive
-                              ? null
-                              : () => widget.onBeginSenderPairing(
-                                  _invitationController.text,
-                                ),
-                          icon: widget.senderPairingStarting
-                              ? const SizedBox.square(
-                                  dimension: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.link_outlined),
-                          label: const Text('Pair with TV'),
-                        ),
-                        if (senderPairingActive) ...[
-                          const SizedBox(width: 12),
-                          OutlinedButton.icon(
-                            key: const Key(
-                              'cancel-windows-sender-pairing-button',
-                            ),
-                            onPressed:
-                                senderStatus?.state ==
-                                    WindowsSenderPairingState.cancelling
-                                ? null
-                                : widget.onCancelSenderPairing,
-                            icon: const Icon(Icons.link_off_outlined),
-                            label: Text(
-                              senderStatus?.state ==
-                                      WindowsSenderPairingState.approved
-                                  ? 'Disconnect'
-                                  : 'Cancel',
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    if (senderStatus != null) ...[
-                      const SizedBox(height: 10),
-                      Text(_senderPairingStatusText(senderStatus)),
-                      if (senderStatus.state ==
-                              WindowsSenderPairingState.approved &&
-                          senderStatus.receiverFingerprint.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        SelectableText(
-                          'Verified TV fingerprint: ${senderStatus.receiverFingerprint}',
-                        ),
-                      ],
-                    ],
-                    if (senderStatus?.state ==
-                        WindowsSenderPairingState.approved) ...[
-                      const SizedBox(height: 16),
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Synthetic media test target',
-                                style: TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                              const SizedBox(height: 8),
-                              const AspectRatio(
-                                aspectRatio: 16 / 9,
-                                child: SyntheticVideoTestPattern(
-                                  child: Center(
-                                    child: Text(
-                                      'MirrorMesh test pattern',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold,
-                                        shadows: [
-                                          Shadow(
-                                            color: Colors.black,
-                                            blurRadius: 8,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                'Choose the MirrorMesh app window to send this animated test pattern through native desktop capture and the H.264 WebRTC track. This capture adapter is not Windows Graphics Capture.',
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        key: const Key('start-windows-screen-share-button'),
-                        onPressed:
-                            widget.senderSessionStarting ||
-                                widget.senderSessionState != null
-                            ? null
-                            : widget.onStartSenderSession,
-                        icon: widget.senderSessionStarting
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.screen_share_outlined),
-                        label: Text(
-                          widget.senderSessionStarting
-                              ? 'Starting screen share'
-                              : 'Choose screen or window to share',
-                        ),
-                      ),
-                      if (widget.senderSessionState != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          _senderSessionStatusText(widget.senderSessionState!),
-                        ),
-                        if (widget.senderSessionStats case final stats?) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            stats.framesEncoded == null
-                                ? 'The WebRTC stack did not report an encoded-frame count.'
-                                : stats.hasEncodedVideo
-                                ? 'Sender reports ${stats.framesEncoded} encoded video frames; ${stats.bytesSent ?? 'byte count not reported'} bytes sent.'
-                                : 'WebRTC reports 0 encoded video frames so far.',
-                          ),
-                          Text(
-                            'Codec: ${stats.codecMimeType ?? 'not reported'} · Encoder implementation: ${stats.encoderImplementation ?? 'not reported'}',
-                          ),
-                        ] else if (widget.senderSessionState ==
-                            WindowsSenderSessionState.transportConnected) ...[
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Waiting for outbound video statistics. TV decoding is not confirmed.',
-                          ),
-                        ],
-                        if (widget.senderSessionState !=
-                                WindowsSenderSessionState.stopped &&
-                            widget.senderSessionState !=
-                                WindowsSenderSessionState.revoked) ...[
-                          const SizedBox(height: 8),
-                          OutlinedButton.icon(
-                            key: const Key('stop-windows-screen-share-button'),
-                            onPressed: widget.onStopSenderSession,
-                            icon: const Icon(Icons.stop_circle_outlined),
-                            label: const Text('Stop screen share'),
-                          ),
-                        ],
-                      ],
-                      if (widget.senderSessionError != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          widget.senderSessionError!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ],
-                    ],
-                    if (widget.senderPairingError != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        widget.senderPairingError!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  String _senderPairingStatusText(WindowsSenderPairingStatus status) =>
-      switch (status.state) {
-        WindowsSenderPairingState.connecting =>
-          'Connecting securely to the TV. The request can take a few seconds.',
-        WindowsSenderPairingState.awaitingApproval =>
-          'Waiting for explicit approval on the Android TV.',
-        WindowsSenderPairingState.approved => 'Pairing approved. The authenticated control channel is retained; video is not streaming.',
-        WindowsSenderPairingState.rejected =>
-          'The TV rejected this pairing request.',
-        WindowsSenderPairingState.failed => switch (status.errorCode) {
-          1 => 'Windows could not open its local pairing identity.',
-          4 => 'The TV closed the pairing control channel.',
-          5 => 'The TV returned an invalid approval or grant.',
-          _ => 'Pairing failed. Check the invitation, TV listener, and network connection.',
-        },
-        WindowsSenderPairingState.cancelling =>
-          'Cancelling the pairing attempt and closing its control channel.',
-        WindowsSenderPairingState.cancelled =>
-          'Pairing was cancelled and the control channel was closed.',
-      };
-
-  String _senderSessionStatusText(
-    WindowsSenderSessionState state,
-  ) => switch (state) {
-    WindowsSenderSessionState.idle => 'Media session is idle.',
-    WindowsSenderSessionState.negotiating =>
-      'Negotiating the authenticated media peer.',
-    WindowsSenderSessionState.transportConnected =>
-      'WebRTC transport connected; waiting for an encoded video frame.',
-    WindowsSenderSessionState.streaming =>
-      'The sender has encoded video. TV frame receipt is still unconfirmed.',
-    WindowsSenderSessionState.reconnecting =>
-      'WebRTC transport was interrupted; attempting to reconnect.',
-    WindowsSenderSessionState.stopped => 'Screen share stopped.',
-    WindowsSenderSessionState.revoked =>
-      'Pairing was revoked. The screen share is stopped.',
-    WindowsSenderSessionState.failed =>
-      'The media session failed and its local peer was closed.',
-  };
-}
-
-class _SettingsPage extends StatelessWidget {
-  const _SettingsPage({required this.rustSessionStatus});
-
-  final RustSessionStatus? rustSessionStatus;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(28),
-      children: [
-        const _PageHeading(
-          eyebrow: 'PREFERENCES',
-          title: 'Settings',
-          subtitle: 'Privacy and platform status.',
-        ),
-        const SizedBox(height: 24),
-        const _StatusCard(
-          icon: Icons.shield_outlined,
-          title: 'Privacy by default',
-          message: 'Pairing requires approval. Capture permissions are requested through native operating system prompts.',
-        ),
-        const SizedBox(height: 16),
-        const _StatusCard(
-          icon: Icons.build_outlined,
-          title: 'Platform adapters are in progress',
-          message: 'This shell does not capture, encode, transmit, or render video. Those capabilities will be supplied by reviewed native adapters.',
-        ),
-        const SizedBox(height: 16),
-        const _StatusCard(
-          icon: Icons.query_stats_outlined,
-          title: 'Diagnostics are not connected',
-          message: 'This build has no transport or live diagnostic source. It does not display estimated performance as measured data.',
-        ),
-        const SizedBox(height: 16),
-        _RustSessionCard(status: rustSessionStatus),
-      ],
-    );
-  }
-}
-
-class _RustSessionCard extends StatelessWidget {
-  const _RustSessionCard({required this.status});
-
-  final RustSessionStatus? status;
-
-  @override
-  Widget build(BuildContext context) {
-    final session = status;
-    if (session == null || !session.isAvailable) {
-      return const _StatusCard(
-        icon: Icons.memory_outlined,
-        title: 'Rust state bridge unavailable',
-        message: 'The native library did not load. The local demo remains separate; pairing and capture are unavailable.',
-      );
+    _pairingTimer?.cancel();
+    _invitation.dispose();
+    unawaited(_stateSubscription?.cancel());
+    unawaited(_statsSubscription?.cancel());
+    final session = _session;
+    if (session != null) {
+      unawaited(session.dispose());
+    } else if (_requestId case final id?) {
+      unawaited(_pairing.cancelSenderPairing(id));
     }
-
-    return StreamBuilder<String>(
-      stream: session.events,
-      initialData: session.currentState(),
-      builder: (context, snapshot) {
-        final state = snapshot.data ?? session.initialState;
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Rust core state bridge',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Local domain state only. This does not indicate pairing, capture, or video.',
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(child: Text('Session state: $state')),
-                    OutlinedButton(
-                      key: const Key('stop-core-session-button'),
-                      onPressed: state == 'Idle' || state == 'Stopped'
-                          ? null
-                          : session.stopSession,
-                      child: const Text('Stop core session'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _PageHeading extends StatelessWidget {
-  const _PageHeading({
-    required this.eyebrow,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String eyebrow;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          eyebrow,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.primary,
-            letterSpacing: 1.4,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(title, style: theme.textTheme.headlineMedium),
-        const SizedBox(height: 8),
-        Text(subtitle, style: theme.textTheme.bodyLarge),
-      ],
-    );
-  }
-}
-
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({
-    required this.icon,
-    required this.title,
-    required this.message,
-  });
-
-  final IconData icon;
-  final String title;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 6),
-                  Text(message),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PrivacyNote extends StatelessWidget {
-  const _PrivacyNote({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.lock_outline, size: 18),
-        const SizedBox(width: 10),
-        Expanded(child: Text(text)),
-      ],
-    );
+    super.dispose();
   }
 }

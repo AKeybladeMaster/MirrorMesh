@@ -1,5 +1,15 @@
 # Rust build output
 /target/
+/.toolchains/
+/releases/**/*.exe
+/releases/**/*.dll
+/releases/**/*.zip
+/releases/**/*.apk
+/releases/**/*.aab
+/releases/**/data/
+/releases/windows-x64/*
+!/releases/windows-x64/README.md
+!/releases/windows-x64/SHA256SUMS.txt
 /fuzz/target/
 /fuzz/artifacts/
 

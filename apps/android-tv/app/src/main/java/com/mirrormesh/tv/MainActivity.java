@@ -1,14 +1,22 @@
 package com.mirrormesh.tv;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Intent;
+import android.content.ActivityNotFoundException;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Build;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -37,6 +45,8 @@ import java.util.concurrent.Executors;
 /** Native TV pairing UI with an approved signaling handoff to the fullscreen receiver. */
 public final class MainActivity extends Activity {
     private static final int PAIRING_PORT = 8765;
+    private static final int LAN_PERMISSION_REQUEST = 37;
+    private static final String LAN_PERMISSION = "android.permission.ACCESS_LOCAL_NETWORK";
 
     private final TvPairingState pairingState = new TvPairingState();
     private final ExecutorService controlWorker = Executors.newSingleThreadExecutor();
@@ -73,6 +83,13 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         bindViews();
+        adaptLayout();
+        View root = findViewById(android.R.id.content);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets;
+        });
         configureEndpoints();
         initializeNativeContext();
 
@@ -83,6 +100,8 @@ public final class MainActivity extends Activity {
         rejectButton.setOnClickListener(view -> rejectRequest());
         closeChannelButton.setOnClickListener(view -> closeChannel());
         refreshQrButton.setOnClickListener(view -> refreshInvitation());
+        findViewById(R.id.copy_invitation_button).setOnClickListener(view -> shareInvitation(false));
+        findViewById(R.id.share_invitation_button).setOnClickListener(view -> shareInvitation(true));
         grantView.setOnCheckedChangeListener((button, checked) -> renderState());
         grantSend.setOnCheckedChangeListener((button, checked) -> renderState());
         grantAnnotate.setOnCheckedChangeListener((button, checked) -> renderState());
@@ -108,6 +127,56 @@ public final class MainActivity extends Activity {
         grantView = findViewById(R.id.grant_view);
         grantSend = findViewById(R.id.grant_send);
         grantAnnotate = findViewById(R.id.grant_annotate);
+    }
+
+    private void adaptLayout() {
+        boolean compact = getResources().getConfiguration().screenWidthDp < 700;
+        LinearLayout columns = findViewById(R.id.pairing_columns);
+        columns.setOrientation(compact ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        View codePanel = findViewById(R.id.pairing_code_panel);
+        LinearLayout.LayoutParams codeParams = (LinearLayout.LayoutParams) codePanel.getLayoutParams();
+        codeParams.width = compact ? LinearLayout.LayoutParams.MATCH_PARENT
+                : (int) (320 * getResources().getDisplayMetrics().density);
+        codeParams.setMarginEnd(compact ? 0 : (int) (28 * getResources().getDisplayMetrics().density));
+        codePanel.setLayoutParams(codeParams);
+        View controls = findViewById(R.id.pairing_controls);
+        LinearLayout.LayoutParams controlsParams = (LinearLayout.LayoutParams) controls.getLayoutParams();
+        controlsParams.width = compact ? LinearLayout.LayoutParams.MATCH_PARENT : 0;
+        controlsParams.weight = compact ? 0 : 1;
+        controls.setLayoutParams(controlsParams);
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        adaptLayout();
+    }
+
+    private void shareInvitation(boolean share) {
+        String invitation = invitationText.getText().toString();
+        if (invitationText.getVisibility() != View.VISIBLE || invitation.isEmpty()) return;
+        if (share) {
+            Intent intent = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, invitation);
+            try { startActivity(Intent.createChooser(intent, "Share receiver invitation")); }
+            catch (ActivityNotFoundException error) { shareInvitation(false); }
+        } else {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("MirrorMesh invitation", invitation));
+            serviceState.setText("Invitation copied. Paste it into MirrorMesh on the PC before it expires.");
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != LAN_PERMISSION_REQUEST) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            configureEndpoints();
+            startReceiver();
+        } else {
+            serviceState.setText("Local network access is required to receive a PC screen. Allow it in Android Settings, then retry.");
+        }
     }
 
     private void initializeNativeContext() {
@@ -146,7 +215,7 @@ public final class MainActivity extends Activity {
                     }
                 }
             }
-        } catch (SocketException error) {
+        } catch (SocketException | SecurityException error) {
             serviceState.setText("The TV network addresses could not be listed: " + error.getMessage());
         }
         Collections.sort(localEndpoints, (left, right) ->
@@ -162,9 +231,14 @@ public final class MainActivity extends Activity {
     }
 
     private void startReceiver() {
-        if (!nativeReady || !pairingState.canStart() || localEndpoints.isEmpty()) {
+        if (!nativeReady || !pairingState.canStart()) {
             return;
         }
+        if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission(LAN_PERMISSION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { LAN_PERMISSION }, LAN_PERMISSION_REQUEST);
+            return;
+        }
+        if (localEndpoints.isEmpty()) configureEndpoints();
         LocalEndpoint endpoint = (LocalEndpoint) endpointSpinner.getSelectedItem();
         if (endpoint == null) {
             serviceState.setText(R.string.pairing_no_address);
@@ -537,7 +611,7 @@ public final class MainActivity extends Activity {
                 }
                 decisionInProgress = false;
                 requestDetails.setText(revoked
-                        ? "Sender signaled revocation; the local trust record still needs revocation handling."
+                        ? "Access revoked. A fresh invitation and explicit approval are needed to pair again."
                         : getString(R.string.pairing_trust_remains));
                 if (refreshed != null) {
                     displayInvitation(refreshed);
@@ -681,7 +755,7 @@ public final class MainActivity extends Activity {
         }
 
         endpointSpinner.setEnabled(stopped && !localEndpoints.isEmpty());
-        startButton.setEnabled(nativeReady && stopped && !localEndpoints.isEmpty());
+        startButton.setEnabled(nativeReady && stopped && !decisionInProgress);
         stopButton.setEnabled(!stopped);
         waitButton.setVisibility(!stopped ? View.VISIBLE : View.GONE);
         waitButton.setEnabled(pairingState.canWait() && !decisionInProgress);
@@ -694,7 +768,7 @@ public final class MainActivity extends Activity {
         grantSend.setEnabled(pending && !decisionInProgress && grantSend.getVisibility() == View.VISIBLE);
         grantAnnotate.setEnabled(pending && !decisionInProgress && grantAnnotate.getVisibility() == View.VISIBLE);
         if (paired) {
-            helpText.setText("This is an authenticated pairing control channel only. No media is being received.");
+            helpText.setText("Waiting for the approved sender to select a screen or window. No capture starts automatically.");
         } else if (stopped) {
             helpText.setText("Choose an active local address, then start the receiver. A sender request will never be auto-approved.");
         } else if (waiting) {

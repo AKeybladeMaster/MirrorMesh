@@ -23,5 +23,3 @@ libc.workspace = true
 mm-store.workspace = true
 ndk-context.workspace = true
 
-[dev-dependencies]
-mm-protocol.workspace = true

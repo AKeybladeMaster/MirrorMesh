@@ -19,6 +19,7 @@ android {
     namespace = "com.mirrormesh.tv"
     compileSdk = 37
     ndkVersion = androidNdkVersion
+    buildFeatures { resValues = true }
 
     defaultConfig {
         applicationId = "com.mirrormesh.tv"
@@ -27,7 +28,34 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         ndk { abiFilters += androidAbi }
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    flavorDimensions += "device"
+    productFlavors {
+        create("tv") {
+            dimension = "device"
+            applicationId = "com.mirrormesh.tv"
+            manifestPlaceholders["leanbackRequired"] = "true"
+            resValue("string", "app_name", "MirrorMesh TV")
+        }
+        create("phone") {
+            dimension = "device"
+            applicationId = "com.mirrormesh.receiver"
+            manifestPlaceholders["leanbackRequired"] = "false"
+            resValue("string", "app_name", "MirrorMesh Receiver")
+        }
+    }
+
+    // Signing material is supplied locally; it is never stored in this repository.
+    val signingStore = providers.environmentVariable("MM_ANDROID_KEYSTORE").orNull
+    if (signingStore != null) {
+        signingConfigs.create("distribution") {
+            storeFile = file(signingStore)
+            storePassword = providers.environmentVariable("MM_ANDROID_STORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("MM_ANDROID_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("MM_ANDROID_KEY_PASSWORD").get()
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("distribution")
     }
 
     compileOptions {
@@ -35,7 +63,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    sourceSets.getByName("main").jniLibs.srcDir(generatedJniLibs)
+    sourceSets.getByName("main").jniLibs.srcDir(generatedJniLibs.get().asFile)
 }
 
 val buildRustAndroid by tasks.registering(Exec::class) {
@@ -86,6 +114,4 @@ tasks.named("preBuild").configure {
 dependencies {
     implementation("io.github.webrtc-sdk:android:150.7871.01")
     implementation("com.google.zxing:core:3.5.4")
-    androidTestImplementation("androidx.test:runner:1.7.0")
-    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }

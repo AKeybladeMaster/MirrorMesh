@@ -1,22 +1,15 @@
-# MirrorMesh Android TV receiver shell
+# Native Android receiver
 
-This is a separate native Android TV application target. It declares the Leanback launcher, touchscreen-free navigation, app icon, and TV banner. The main activity lists active local IPv4 addresses, starts the Rust-owned pairing listener, displays a short-lived one-time QR invitation, waits for a verified sender request off the UI thread, and presents the sender fingerprint and requested grants. All permission boxes begin unchecked; approval and rejection require separate remote-control actions. A refresh action cancels the current idle wait and issues a fresh invitation; rejection and channel close also refresh the one-time code. It also contains a native receive-only WebRTC adapter and fullscreen `SurfaceViewRenderer` activity. The adapter accepts only an approved signaling channel, bounds SDP and ICE inputs, configures a receive-only transceiver with H.264-only codec preferences, and uses `HardwareVideoDecoderFactory` without a software decoder fallback.
+One Java/WebRTC receiver and Rust JNI runtime produce two flavors:
 
-The approved pairing channel polls Rust-validated `session.offer`, `session.ice`, `session.start`, and `session.stop` messages, sends Rust-encoded H.264 answers and local ICE, and opens the fullscreen WebRTC receiver on the first offer. Task 47 validates the bounded start source label against the active session and reports that the sender says capture started; this is not a decoded-frame confirmation. Task 48 treats sender stop as a normal `STOPPED` transition and releases the TV peer and renderer. Task 49 adds an Android instrumentation loopback with a generated native I420 source, a real H.264 libwebrtc peer pair, the production TV receiver, and Android's software-only `MediaCodec` decoder factory. It asserts ICE connection, decoded-frame delivery, and JPEG capture, and skips when the pinned software H.264 encoder or emulator software decoder is unavailable. The test is authored but has not run here; its in-process approved-signal fake does not verify QR-pinned WSS or Windows-to-TV integration, and software decoding does not verify MediaCodec hardware. The production receiver continues to require a hardware H.264 decoder. ICE arriving before renderer setup is buffered with a fixed limit. Windows sender source covers approved pairing, offer/ICE exchange, user-selected desktop-track attachment, H.264-only codec preferences, a post-connect session-start notice, and explicit disconnect. No Windows app-to-TV WebRTC run has been verified. Task 44 adds a user-triggered screenshot action that copies only the next decoded frame and saves it with MediaStore on Android 10+ or to app-specific storage on older versions. The app requests only the ordinary `INTERNET` permission; cleartext traffic is disabled and no local screen, camera, or microphone capture is requested. ZXing Core 3.5.4 (Apache-2.0) encodes the invitation QR. Native Android TV is the primary TV path; the browser receiver remains a compatibility fallback.
+- `phone`: `com.mirrormesh.receiver`, touch devices, adaptive layout.
+- `tv`: `com.mirrormesh.tv`, Leanback launcher and remote navigation.
 
-## Build
+The receiver authenticates a Windows sender before accepting H.264 media. It uses native
+MediaCodec decoding, fullscreen rendering, JPEG snapshots and explicit disconnect/revoke
+controls. It does not capture or send the Android screen.
 
-Install JDK 17 or newer, Android SDK platform 37, Build Tools 36.0.0 or newer, NDK 28.2.13676358, Rust 1.99.1 with the `aarch64-linux-android` target, and Gradle 9.6.0. From this directory run `gradle :app:assembleDebug`. Gradle builds and packages the shared `mm_ffi` Rust library for ARM64. The output is `app/build/outputs/apk/debug/app-debug.apk`. To run Task 49's emulator loopback, also install the `x86_64-linux-android` Rust target and run `gradle :app:connectedDebugAndroidTest -PmmAndroidAbi=x86_64` with an API 35 Google APIs x86_64 emulator booted. The loopback uses a software H.264 encoder when the pinned library provides one, Android's software-only MediaCodec decoder when the emulator provides one, and in-process signaling. It skips when either codec is unavailable. It checks native H.264 frame delivery and screenshot conversion, not production WSS, Windows sender interop, MediaCodec hardware, or physical TV behavior.
-
-GitHub Actions runs the Java state checks, the API 35 x86_64 WebRTC instrumentation loopback, and a separate ARM64 APK build. It retains the APK and build evidence but does not publish or sign the APK.
-
-## Local behavior checks
-
-From the repository root run:
-
-```powershell
-powershell.exe -File .\apps\android-tv\scripts\test-demo-state.ps1
-powershell.exe -File .\apps\android-tv\scripts\verify-shell.ps1
-```
-
-The JDK-only tests cover explicit pairing state, bounded H.264 SDP selection, receiver lifecycle including sender-driven `STOPPED`, bounded I420-to-NV21 screenshot conversion, and the Task 47 source-label validator. XML/source checks verify bridge wiring, QR dependency, explicit grant selection, approved signaling, INTERNET-only permission, hardware decode policy, the screenshot action, and normal remote-stop handling. The Android app has no build evidence on this workstation because Gradle and the Android SDK/NDK are unavailable. Rust protocol and loopback tests cover bounded control polling and validated answer/ICE/start/stop envelopes, but they do not instantiate Android WebRTC. No actual QR scan, sender connection, screenshot write, or media playback is claimed. Final hardware testing must install the APK on an Android TV, pair to a Windows sender, explicitly approve, receive H.264, verify fullscreen hardware decode and screenshot saving, and exercise disconnect, reconnect, rejection, and revocation. Emulator compilation is build evidence only, not TV hardware evidence.
+From the repository root, run `scripts/build-android.ps1 -Configuration debug` for locally
+installable preview APKs or `-Configuration release` for distribution build output.
+See [build instructions](../../docs/build-release.md) and [user instructions](../../docs/USER_GUIDE.md).
+No tests or GitHub Actions are included in this branch.

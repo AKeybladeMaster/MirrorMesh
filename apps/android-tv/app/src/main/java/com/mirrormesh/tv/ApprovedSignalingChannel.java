@@ -32,6 +32,9 @@ interface ApprovedSignalingChannel extends AutoCloseable {
 
     void clearListeners();
 
+    /** Immediately blocks further signaling, then persists revocation on a worker. */
+    void revoke(TextListener completion);
+
     @Override
     void close();
 

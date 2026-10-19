@@ -9,6 +9,4 @@ mm-domain.workspace = true
 mm-ports.workspace = true
 rusqlite.workspace = true
 
-[dev-dependencies]
-mm-domain.workspace = true
 

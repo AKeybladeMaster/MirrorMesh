@@ -38,6 +38,18 @@
         android:textSize="18sp" />
 
     <Button
+        android:id="@+id/video_revoke_button"
+        android:layout_width="wrap_content"
+        android:layout_height="64dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="36dp"
+        android:background="@drawable/tv_button_background"
+        android:focusable="true"
+        android:text="Revoke access"
+        android:textAllCaps="false"
+        android:textSize="16sp" />
+
+    <Button
         android:id="@+id/video_disconnect_button"
         android:layout_width="wrap_content"
         android:layout_height="64dp"

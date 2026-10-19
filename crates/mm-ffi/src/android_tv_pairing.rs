@@ -10,9 +10,10 @@ use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jlong, jstring};
 use mm_adapter_android::{AndroidTvPairingServiceHandle, PendingAndroidTvPairing};
 use mm_adapter_signaling::PairingConnection;
-use mm_domain::{MessageId, PeerGrant, SessionId, TrustedPeerGrants};
+use mm_domain::{DeviceId, MessageId, PeerGrant, SessionId, TrustedPeerGrants};
 use mm_protocol::{
-    MessagePayload, SessionAnswer, SessionIce, encode_session_answer, encode_session_ice,
+    MessagePayload, PairRevoke, SessionAnswer, SessionIce, SessionStop, encode_pair_revoke,
+    encode_session_answer, encode_session_ice, encode_session_stop,
 };
 use serde_json::{Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -43,6 +44,7 @@ fn connection_slot() -> &'static Mutex<HashMap<i64, ApprovedControlConnection>> 
 
 struct ApprovedControlConnection {
     channel: PairingConnection,
+    peer_id: DeviceId,
     peer_fingerprint: String,
     grants: TrustedPeerGrants,
     session_id: Option<SessionId>,
@@ -250,6 +252,7 @@ fn approve_request(
             connection_id,
             ApprovedControlConnection {
                 channel: connection,
+                peer_id: peer.id(),
                 peer_fingerprint: peer.fingerprint().to_hex(),
                 grants: peer.grants(),
                 session_id: None,
@@ -345,6 +348,26 @@ fn close_connection(connection_id: i64) -> Result<bool, String> {
     else {
         return Ok(false);
     };
+    if let Some(session_id) = connection.session_id {
+        // Sending is best effort; local closure always proceeds after a bounded socket timeout.
+        if let (Ok(sequence), Ok(message_id), Ok(now)) = (
+            next_outbound_sequence(&mut connection),
+            random_message_id(),
+            unix_millis(),
+        ) {
+            if let Ok(frame) = encode_session_stop(
+                message_id,
+                session_id,
+                sequence,
+                now,
+                &SessionStop {
+                    reason: "receiver-disconnected".to_owned(),
+                },
+            ) {
+                let _ = connection.channel.send_control_message(&frame);
+            }
+        }
+    }
     connection
         .channel
         .close()
@@ -423,6 +446,7 @@ fn poll_control_message(connection_id: i64) -> Result<Value, String> {
             if message.header.session_id != connection.session_id {
                 return Err("session stop does not belong to the approved TV session".to_owned());
             }
+            connection.session_id = None;
             Ok(json!({
                 "ok": true,
                 "pending": false,
@@ -441,13 +465,46 @@ fn poll_control_message(connection_id: i64) -> Result<Value, String> {
                 "source_id": start.source_id
             }))
         }
-        MessagePayload::PairRevoke(_) => Ok(json!({
-            "ok": true,
-            "pending": false,
-            "kind": "revoke"
-        })),
+        MessagePayload::PairRevoke(revoke) => {
+            let local_id = mm_adapter_android::initialize_pairing_runtime()
+                .map_err(|_| "receiver identity is unavailable".to_owned())?;
+            if revoke.peer_id != local_id.to_string() {
+                return Err("revocation is not addressed to this receiver".to_owned());
+            }
+            mm_adapter_android::revoke_trusted_peer(connection.peer_id, unix_millis()?)
+                .map_err(|_| "peer revocation could not be saved".to_owned())?;
+            Ok(json!({ "ok": true, "pending": false, "kind": "revoke" }))
+        }
         _ => Err("approved TV channel received an unsupported control message".to_owned()),
     }
+}
+
+fn revoke_connection(connection_id: i64) -> Result<Value, String> {
+    let mut connection = connection_slot()
+        .lock()
+        .map_err(|_| "approved connection registry is unavailable".to_owned())?
+        .remove(&connection_id)
+        .ok_or_else(|| "approved connection is already closed".to_owned())?;
+    let result = (|| {
+        let now = unix_millis()?;
+        mm_adapter_android::revoke_trusted_peer(connection.peer_id, now)
+            .map_err(|_| "connection closed, but revocation could not be saved".to_owned())?;
+        let sequence = next_outbound_sequence(&mut connection)?;
+        let frame = encode_pair_revoke(
+            random_message_id()?,
+            sequence,
+            now,
+            &PairRevoke {
+                peer_id: connection.peer_id.to_string(),
+            },
+        )
+        .map_err(|_| "revocation message could not be encoded".to_owned())?;
+        // Persisted revocation remains valid even if the peer has already left.
+        let delivered = connection.channel.send_control_message(&frame).is_ok();
+        Ok(json!({ "ok": true, "revoked": true, "delivered": delivered }))
+    })();
+    let _ = connection.channel.close();
+    result
 }
 
 fn send_session_answer(connection_id: i64, sdp: &str) -> Result<Value, String> {
@@ -691,6 +748,17 @@ pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_sendSessionIce
         )
     }))
     .unwrap_or_else(|_| Err("WebRTC ICE candidate failed unexpectedly".to_owned()));
+    java_string(&mut env, response_json(result))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_revokeControlChannel(
+    mut env: JNIEnv,
+    _bridge: JClass,
+    connection_id: jlong,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| revoke_connection(connection_id)))
+        .unwrap_or_else(|_| Err("revocation failed unexpectedly".to_owned()));
     java_string(&mut env, response_json(result))
 }
 

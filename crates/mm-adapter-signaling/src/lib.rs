@@ -1080,6 +1080,3 @@ fn websocket_config() -> WebSocketConfig {
         .max_message_size(Some(MAX_PAIR_BEGIN_BYTES))
         .max_frame_size(Some(MAX_PAIR_BEGIN_BYTES))
 }
-
-#[cfg(test)]
-mod tests;

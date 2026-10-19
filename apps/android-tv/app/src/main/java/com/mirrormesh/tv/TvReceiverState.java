@@ -77,7 +77,8 @@ public final class TvReceiverState {
         if (phase != Phase.APPROVED
                 && phase != Phase.CONNECTING
                 && phase != Phase.STREAMING
-                && phase != Phase.RECONNECTING) {
+                && phase != Phase.RECONNECTING
+                && phase != Phase.STOPPED) {
             return false;
         }
         phase = Phase.REVOKED;

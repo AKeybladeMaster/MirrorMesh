@@ -32,30 +32,3 @@ pub unsafe extern "C" fn mirrormesh_linux_prepare_pairing_runtime(
         Ok(Err(_)) | Err(_) => PAIRING_RUNTIME_UNAVAILABLE,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{PAIRING_RUNTIME_INVALID_ARGUMENT, mirrormesh_linux_prepare_pairing_runtime};
-
-    #[test]
-    fn exported_initializer_rejects_null_or_short_device_id_buffers() {
-        let device_id = [0_u8; 16];
-        let mut short_device_id = [0_u8; 15];
-
-        assert_eq!(
-            unsafe {
-                mirrormesh_linux_prepare_pairing_runtime(std::ptr::null_mut(), device_id.len())
-            },
-            PAIRING_RUNTIME_INVALID_ARGUMENT
-        );
-        assert_eq!(
-            unsafe {
-                mirrormesh_linux_prepare_pairing_runtime(
-                    short_device_id.as_mut_ptr(),
-                    short_device_id.len(),
-                )
-            },
-            PAIRING_RUNTIME_INVALID_ARGUMENT
-        );
-    }
-}

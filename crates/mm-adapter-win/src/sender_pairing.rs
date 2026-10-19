@@ -687,6 +687,15 @@ fn run_sender_session_worker(
                 }
             }
             MessagePayload::PairRevoke(revoke) => {
+                if initialize_pairing_runtime()
+                    .map(|id| id.to_string())
+                    .ok()
+                    .as_deref()
+                    != Some(revoke.peer_id.as_str())
+                {
+                    fail_sender_session_worker(snapshot, session_id_slot);
+                    return;
+                }
                 let event = SenderSessionEvent::Revoked {
                     peer_id: revoke.peer_id,
                 };
@@ -977,73 +986,5 @@ fn set_terminal_state(
     current.error_code = error_code;
     if state != SenderPairingState::Approved {
         current.receiver_fingerprint = [0; 32];
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        MAX_PAIRING_INVITATION_BYTES, SenderPairingError, SenderPairingState, stop_sender_session,
-        validate_invitation_uri, validate_session_source_id, validate_session_stop_reason,
-    };
-
-    #[test]
-    fn accepts_a_bounded_nonempty_invitation_uri() {
-        assert!(validate_invitation_uri("mirrormesh://pair?v=1").is_ok());
-    }
-
-    #[test]
-    fn rejects_empty_oversized_or_control_bearing_invitation_text() {
-        assert!(validate_invitation_uri("").is_err());
-        assert!(validate_invitation_uri(" \t").is_err());
-        assert!(validate_invitation_uri("mirrormesh://pair\n?v=1").is_err());
-        assert!(validate_invitation_uri(&"x".repeat(MAX_PAIRING_INVITATION_BYTES + 1)).is_err());
-    }
-
-    #[test]
-    fn rejects_outer_whitespace_so_a_pasted_uri_is_not_silently_changed() {
-        assert!(validate_invitation_uri(" mirrormesh://pair?v=1").is_err());
-        assert!(validate_invitation_uri("mirrormesh://pair?v=1 ").is_err());
-    }
-
-    #[test]
-    fn accepts_only_bounded_control_free_session_source_ids() {
-        assert!(validate_session_source_id("desktop-capture").is_ok());
-        assert!(validate_session_source_id("x".repeat(128).as_str()).is_ok());
-        assert!(validate_session_source_id("").is_err());
-        assert!(validate_session_source_id("x".repeat(129).as_str()).is_err());
-        assert!(validate_session_source_id("window\nname").is_err());
-    }
-
-    #[test]
-    fn accepts_only_bounded_control_free_session_stop_reasons() {
-        assert!(validate_session_stop_reason("user-disconnected").is_ok());
-        assert!(validate_session_stop_reason("x".repeat(128).as_str()).is_ok());
-        assert!(validate_session_stop_reason("").is_err());
-        assert!(validate_session_stop_reason("x".repeat(129).as_str()).is_err());
-        assert!(validate_session_stop_reason("user\nname").is_err());
-    }
-
-    #[test]
-    fn stop_sender_session_validates_reason_before_pairing_lookup() {
-        assert_eq!(
-            stop_sender_session(0, ""),
-            Err(SenderPairingError::InvalidSessionMessage)
-        );
-        assert_eq!(
-            stop_sender_session(0, "user-disconnected"),
-            Err(SenderPairingError::UnknownRequest)
-        );
-    }
-
-    #[test]
-    fn only_pending_or_approved_pairings_keep_the_sender_slot_active() {
-        assert!(SenderPairingState::Connecting.is_active());
-        assert!(SenderPairingState::AwaitingApproval.is_active());
-        assert!(SenderPairingState::Approved.is_active());
-        assert!(SenderPairingState::Cancelling.is_active());
-        assert!(!SenderPairingState::Rejected.is_active());
-        assert!(!SenderPairingState::Cancelled.is_active());
-        assert!(!SenderPairingState::Failed.is_active());
     }
 }

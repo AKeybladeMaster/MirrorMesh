@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.mirrormesh" "\0"
-            VALUE "FileDescription", "mirrormesh_flutter" "\0"
+            VALUE "FileDescription", "MirrorMesh screen sharing" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "mirrormesh_flutter" "\0"
+            VALUE "InternalName", "MirrorMesh" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.mirrormesh. All rights reserved." "\0"
-            VALUE "OriginalFilename", "mirrormesh_flutter.exe" "\0"
-            VALUE "ProductName", "mirrormesh_flutter" "\0"
+            VALUE "OriginalFilename", "MirrorMesh.exe" "\0"
+            VALUE "ProductName", "MirrorMesh" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
