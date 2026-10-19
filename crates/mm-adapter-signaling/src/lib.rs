@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use mm_domain::{TrustedPeer, TrustedPeerGrants};
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, TrustedPeerPort};
 use mm_protocol::MAX_ENVELOPE_BYTES;
 use mm_runtime::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
@@ -45,8 +46,32 @@ impl PendingPairingConnection {
         &mut self.connection.websocket
     }
 
-    pub fn into_parts(self) -> (AdmittedPendingPairingApproval, PairingConnection) {
-        (self.admitted, self.connection)
+    /// Persists the explicitly approved grants only while the pending approval is valid.
+    ///
+    /// The live connection is returned only after runtime approval succeeds. If approval has
+    /// expired or otherwise fails, consuming `self` drops the connection and releases its slot.
+    pub fn approve<P, I>(
+        self,
+        runtime: &PairingRuntime<P, I>,
+        approved_grants: TrustedPeerGrants,
+        now_monotonic_ms: u64,
+        paired_at_unix_ms: u64,
+    ) -> Result<(TrustedPeer, PairingConnection), PairingRuntimeError>
+    where
+        P: TrustedPeerPort,
+        I: LocalPairingIdentityPort + PairingIdentityPort,
+    {
+        let Self {
+            admitted,
+            connection,
+        } = self;
+        let peer = runtime.approve(
+            admitted,
+            approved_grants,
+            now_monotonic_ms,
+            paired_at_unix_ms,
+        )?;
+        Ok((peer, connection))
     }
 }
 

@@ -7,13 +7,13 @@ use std::time::Duration;
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
 use mm_adapter_tls::{tls13_pinned_client_config, tls13_server_config};
-use mm_application::PairingProof;
+use mm_application::{PairingCoordinatorError, PairingProof};
 use mm_domain::{DeviceId, MessageId, PeerGrant, PeerPublicKey, TrustedPeerGrants};
 use mm_ports::{
     LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort,
 };
 use mm_protocol::{PairBegin, encode_pair_begin};
-use mm_runtime::PairingRuntime;
+use mm_runtime::{PairingRuntime, PairingRuntimeError};
 use mm_security::parse_pairing_qr;
 use mm_store::SqliteTrustedPeers;
 use rustls::pki_types::ServerName;
@@ -37,7 +37,17 @@ fn wss_pair_begin_is_pinned_and_waits_for_approval() {
         return;
     }
 
-    run_client_parent();
+    run_client_parent(false);
+}
+
+#[test]
+fn expired_wss_pairing_approval_is_rejected_and_drops_connection() {
+    if std::env::var_os(CHILD_MODE).is_some() {
+        run_server_child();
+        return;
+    }
+
+    run_client_parent(true);
 }
 
 struct TestIdentity(SigningKey);
@@ -126,9 +136,11 @@ fn run_server_child() {
     let pending = listener
         .accept_pairing_request(&mut runtime, NOW_MONOTONIC_MS + 1)
         .expect("accept and verify the incoming WSS pairing request");
-    let (admitted, websocket) = pending.into_parts();
-    let approval = admitted.approval();
-    assert_eq!(admitted.source_ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    let approval = pending.admitted().approval();
+    assert_eq!(
+        pending.admitted().source_ip(),
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    );
     assert_eq!(approval.peer_id(), SENDER_ID);
     assert!(approval.requested_grants().allows(PeerGrant::View));
     assert!(
@@ -139,7 +151,7 @@ fn run_server_child() {
     );
     println!(
         "PENDING={}|{}|{}|untrusted",
-        admitted.source_ip(),
+        pending.admitted().source_ip(),
         approval.peer_id(),
         approval.fingerprint().to_hex()
     );
@@ -148,30 +160,59 @@ fn run_server_child() {
     let mut approval_command = String::new();
     std::io::stdin()
         .read_line(&mut approval_command)
-        .expect("read explicit test approval");
-    assert_eq!(approval_command.trim(), "approve");
+        .expect("read explicit test approval decision");
 
-    let approved = runtime
-        .approve(
-            admitted,
-            TrustedPeerGrants::new(true, false, false).expect("view grant scope"),
-            NOW_MONOTONIC_MS + 2,
-            NOW_UNIX_SECONDS * 1000 + 1,
-        )
-        .expect("persist the explicitly approved view grant");
-    assert_eq!(
-        peers
-            .get_peer(SENDER_ID)
-            .expect("read trusted peer after approval"),
-        Some(approved.clone())
-    );
-    drop(websocket);
-    println!("APPROVED={}|view", approved.id());
-    std::io::stdout().flush().expect("flush approved peer");
+    let requested = TrustedPeerGrants::new(true, false, false).expect("view grant scope");
+    match approval_command.trim() {
+        "approve" => {
+            let (approved, websocket) = pending
+                .approve(
+                    &runtime,
+                    requested,
+                    NOW_MONOTONIC_MS + 2,
+                    NOW_UNIX_SECONDS * 1000 + 1,
+                )
+                .expect("persist the explicitly approved view grant");
+            assert_eq!(
+                peers
+                    .get_peer(SENDER_ID)
+                    .expect("read trusted peer after approval"),
+                Some(approved.clone())
+            );
+            drop(websocket);
+            println!("APPROVED={}|view", approved.id());
+            std::io::stdout().flush().expect("flush approved peer");
+        }
+        "expire" => {
+            let expires_at = pending.admitted().approval().expires_at_monotonic_ms();
+            assert!(matches!(
+                pending.approve(&runtime, requested, expires_at, NOW_UNIX_SECONDS * 1000 + 1,),
+                Err(PairingRuntimeError::Coordinator(
+                    PairingCoordinatorError::ApprovalExpired
+                ))
+            ));
+            assert!(
+                peers
+                    .get_peer(SENDER_ID)
+                    .expect("read trusted peer after expired approval")
+                    .is_none()
+            );
+            println!("EXPIRED=untrusted");
+            std::io::stdout()
+                .flush()
+                .expect("flush expired approval result");
+        }
+        other => panic!("unexpected test approval decision: {other}"),
+    }
 }
 
-fn run_client_parent() {
-    let mut child = spawn_server_child();
+fn run_client_parent(expire_approval: bool) {
+    let test_name = if expire_approval {
+        "expired_wss_pairing_approval_is_rejected_and_drops_connection"
+    } else {
+        "wss_pair_begin_is_pinned_and_waits_for_approval"
+    };
+    let mut child = spawn_server_child(test_name);
     let stdout = child.stdout.take().expect("capture server stdout");
     let mut output = BufReader::new(stdout);
     let mut transcript = String::new();
@@ -222,13 +263,23 @@ fn run_client_parent() {
     assert!(pending_line.ends_with("|untrusted"), "{pending_line}");
     let mut child_stdin = child.stdin.take().expect("open approval channel to child");
     child_stdin
-        .write_all(b"approve\n")
-        .expect("send explicit test approval");
+        .write_all(if expire_approval {
+            b"expire\n"
+        } else {
+            b"approve\n"
+        })
+        .expect("send explicit test approval decision");
     child_stdin.flush().expect("flush explicit test approval");
 
-    let approved_line = read_prefixed_line(&mut output, &mut transcript, "APPROVED=");
-    assert!(approved_line.ends_with("|view"), "{approved_line}");
-    drop(websocket);
+    if expire_approval {
+        let expired_line = read_prefixed_line(&mut output, &mut transcript, "EXPIRED=");
+        assert_eq!(expired_line, "untrusted");
+        assert!(websocket.read().is_err(), "expired approval kept WSS open");
+    } else {
+        let approved_line = read_prefixed_line(&mut output, &mut transcript, "APPROVED=");
+        assert!(approved_line.ends_with("|view"), "{approved_line}");
+        drop(websocket);
+    }
     drop(child_stdin);
     let status = child.wait().expect("wait for WSS server child");
     assert!(
@@ -237,10 +288,10 @@ fn run_client_parent() {
     );
 }
 
-fn spawn_server_child() -> Child {
+fn spawn_server_child(test_name: &str) -> Child {
     Command::new(std::env::current_exe().expect("current integration test executable"))
         .arg("--exact")
-        .arg("wss_pair_begin_is_pinned_and_waits_for_approval")
+        .arg(test_name)
         .arg("--nocapture")
         .env(CHILD_MODE, "1")
         .stdin(Stdio::piped())
