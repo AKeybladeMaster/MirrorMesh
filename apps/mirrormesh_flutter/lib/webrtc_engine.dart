@@ -69,6 +69,92 @@ final class WebRtcConnectionStateEvent extends WebRtcEngineEvent {
   int get hashCode => state.hashCode;
 }
 
+/// Metadata reported by the local WebRTC stack for its outbound video RTP.
+///
+/// These counters confirm sender-side encoding only; they do not prove that a
+/// receiver decoded or presented a frame.
+final class WebRtcOutboundVideoStats {
+  const WebRtcOutboundVideoStats({
+    required this.framesEncoded,
+    required this.bytesSent,
+    this.codecMimeType,
+    this.encoderImplementation,
+  });
+
+  final int? framesEncoded;
+  final int? bytesSent;
+  final String? codecMimeType;
+  final String? encoderImplementation;
+
+  bool get hasEncodedVideo => (framesEncoded ?? 0) > 0;
+
+  static WebRtcOutboundVideoStats? parse(Iterable<StatsReport> reports) {
+    final reportList = reports.toList(growable: false);
+    StatsReport? outboundVideo;
+    for (final report in reportList) {
+      if (report.type != 'outbound-rtp') continue;
+      final kind = _safeStatsLabel(
+        report.values['kind'] ?? report.values['mediaType'],
+      );
+      if (kind?.toLowerCase() == 'video') {
+        outboundVideo = report;
+        break;
+      }
+    }
+    if (outboundVideo == null) return null;
+
+    final codecId = _safeStatsLabel(outboundVideo.values['codecId']);
+    StatsReport? codecReport;
+    if (codecId != null) {
+      for (final report in reportList) {
+        if (report.type == 'codec' && report.id == codecId) {
+          codecReport = report;
+          break;
+        }
+      }
+    }
+
+    return WebRtcOutboundVideoStats(
+      framesEncoded: _nonNegativeStatsInt(
+        outboundVideo.values['framesEncoded'],
+      ),
+      bytesSent: _nonNegativeStatsInt(outboundVideo.values['bytesSent']),
+      codecMimeType: _safeStatsLabel(
+        outboundVideo.values['mimeType'] ?? codecReport?.values['mimeType'],
+      ),
+      encoderImplementation: _safeStatsLabel(
+        outboundVideo.values['encoderImplementation'] ??
+            codecReport?.values['encoderImplementation'],
+      ),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is WebRtcOutboundVideoStats &&
+      other.framesEncoded == framesEncoded &&
+      other.bytesSent == bytesSent &&
+      other.codecMimeType == codecMimeType &&
+      other.encoderImplementation == encoderImplementation;
+
+  @override
+  int get hashCode => Object.hash(
+    framesEncoded,
+    bytesSent,
+    codecMimeType,
+    encoderImplementation,
+  );
+}
+
+int? _nonNegativeStatsInt(Object? value) =>
+    value is num && value.isFinite && value >= 0 ? value.toInt() : null;
+
+String? _safeStatsLabel(Object? value) {
+  if (value is! String || value.isEmpty || value.length > 128) return null;
+  if (value.contains(RegExp(r'[\u0000-\u001f\u007f]'))) return null;
+  return value;
+}
+
 final class WebRtcRemoteVideoTrackEvent extends WebRtcEngineEvent {
   const WebRtcRemoteVideoTrackEvent(this.trackId);
 
@@ -129,6 +215,7 @@ abstract interface class WebRtcPeerConnectionPort {
   Future<void> addSendOnlyVideoTransceiver();
   Future<void> startDesktopCapture(String sourceId);
   Future<void> stopDesktopCapture();
+  Future<WebRtcOutboundVideoStats?> getOutboundVideoStats();
   Future<String> createOffer();
   Future<String> createAnswer();
   Future<void> setLocalDescription({
@@ -218,6 +305,9 @@ final class FlutterWebRtcEngine {
   Future<void> stopDesktopCapture() async {
     await _peerOrThrow().stopDesktopCapture();
   }
+
+  Future<WebRtcOutboundVideoStats?> getOutboundVideoStats() =>
+      _peerOrThrow().getOutboundVideoStats();
 
   Future<String> createAnswer() async => _peerOrThrow().createAnswer();
 
@@ -418,6 +508,16 @@ final class _FlutterWebRtcPeerConnection implements WebRtcPeerConnectionPort {
     final stream = _localDesktopStream;
     _localDesktopStream = null;
     if (stream != null) await _stopStream(stream);
+  }
+
+  @override
+  Future<WebRtcOutboundVideoStats?> getOutboundVideoStats() async {
+    for (final sender in await _peer.getSenders()) {
+      if (sender.track?.kind != 'video') continue;
+      final stats = WebRtcOutboundVideoStats.parse(await sender.getStats());
+      if (stats != null) return stats;
+    }
+    return null;
   }
 
   @override

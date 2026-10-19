@@ -59,14 +59,23 @@ void main() {
           });
 
       final peer = _FakePeer();
+      const sentStats = WebRtcOutboundVideoStats(
+        framesEncoded: 3,
+        bytesSent: 2048,
+        codecMimeType: 'video/H264',
+      );
+      peer.outboundVideoStats = sentStats;
       final controller = WindowsSenderSessionController(
         pairing: const WindowsPairingBootstrap(),
         factory: _FakeFactory(peer),
+        statsPollInterval: const Duration(milliseconds: 10),
       );
+      final statsFuture = controller.videoStats.first;
       final startedSessionId = await controller.start(
         requestId: 41,
         sourceId: 'window-2',
       );
+      expect(await statsFuture.timeout(const Duration(seconds: 1)), sentStats);
       peer.emitLocalCandidate(
         const WebRtcIceCandidate(
           candidate: 'candidate:1 1 UDP 1 192.0.2.1 5000 typ host',
@@ -97,6 +106,9 @@ void main() {
       expect(controller.state, WindowsSenderSessionState.transportConnected);
 
       await controller.dispose();
+      final statsPollsAfterClose = peer.statsPollCalls;
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(peer.statsPollCalls, statsPollsAfterClose);
       expect(peer.stopDesktopCaptureCalls, 1);
       expect(peer.closeCalls, 1);
       expect(
@@ -169,6 +181,8 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   String? startedCaptureSourceId;
   String? localDescription;
   String? remoteDescription;
+  WebRtcOutboundVideoStats? outboundVideoStats;
+  int statsPollCalls = 0;
 
   @override
   Stream<WebRtcIceCandidate> get localIceCandidates => _localIce.stream;
@@ -197,6 +211,15 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   @override
   Future<void> stopDesktopCapture() async {
     stopDesktopCaptureCalls++;
+  }
+
+  @override
+  Future<WebRtcOutboundVideoStats?> getOutboundVideoStats() async =>
+      _readOutboundVideoStats();
+
+  Future<WebRtcOutboundVideoStats?> _readOutboundVideoStats() async {
+    statsPollCalls++;
+    return outboundVideoStats;
   }
 
   @override

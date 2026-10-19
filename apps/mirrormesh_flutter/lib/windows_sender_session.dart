@@ -26,12 +26,17 @@ final class WindowsSenderSessionController {
   WindowsSenderSessionController({
     required this.pairing,
     WebRtcPeerConnectionFactory? factory,
-  }) : _engineFactory = factory ?? const FlutterWebRtcPeerConnectionFactory();
+    this.statsPollInterval = const Duration(seconds: 1),
+  }) : _engineFactory = factory ?? const FlutterWebRtcPeerConnectionFactory(),
+       assert(statsPollInterval.inMicroseconds > 0);
 
   final WindowsPairingBootstrap pairing;
   final WebRtcPeerConnectionFactory _engineFactory;
+  final Duration statsPollInterval;
   final StreamController<WindowsSenderSessionState> _states =
       StreamController<WindowsSenderSessionState>.broadcast();
+  final StreamController<WebRtcOutboundVideoStats> _videoStats =
+      StreamController<WebRtcOutboundVideoStats>.broadcast();
   final StreamController<WebRtcEngineEvent> _rtcEvents =
       StreamController<WebRtcEngineEvent>.broadcast();
   final List<WebRtcIceCandidate> _pendingLocalIce = [];
@@ -41,12 +46,14 @@ final class WindowsSenderSessionController {
   FlutterWebRtcEngine? _engine;
   StreamSubscription<WebRtcEngineEvent>? _engineEvents;
   Timer? _pollTimer;
+  Timer? _statsTimer;
   String? _sessionId;
   int? _requestId;
   int _pendingLocalIceBytes = 0;
   int _pendingRemoteIceBytes = 0;
   bool _remoteDescriptionSet = false;
   bool _polling = false;
+  bool _statsPolling = false;
   bool _drainingLocalIce = false;
   bool _starting = false;
   bool _closed = false;
@@ -55,6 +62,7 @@ final class WindowsSenderSessionController {
   WindowsSenderSessionState get state => _state;
   Object? get lastError => _lastError;
   Stream<WindowsSenderSessionState> get states => _states.stream;
+  Stream<WebRtcOutboundVideoStats> get videoStats => _videoStats.stream;
   Stream<WebRtcEngineEvent> get rtcEvents => _rtcEvents.stream;
 
   Future<List<WebRtcDesktopCaptureSource>> availableCaptureSources() {
@@ -107,6 +115,10 @@ final class WindowsSenderSessionController {
         const Duration(milliseconds: 100),
         (_) => unawaited(_pollSessionEvent()),
       );
+      _statsTimer = Timer.periodic(
+        statsPollInterval,
+        (_) => unawaited(_pollOutboundVideoStats()),
+      );
       return _sessionId!;
     } catch (error) {
       await _closePeer();
@@ -131,7 +143,26 @@ final class WindowsSenderSessionController {
     await stop();
     _closed = true;
     await _states.close();
+    await _videoStats.close();
     await _rtcEvents.close();
+  }
+
+  Future<void> _pollOutboundVideoStats() async {
+    final engine = _engine;
+    if (_statsPolling || _closed || engine == null) return;
+    _statsPolling = true;
+    try {
+      final stats = await engine.getOutboundVideoStats();
+      if (stats != null &&
+          identical(_engine, engine) &&
+          !_videoStats.isClosed) {
+        _videoStats.add(stats);
+      }
+    } on Object {
+      // Stats are diagnostic only; a native stats failure must not stop video.
+    } finally {
+      _statsPolling = false;
+    }
   }
 
   void _onRtcEvent(WebRtcEngineEvent event) {
@@ -283,6 +314,8 @@ final class WindowsSenderSessionController {
   Future<void> _closePeer() async {
     _pollTimer?.cancel();
     _pollTimer = null;
+    _statsTimer?.cancel();
+    _statsTimer = null;
     await _engineEvents?.cancel();
     _engineEvents = null;
     final engine = _engine;

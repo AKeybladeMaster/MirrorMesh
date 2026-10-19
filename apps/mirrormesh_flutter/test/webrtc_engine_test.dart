@@ -5,6 +5,60 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mirrormesh_flutter/webrtc_engine.dart';
 
 void main() {
+  test('parses outbound video counters and optional codec metadata', () {
+    final stats = WebRtcOutboundVideoStats.parse([
+      StatsReport('audio-out', 'outbound-rtp', 10.0, {
+        'kind': 'audio',
+        'framesEncoded': 999,
+        'bytesSent': 123,
+      }),
+      StatsReport('video-out', 'outbound-rtp', 11.0, {
+        'kind': 'video',
+        'framesEncoded': 42,
+        'bytesSent': 98765,
+        'codecId': 'video-codec',
+        'encoderImplementation': 'MediaFoundation',
+      }),
+      StatsReport('video-codec', 'codec', 11.0, {'mimeType': 'video/H264'}),
+    ]);
+
+    expect(
+      stats,
+      const WebRtcOutboundVideoStats(
+        framesEncoded: 42,
+        bytesSent: 98765,
+        codecMimeType: 'video/H264',
+        encoderImplementation: 'MediaFoundation',
+      ),
+    );
+    expect(stats!.hasEncodedVideo, isTrue);
+  });
+
+  test('does not treat audio or malformed video counters as encoded video', () {
+    expect(
+      WebRtcOutboundVideoStats.parse([
+        StatsReport('audio-out', 'outbound-rtp', 10.0, {
+          'kind': 'audio',
+          'framesEncoded': 999,
+          'bytesSent': 123,
+        }),
+      ]),
+      isNull,
+    );
+
+    final stats = WebRtcOutboundVideoStats.parse([
+      StatsReport('video-out', 'outbound-rtp', 11.0, {
+        'mediaType': 'video',
+        'framesEncoded': 'many',
+        'bytesSent': -1,
+      }),
+    ]);
+
+    expect(stats?.framesEncoded, isNull);
+    expect(stats?.bytesSent, isNull);
+    expect(stats?.hasEncodedVideo, isFalse);
+  });
+
   test('H.264 preference contains only supported 90 kHz video codecs', () {
     final codecs = h264VideoCodecPreferences([
       RTCRtpCodecCapability(
@@ -150,6 +204,22 @@ void main() {
     await engine.close();
   });
 
+  test('reads only outbound video stats from the peer adapter', () async {
+    final factory = _FakeFactory();
+    const stats = WebRtcOutboundVideoStats(
+      framesEncoded: 8,
+      bytesSent: 1200,
+      codecMimeType: 'video/H264',
+    );
+    factory.peer.outboundVideoStats = stats;
+    final engine = FlutterWebRtcEngine(factory: factory);
+    await engine.initialize();
+
+    expect(await engine.getOutboundVideoStats(), stats);
+
+    await engine.close();
+  });
+
   test('close tears down the peer once and ends the event stream', () async {
     final factory = _FakeFactory();
     final engine = FlutterWebRtcEngine(factory: factory);
@@ -254,6 +324,7 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   int stopDesktopCaptureCalls = 0;
   String? startedCaptureSourceId;
   String? remoteDescription;
+  WebRtcOutboundVideoStats? outboundVideoStats;
   Object? closeFailure;
 
   @override
@@ -286,6 +357,10 @@ final class _FakePeer implements WebRtcPeerConnectionPort {
   Future<void> stopDesktopCapture() async {
     stopDesktopCaptureCalls++;
   }
+
+  @override
+  Future<WebRtcOutboundVideoStats?> getOutboundVideoStats() async =>
+      outboundVideoStats;
 
   @override
   Future<String> createOffer() async => 'offer-sdp';

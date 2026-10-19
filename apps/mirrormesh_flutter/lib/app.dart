@@ -87,7 +87,9 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   bool _senderSessionStarting = false;
   WindowsSenderSessionController? _windowsSenderSession;
   StreamSubscription<WindowsSenderSessionState>? _senderSessionSubscription;
+  StreamSubscription<WebRtcOutboundVideoStats>? _senderVideoStatsSubscription;
   WindowsSenderSessionState? _senderSessionState;
+  WebRtcOutboundVideoStats? _senderVideoStats;
   String? _senderSessionError;
   List<AnnotationStroke> _demoStrokes = [];
   Color _demoStrokeColor = const Color(0xFF61D7C5);
@@ -156,6 +158,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
             onCancelSenderPairing: _cancelWindowsSenderPairing,
             senderSessionStarting: _senderSessionStarting,
             senderSessionState: _senderSessionState,
+            senderSessionStats: _senderVideoStats,
             senderSessionError: _senderSessionError,
             onStartSenderSession: _startWindowsSenderSession,
             onStopSenderSession: _stopWindowsSenderSession,
@@ -467,8 +470,12 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
         pairing: const WindowsPairingBootstrap(),
       );
       _windowsSenderSession = controller;
+      _senderVideoStats = null;
       _senderSessionSubscription = controller.states.listen((state) {
         if (mounted) setState(() => _senderSessionState = state);
+      });
+      _senderVideoStatsSubscription = controller.videoStats.listen((stats) {
+        if (mounted) setState(() => _senderVideoStats = stats);
       });
       await controller.start(requestId: requestId, sourceId: source.id);
     } on PlatformException catch (error) {
@@ -499,12 +506,16 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
     final subscription = _senderSessionSubscription;
     _senderSessionSubscription = null;
     await subscription?.cancel();
+    final statsSubscription = _senderVideoStatsSubscription;
+    _senderVideoStatsSubscription = null;
+    await statsSubscription?.cancel();
     final controller = _windowsSenderSession;
     _windowsSenderSession = null;
     if (controller != null) await controller.dispose();
     if (mounted) {
       setState(() {
         _senderSessionState = null;
+        _senderVideoStats = null;
         _senderSessionStarting = false;
       });
     }
@@ -523,6 +534,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   void dispose() {
     _senderPairingPollTimer?.cancel();
     unawaited(_senderSessionSubscription?.cancel());
+    unawaited(_senderVideoStatsSubscription?.cancel());
     unawaited(_windowsSenderSession?.dispose());
     final requestId = _senderPairingRequestId;
     if (requestId != null && _senderPairingStatus?.state.isActive == true) {
@@ -994,6 +1006,7 @@ class _DevicesPage extends StatefulWidget {
     required this.onCancelSenderPairing,
     required this.senderSessionStarting,
     required this.senderSessionState,
+    required this.senderSessionStats,
     required this.senderSessionError,
     required this.onStartSenderSession,
     required this.onStopSenderSession,
@@ -1012,6 +1025,7 @@ class _DevicesPage extends StatefulWidget {
   final VoidCallback onCancelSenderPairing;
   final bool senderSessionStarting;
   final WindowsSenderSessionState? senderSessionState;
+  final WebRtcOutboundVideoStats? senderSessionStats;
   final String? senderSessionError;
   final VoidCallback onStartSenderSession;
   final VoidCallback onStopSenderSession;
@@ -1311,6 +1325,25 @@ class _DevicesPageState extends State<_DevicesPage> {
                         Text(
                           _senderSessionStatusText(widget.senderSessionState!),
                         ),
+                        if (widget.senderSessionStats case final stats?) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            stats.framesEncoded == null
+                                ? 'The WebRTC stack did not report an encoded-frame count.'
+                                : stats.hasEncodedVideo
+                                ? 'Sender reports ${stats.framesEncoded} encoded video frames; ${stats.bytesSent ?? 'byte count not reported'} bytes sent.'
+                                : 'WebRTC reports 0 encoded video frames so far.',
+                          ),
+                          Text(
+                            'Codec: ${stats.codecMimeType ?? 'not reported'} · Encoder implementation: ${stats.encoderImplementation ?? 'not reported'}',
+                          ),
+                        ] else if (widget.senderSessionState ==
+                            WindowsSenderSessionState.transportConnected) ...[
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Waiting for outbound video statistics. TV decoding is not confirmed.',
+                          ),
+                        ],
                         if (widget.senderSessionState !=
                                 WindowsSenderSessionState.stopped &&
                             widget.senderSessionState !=

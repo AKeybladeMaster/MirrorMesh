@@ -105,6 +105,20 @@ Task 43 is **SOURCE_IMPLEMENTED** for H.264 sender preferences only. It does not
 
 Task 44 is **SOURCE_IMPLEMENTED** for the user-triggered snapshot path. The JDK tests verify only I420-to-NV21 bounds and conversion; they do not compile Android classes or prove JPEG/MediaStore behavior. A decoded sender frame and actual saved image remain unverified; physical TV testing stays deferred.
 
+**Task 45 verification update:** The Windows sender polls its outbound video sender stats once per second. The parser accepts video `outbound-rtp` reports only, preserves missing/malformed counters as unknown, and displays optional codec and encoder-implementation metadata as reported. Stats failures are best-effort and do not stop the session. The UI keeps sender encoding separate from transport connection and receiver decode.
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `dart format --output=none --set-exit-if-changed lib/app.dart lib/webrtc_engine.dart lib/windows_sender_session.dart test/webrtc_engine_test.dart test/windows_sender_session_test.dart` | 0 | All five changed Dart files are formatted. |
+| `dart analyze --format machine lib/app.dart lib/webrtc_engine.dart lib/windows_sender_session.dart test/webrtc_engine_test.dart test/windows_sender_session_test.dart` | 0 | No analyzer issues; analyzer state was redirected to the permitted temporary directory. |
+| `dart analyze --format machine lib/linux_pairing_bootstrap.dart test/linux_pairing_bootstrap_test.dart` | 0 | Task 29 Flutter wrapper and its tests analyze cleanly. |
+| `cargo test -p mm-adapter-linux --locked --offline` | 0 | All 19 host Rust adapter/runtime tests pass. This does not compile Linux-only FFI or GTK runner code. |
+| Focused Flutter tests: sender engine/controller and Task 29 Linux wrapper | interrupted | The test runner produced no output for 60 seconds (sender tests) and 30 seconds (Linux wrapper test); both runs were interrupted. No test-pass claim is made. |
+| `flutter build windows --release --no-pub` | interrupted | The command produced no output for 30 seconds and was interrupted; no Windows application bundle was produced. |
+| `git diff --check` | 0 | Source and documentation changes are whitespace-clean. |
+
+Task 45 is **SOURCE_IMPLEMENTED** for sender-side diagnostics, not media delivery. Dart analysis and formatting pass, but the Flutter tests and Windows build remain unverified because their processes stalled. A reported encoded frame does not prove RTP reached the Android TV, that Android decoded or displayed it, or that hardware encoding was used. The next coding task is a native synthetic H.264 sender source and an automated path to a decoded TV frame; WGC integration remains separate.
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |
