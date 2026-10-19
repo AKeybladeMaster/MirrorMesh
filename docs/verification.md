@@ -188,6 +188,19 @@ Task 49 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED` and `AUTOMATED_INTEGRATION_VER
 
 Task 50 changes no protocol or FFI schema. It is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` are pending. The timeout begins after the WebRTC transport is connected and a session ID exists. See the [Task 50 brief](../codex/50-windows-first-encoded-frame-gate.md) and proposed follow-up in [ADR-0047](adr/0047-windows-session-start-control.md).
 
+## Task 51 verification — bounded Windows peer reconnect
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `dart format --output=none --set-exit-if-changed lib/windows_sender_session.dart lib/app.dart test/windows_sender_session_test.dart` | unavailable | `dart` is not installed or on `PATH` in this workstation session. |
+| `flutter analyze` | unavailable | `flutter` is not installed or on `PATH` in this workstation session. |
+| `flutter test test/windows_sender_session_test.dart` | unavailable | The recovery and timeout tests are authored but could not be launched because `flutter` is unavailable. |
+| `cargo fmt --all -- --check` | pass (exit 0) | Rust sources are unchanged; this does not validate Dart formatting. |
+| `git diff --check` | pass (exit 0) | No whitespace errors; Git reports only configured LF-to-CRLF working-copy notices. |
+| Network reconnect / TV frame continuity | not verified | Mocked connection events exercise state and cleanup only; no network or receiver frame was observed. |
+
+Task 51 changes the Windows Dart state enum/controller but no signaling schema, Rust FFI, permission, or capture API. It is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` remain pending. Proposed [ADR-0051](adr/0051-windows-peer-reconnect.md) records the bounded same-peer recovery behavior. See the [Task 51 brief](../codex/51-windows-peer-reconnect.md).
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |
