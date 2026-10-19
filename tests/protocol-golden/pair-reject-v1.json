@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "pair.reject",
+  "message_id": "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2",
+  "seq": 1,
+  "sent_at_ms": 201,
+  "payload": {
+    "reason": "user_rejected"
+  }
+}

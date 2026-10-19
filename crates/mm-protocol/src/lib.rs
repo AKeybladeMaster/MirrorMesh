@@ -367,6 +367,39 @@ struct PairBeginPayloadRef<'a> {
     signature: &'a str,
 }
 
+#[derive(Serialize)]
+struct PairApproveEnvelope<'a> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: PairApprovePayloadRef<'a>,
+}
+
+#[derive(Serialize)]
+struct PairApprovePayloadRef<'a> {
+    accepted_grants: &'a [String],
+    peer_identity_proof: &'a str,
+}
+
+#[derive(Serialize)]
+struct PairRejectEnvelope<'a> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: PairRejectPayloadRef<'a>,
+}
+
+#[derive(Serialize)]
+struct PairRejectPayloadRef<'a> {
+    reason: &'a str,
+}
+
 /// Performs byte and UTF-8 checks before a JSON decoder allocates a payload tree.
 /// This is deliberately a preflight step, not a JSON parser.
 pub fn preflight_json(bytes: &[u8]) -> Result<&str, ProtocolError> {
@@ -414,6 +447,67 @@ pub fn encode_pair_begin(
             public_key: &payload.public_key,
             requested_grants: &payload.requested_grants,
             signature: &payload.signature,
+        },
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Encodes the receiver's explicit approval decision in the sessionless v1 pairing envelope.
+/// `peer_identity_proof` is the canonical lowercase SHA-256 fingerprint of the receiver key
+/// pinned by the QR invitation.
+pub fn encode_pair_approve(
+    message_id: MessageId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &PairApprove,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    validate_pair_approve(payload)?;
+
+    let envelope = PairApproveEnvelope {
+        v: 1,
+        message_type: "pair.approve",
+        message_id: message_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload: PairApprovePayloadRef {
+            accepted_grants: &payload.accepted_grants,
+            peer_identity_proof: &payload.peer_identity_proof,
+        },
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Encodes the receiver's explicit rejection decision in the sessionless v1 pairing envelope.
+pub fn encode_pair_reject(
+    message_id: MessageId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &PairReject,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    validate_pair_reject(payload)?;
+
+    let envelope = PairRejectEnvelope {
+        v: 1,
+        message_type: "pair.reject",
+        message_id: message_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload: PairRejectPayloadRef {
+            reason: &payload.reason,
         },
     };
     let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
@@ -478,13 +572,12 @@ pub fn parse_message(bytes: &[u8]) -> Result<ValidatedMessage, ProtocolError> {
         }
         MessageKind::PairApprove => {
             let value: PairApprove = decode(raw.payload)?;
-            validate_grants(&value.accepted_grants)?;
-            bounded_text(&value.peer_identity_proof, 1, 8192)?;
+            validate_pair_approve(&value)?;
             MessagePayload::PairApprove(value)
         }
         MessageKind::PairReject => {
             let value: PairReject = decode(raw.payload)?;
-            bounded_text(&value.reason, 1, 128)?;
+            validate_pair_reject(&value)?;
             MessagePayload::PairReject(value)
         }
         MessageKind::PairRevoke => {
@@ -656,6 +749,18 @@ fn validate_pair_begin(value: &PairBegin) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn validate_pair_approve(value: &PairApprove) -> Result<(), ProtocolError> {
+    validate_grants(&value.accepted_grants)?;
+    if value.accepted_grants.is_empty() {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_lower_hex(&value.peer_identity_proof, 32)
+}
+
+fn validate_pair_reject(value: &PairReject) -> Result<(), ProtocolError> {
+    bounded_text(&value.reason, 1, 128)
+}
+
 fn validate_capabilities(value: &Capabilities) -> Result<(), ProtocolError> {
     if value.video.is_empty()
         || value.video.len() > 8
@@ -791,14 +896,19 @@ impl SequenceTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairBegin, ProtocolError,
-        SequenceTracker, encode_pair_begin, parse_message, preflight_json, validate_version,
+        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairApprove, PairBegin,
+        PairReject, ProtocolError, SequenceTracker, encode_pair_approve, encode_pair_begin,
+        encode_pair_reject, parse_message, preflight_json, validate_version,
     };
     use mm_domain::{DeviceId, MessageId, SessionId};
 
     const VALID_OFFER: &str = include_str!("../../../tests/protocol-golden/session-offer-v1.json");
     const VALID_PAIR_BEGIN: &str =
         include_str!("../../../tests/protocol-golden/pair-begin-v1.json");
+    const VALID_PAIR_APPROVE: &str =
+        include_str!("../../../tests/protocol-golden/pair-approve-v1.json");
+    const VALID_PAIR_REJECT: &str =
+        include_str!("../../../tests/protocol-golden/pair-reject-v1.json");
 
     fn id(value: u8) -> [u8; 16] {
         [value; 16]
@@ -889,6 +999,74 @@ mod tests {
                 assert_eq!(value.display_name, payload.display_name);
             }
             _ => panic!("encoded frame must decode to PairBegin"),
+        }
+    }
+
+    #[test]
+    fn encodes_pair_approval_with_a_canonical_receiver_fingerprint_proof() {
+        let payload = PairApprove {
+            accepted_grants: vec!["view".to_owned(), "send".to_owned()],
+            peer_identity_proof: "ab".repeat(32),
+        };
+        let message_id = MessageId::from_bytes([0xc1; 16]);
+        let frame = encode_pair_approve(message_id, 1, 200, &payload).unwrap();
+        let parsed = parse_message(&frame).unwrap();
+
+        assert_eq!(parsed.header.kind, super::MessageKind::PairApprove);
+        assert_eq!(parsed.header.message_id, message_id);
+        assert_eq!(parsed.header.sequence, 1);
+        assert_eq!(parsed.header.sent_at_ms, 200);
+        assert!(parsed.header.session_id.is_none());
+        match parsed.payload {
+            MessagePayload::PairApprove(value) => {
+                assert_eq!(value.accepted_grants, payload.accepted_grants);
+                assert_eq!(value.peer_identity_proof, payload.peer_identity_proof);
+            }
+            _ => panic!("encoded frame must decode to PairApprove"),
+        }
+    }
+
+    #[test]
+    fn parses_pairing_decision_golden_fixtures() {
+        let approval = parse_message(VALID_PAIR_APPROVE.as_bytes()).unwrap();
+        assert_eq!(approval.header.kind, super::MessageKind::PairApprove);
+        let rejection = parse_message(VALID_PAIR_REJECT.as_bytes()).unwrap();
+        assert_eq!(rejection.header.kind, super::MessageKind::PairReject);
+    }
+
+    #[test]
+    fn refuses_pair_approval_with_empty_grants_or_noncanonical_fingerprint() {
+        let mut payload = PairApprove {
+            accepted_grants: Vec::new(),
+            peer_identity_proof: "ab".repeat(32),
+        };
+        assert_eq!(
+            encode_pair_approve(MessageId::from_bytes([0xc1; 16]), 1, 200, &payload),
+            Err(ProtocolError::InvalidPayload)
+        );
+        payload.accepted_grants.push("view".to_owned());
+        payload.peer_identity_proof = "AB".repeat(32);
+        assert_eq!(
+            encode_pair_approve(MessageId::from_bytes([0xc1; 16]), 1, 200, &payload),
+            Err(ProtocolError::InvalidPayload)
+        );
+    }
+
+    #[test]
+    fn encodes_pair_rejection_without_a_session() {
+        let payload = PairReject {
+            reason: "user_rejected".to_owned(),
+        };
+        let message_id = MessageId::from_bytes([0xc2; 16]);
+        let frame = encode_pair_reject(message_id, 1, 201, &payload).unwrap();
+        let parsed = parse_message(&frame).unwrap();
+
+        assert_eq!(parsed.header.kind, super::MessageKind::PairReject);
+        assert_eq!(parsed.header.message_id, message_id);
+        assert!(parsed.header.session_id.is_none());
+        match parsed.payload {
+            MessagePayload::PairReject(value) => assert_eq!(value.reason, payload.reason),
+            _ => panic!("encoded frame must decode to PairReject"),
         }
     }
 

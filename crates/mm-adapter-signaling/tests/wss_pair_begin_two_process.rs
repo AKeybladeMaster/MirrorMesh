@@ -51,7 +51,17 @@ fn wss_pair_begin_requires_approval_and_exchanges_control_messages() {
         return;
     }
 
-    run_client_parent(false);
+    run_client_parent(TestDecision::Approve);
+}
+
+#[test]
+fn wss_pair_reject_is_sent_without_persisting_trust() {
+    if std::env::var_os(CHILD_MODE).is_some() {
+        run_server_child();
+        return;
+    }
+
+    run_client_parent(TestDecision::Reject);
 }
 
 #[test]
@@ -61,7 +71,14 @@ fn expired_wss_pairing_approval_is_rejected_and_drops_connection() {
         return;
     }
 
-    run_client_parent(true);
+    run_client_parent(TestDecision::Expire);
+}
+
+#[derive(Clone, Copy)]
+enum TestDecision {
+    Approve,
+    Reject,
+    Expire,
 }
 
 struct TestIdentity(SigningKey);
@@ -212,8 +229,8 @@ fn run_server_child() {
             let expires_at = pending.admitted().approval().expires_at_monotonic_ms();
             assert!(matches!(
                 pending.approve(&runtime, requested, expires_at, NOW_UNIX_SECONDS * 1000 + 1,),
-                Err(PairingRuntimeError::Coordinator(
-                    PairingCoordinatorError::ApprovalExpired
+                Err(mm_adapter_signaling::WssApprovalError::Runtime(
+                    PairingRuntimeError::Coordinator(PairingCoordinatorError::ApprovalExpired)
                 ))
             ));
             assert!(
@@ -227,15 +244,36 @@ fn run_server_child() {
                 .flush()
                 .expect("flush expired approval result");
         }
+        "reject" => {
+            pending
+                .reject("user_rejected", NOW_UNIX_SECONDS * 1000 + 1)
+                .expect("send explicit pair.reject without persisting trust");
+            assert!(
+                peers
+                    .get_peer(SENDER_ID)
+                    .expect("read trusted peer after rejection")
+                    .is_none()
+            );
+            println!("REJECTED=untrusted");
+            std::io::stdout()
+                .flush()
+                .expect("flush rejected approval result");
+        }
         other => panic!("unexpected test approval decision: {other}"),
     }
 }
 
-fn run_client_parent(expire_approval: bool) {
-    let test_name = if expire_approval {
-        "expired_wss_pairing_approval_is_rejected_and_drops_connection"
-    } else {
-        "wss_pair_begin_requires_approval_and_exchanges_control_messages"
+fn run_client_parent(decision: TestDecision) {
+    let (test_name, decision_text) = match decision {
+        TestDecision::Approve => (
+            "wss_pair_begin_requires_approval_and_exchanges_control_messages",
+            "approve",
+        ),
+        TestDecision::Reject => ("wss_pair_reject_is_sent_without_persisting_trust", "reject"),
+        TestDecision::Expire => (
+            "expired_wss_pairing_approval_is_rejected_and_drops_connection",
+            "expire",
+        ),
     };
     let mut child = spawn_server_child(test_name);
     let stdout = child.stdout.take().expect("capture server stdout");
@@ -288,42 +326,76 @@ fn run_client_parent(expire_approval: bool) {
     assert!(pending_line.ends_with("|untrusted"), "{pending_line}");
     let mut child_stdin = child.stdin.take().expect("open approval channel to child");
     child_stdin
-        .write_all(if expire_approval {
-            b"expire\n"
-        } else {
-            b"approve\n"
-        })
+        .write_all(format!("{decision_text}\n").as_bytes())
         .expect("send explicit test approval decision");
     child_stdin.flush().expect("flush explicit test approval");
 
-    if expire_approval {
-        let expired_line = read_prefixed_line(&mut output, &mut transcript, "EXPIRED=");
-        assert_eq!(expired_line, "untrusted");
-        assert!(websocket.read().is_err(), "expired approval kept WSS open");
-    } else {
-        let approved_line = read_prefixed_line(&mut output, &mut transcript, "APPROVED=");
-        assert!(approved_line.ends_with("|view"), "{approved_line}");
-        websocket
-            .send(Message::text(VALID_SESSION_OFFER))
-            .expect("send a session offer over the approved WSS channel");
-        let answer = match websocket.read().expect("read session answer") {
-            Message::Text(text) => text,
-            other => panic!("expected text session answer, received {other:?}"),
-        };
-        let parsed_answer = mm_protocol::parse_message(answer.as_str().as_bytes())
-            .expect("server answer uses the shared v1 protocol");
-        let parsed_offer = mm_protocol::parse_message(VALID_SESSION_OFFER.as_bytes())
-            .expect("client offer uses the shared v1 protocol");
-        assert_eq!(
-            parsed_answer.header.kind,
-            mm_protocol::MessageKind::SessionAnswer
-        );
-        assert_eq!(
-            parsed_answer.header.session_id,
-            parsed_offer.header.session_id
-        );
-        let exchanged_line = read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
-        assert_eq!(exchanged_line, "session.offer/session.answer");
+    match decision {
+        TestDecision::Expire => {
+            let expired_line = read_prefixed_line(&mut output, &mut transcript, "EXPIRED=");
+            assert_eq!(expired_line, "untrusted");
+            assert!(websocket.read().is_err(), "expired approval kept WSS open");
+        }
+        TestDecision::Reject => {
+            let rejected_line = read_prefixed_line(&mut output, &mut transcript, "REJECTED=");
+            assert_eq!(rejected_line, "untrusted");
+            let rejection = match websocket.read().expect("read pair.reject response") {
+                Message::Text(text) => text,
+                other => panic!("expected text pair.reject, received {other:?}"),
+            };
+            let parsed = mm_protocol::parse_message(rejection.as_str().as_bytes())
+                .expect("pair.reject uses the shared v1 protocol");
+            assert_eq!(parsed.header.kind, mm_protocol::MessageKind::PairReject);
+            match parsed.payload {
+                mm_protocol::MessagePayload::PairReject(value) => {
+                    assert_eq!(value.reason, "user_rejected");
+                }
+                _ => panic!("response must contain a PairReject payload"),
+            }
+        }
+        TestDecision::Approve => {
+            let approved_line = read_prefixed_line(&mut output, &mut transcript, "APPROVED=");
+            assert!(approved_line.ends_with("|view"), "{approved_line}");
+            let approval = match websocket.read().expect("read pair.approve response") {
+                Message::Text(text) => text,
+                other => panic!("expected text pair.approve, received {other:?}"),
+            };
+            let parsed_approval = mm_protocol::parse_message(approval.as_str().as_bytes())
+                .expect("pair.approve uses the shared v1 protocol");
+            assert_eq!(
+                parsed_approval.header.kind,
+                mm_protocol::MessageKind::PairApprove
+            );
+            match parsed_approval.payload {
+                mm_protocol::MessagePayload::PairApprove(value) => {
+                    assert_eq!(value.accepted_grants, vec!["view"]);
+                    assert_eq!(value.peer_identity_proof, qr.fingerprint().to_hex());
+                }
+                _ => panic!("response must contain a PairApprove payload"),
+            }
+            websocket
+                .send(Message::text(VALID_SESSION_OFFER))
+                .expect("send a session offer over the approved WSS channel");
+            let answer = match websocket.read().expect("read session answer") {
+                Message::Text(text) => text,
+                other => panic!("expected text session answer, received {other:?}"),
+            };
+            let parsed_answer = mm_protocol::parse_message(answer.as_str().as_bytes())
+                .expect("server answer uses the shared v1 protocol");
+            let parsed_offer = mm_protocol::parse_message(VALID_SESSION_OFFER.as_bytes())
+                .expect("client offer uses the shared v1 protocol");
+            assert_eq!(
+                parsed_answer.header.kind,
+                mm_protocol::MessageKind::SessionAnswer
+            );
+            assert_eq!(
+                parsed_answer.header.session_id,
+                parsed_offer.header.session_id
+            );
+            let exchanged_line =
+                read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
+            assert_eq!(exchanged_line, "session.offer/session.answer");
+        }
     }
     drop(child_stdin);
     let status = child.wait().expect("wait for WSS server child");

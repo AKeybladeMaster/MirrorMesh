@@ -1194,6 +1194,7 @@ name = "mm-adapter-signaling"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "getrandom 0.4.3",
  "mm-adapter-identity",
  "mm-adapter-tls",
  "mm-application",

@@ -6,7 +6,7 @@ use mm_application::{
     PairingCoordinator, PairingCoordinatorError, PairingInvitation, PairingProof,
     PendingPairingApproval,
 };
-use mm_domain::{DeviceId, PeerPublicKey, TrustedPeer, TrustedPeerGrants};
+use mm_domain::{DeviceId, PeerFingerprint, PeerPublicKey, TrustedPeer, TrustedPeerGrants};
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort};
 use mm_protocol::{MessagePayload, ProtocolError, parse_message};
 use mm_security::{
@@ -143,6 +143,11 @@ where
             coordinator,
             attempt_limiter,
         })
+    }
+
+    /// Returns the local key fingerprint captured when this runtime was created.
+    pub const fn local_fingerprint(&self) -> PeerFingerprint {
+        self.coordinator.local_fingerprint()
     }
 
     /// Creates a user-displayable invitation for an explicitly approved endpoint.

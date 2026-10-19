@@ -66,7 +66,7 @@ The sessionless common envelope carries a strict payload with exactly `receiver_
 |---|---|---|---|
 | `device.hello` | `device_id, protocol_versions, capabilities` | both | no sensitive data; version check |
 | `pair.begin` | `receiver_id, nonce, peer_id, display_name, public_key, requested_grants, signature` | sender→receiver | only an unexpired QR; strict candidate encoding and domain-separated proof are checked before an approval prompt; explicit approval is still required |
-| `pair.approve` | `accepted_grants, peer_identity_proof` | receiver→sender | identity/fingerprint verified |
+| `pair.approve` | `accepted_grants, peer_identity_proof` | receiver→sender | accepted grants are a non-empty subset of the request; `peer_identity_proof` is the receiver's canonical lowercase SHA-256 fingerprint hex from the pinned QR |
 | `pair.reject` | `reason` | receiver→sender | no stream setup |
 | `pair.revoke` | `peer_id` | either | closes active sessions scoped to peer |
 | `session.offer` | `role, capabilities, sdp` | sender→receiver | after grant and capture authorization |

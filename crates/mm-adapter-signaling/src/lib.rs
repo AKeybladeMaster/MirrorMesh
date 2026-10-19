@@ -5,11 +5,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use mm_domain::{DeviceId, SessionId, TrustedPeer, TrustedPeerGrants};
+use mm_domain::{
+    DeviceId, MessageId, PeerFingerprint, PeerGrant, SessionId, TrustedPeer, TrustedPeerGrants,
+};
 use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, TrustedPeerPort};
 use mm_protocol::{
-    EnvelopeHeader, MAX_ENVELOPE_BYTES, MessageKind, ProtocolError, SequenceTracker,
-    ValidatedMessage, parse_message,
+    EnvelopeHeader, MAX_ENVELOPE_BYTES, MessageKind, PairApprove, PairReject, ProtocolError,
+    SequenceTracker, ValidatedMessage, encode_pair_approve, encode_pair_reject, parse_message,
 };
 use mm_runtime::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -55,24 +57,65 @@ impl PendingPairingConnection {
         approved_grants: TrustedPeerGrants,
         now_monotonic_ms: u64,
         paired_at_unix_ms: u64,
-    ) -> Result<(TrustedPeer, PairingConnection), PairingRuntimeError>
+    ) -> Result<(TrustedPeer, PairingConnection), WssApprovalError>
     where
         P: TrustedPeerPort,
         I: LocalPairingIdentityPort + PairingIdentityPort,
     {
         let Self {
             admitted,
-            connection,
+            mut connection,
         } = self;
-        let peer = runtime.approve(
-            admitted,
-            approved_grants,
-            now_monotonic_ms,
-            paired_at_unix_ms,
-        )?;
+        let peer = runtime
+            .approve(
+                admitted,
+                approved_grants,
+                now_monotonic_ms,
+                paired_at_unix_ms,
+            )
+            .map_err(WssApprovalError::Runtime)?;
+        connection
+            .send_pairing_approval(&peer, runtime.local_fingerprint(), paired_at_unix_ms)
+            .map_err(WssApprovalError::Control)?;
         Ok((peer, connection))
     }
+
+    /// Sends an explicit rejection decision without persisting trust, then closes the connection.
+    pub fn reject(mut self, reason: &str, sent_at_ms: u64) -> Result<(), WssControlChannelError> {
+        let payload = PairReject {
+            reason: reason.to_owned(),
+        };
+        let frame = encode_pair_reject(random_message_id()?, 1, sent_at_ms, &payload)?;
+        let text = String::from_utf8(frame)
+            .map_err(|_| WssControlChannelError::Protocol(ProtocolError::InvalidUtf8))?;
+        self.connection
+            .websocket
+            .send(Message::text(text))
+            .map_err(WssControlChannelError::WebSocket)?;
+        self.connection
+            .websocket
+            .close(None)
+            .map_err(WssControlChannelError::WebSocket)
+    }
 }
+
+/// A pairing approval can be persisted successfully even if its response cannot be delivered.
+#[derive(Debug)]
+pub enum WssApprovalError {
+    Runtime(PairingRuntimeError),
+    Control(WssControlChannelError),
+}
+
+impl fmt::Display for WssApprovalError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Runtime(error) => write!(formatter, "pairing approval failed: {error}"),
+            Self::Control(error) => write!(formatter, "approved peer response failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for WssApprovalError {}
 
 /// A live WSS connection that retains its listener capacity slot until dropped.
 pub struct PairingConnection {
@@ -80,6 +123,7 @@ pub struct PairingConnection {
     websocket: PendingPairingWebSocket,
     inbound_sequences: ControlSequenceState,
     outbound_sequences: ControlSequenceState,
+    control_ready: bool,
     _slot: PendingConnectionSlot,
 }
 
@@ -94,6 +138,7 @@ impl PairingConnection {
             websocket,
             inbound_sequences: ControlSequenceState::new(),
             outbound_sequences: ControlSequenceState::new(),
+            control_ready: false,
             _slot: slot,
         }
     }
@@ -112,6 +157,7 @@ impl PairingConnection {
         &mut self,
         frame: &[u8],
     ) -> Result<EnvelopeHeader, WssControlChannelError> {
+        self.ensure_control_ready()?;
         let message = parse_post_approval_control_frame(frame)?;
         self.outbound_sequences
             .accept(self.peer_id, &message.header)?;
@@ -129,6 +175,7 @@ impl PairingConnection {
     /// This is blocking I/O and belongs on a dedicated worker. Ping frames are answered by
     /// flushing the WebSocket; binary frames are never accepted as protocol messages.
     pub fn receive_control_message(&mut self) -> Result<ValidatedMessage, WssControlChannelError> {
+        self.ensure_control_ready()?;
         loop {
             let frame = match self.websocket.read() {
                 Ok(Message::Text(text)) => text,
@@ -168,6 +215,54 @@ impl PairingConnection {
             .close(None)
             .map_err(WssControlChannelError::WebSocket)
     }
+
+    fn send_pairing_approval(
+        &mut self,
+        trusted_peer: &TrustedPeer,
+        local_fingerprint: PeerFingerprint,
+        sent_at_ms: u64,
+    ) -> Result<(), WssControlChannelError> {
+        if self.control_ready {
+            return Err(WssControlChannelError::AlreadyApproved);
+        }
+        let grants = [
+            (PeerGrant::View, "view"),
+            (PeerGrant::Send, "send"),
+            (PeerGrant::Annotate, "annotate"),
+        ]
+        .into_iter()
+        .filter(|(grant, _)| trusted_peer.grants().allows(*grant))
+        .map(|(_, value)| value.to_owned())
+        .collect();
+        let payload = PairApprove {
+            accepted_grants: grants,
+            peer_identity_proof: local_fingerprint.to_hex(),
+        };
+        let frame = encode_pair_approve(random_message_id()?, 1, sent_at_ms, &payload)?;
+        let text = String::from_utf8(frame)
+            .map_err(|_| WssControlChannelError::Protocol(ProtocolError::InvalidUtf8))?;
+        self.websocket
+            .send(Message::text(text))
+            .map_err(WssControlChannelError::WebSocket)?;
+        self.control_ready = true;
+        Ok(())
+    }
+
+    fn ensure_control_ready(&self) -> Result<(), WssControlChannelError> {
+        if self.control_ready {
+            Ok(())
+        } else {
+            Err(WssControlChannelError::NotApproved)
+        }
+    }
+}
+
+fn random_message_id() -> Result<MessageId, WssControlChannelError> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).map_err(|_| WssControlChannelError::RandomnessUnavailable)?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(MessageId::from_bytes(bytes))
 }
 
 /// Errors from the authenticated, post-approval WSS control channel.
@@ -177,6 +272,9 @@ pub enum WssControlChannelError {
     WebSocket(WebSocketError),
     UnexpectedMessageKind,
     UnexpectedBinaryMessage,
+    NotApproved,
+    AlreadyApproved,
+    RandomnessUnavailable,
     Closed,
 }
 
@@ -190,6 +288,15 @@ impl fmt::Display for WssControlChannelError {
             }
             Self::UnexpectedBinaryMessage => {
                 formatter.write_str("binary WebSocket messages are not control messages")
+            }
+            Self::NotApproved => {
+                formatter.write_str("pairing approval has not completed on this connection")
+            }
+            Self::AlreadyApproved => {
+                formatter.write_str("pairing approval has already been sent on this connection")
+            }
+            Self::RandomnessUnavailable => {
+                formatter.write_str("operating-system randomness is unavailable")
             }
             Self::Closed => formatter.write_str("WSS control connection is closed"),
         }

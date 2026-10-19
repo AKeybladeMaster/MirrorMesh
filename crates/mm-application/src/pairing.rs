@@ -270,6 +270,11 @@ impl<P: TrustedPeerPort, I: PairingIdentityPort> PairingCoordinator<P, I> {
         }
     }
 
+    /// Returns the public identity fingerprint captured when this coordinator was created.
+    pub const fn local_fingerprint(&self) -> PeerFingerprint {
+        self.local_fingerprint
+    }
+
     /// Create a user-displayable QR URI for a previously approved numeric endpoint.
     pub fn create_invitation(
         &mut self,
