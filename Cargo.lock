@@ -1183,6 +1183,8 @@ dependencies = [
  "mm-adapter-identity",
  "mm-domain",
  "mm-ports",
+ "mm-runtime",
+ "mm-store",
  "secret-service",
  "zeroize",
 ]
@@ -1252,6 +1254,7 @@ dependencies = [
  "flutter_rust_bridge",
  "jni",
  "mm-adapter-android",
+ "mm-adapter-linux",
  "mm-adapter-win",
  "mm-domain",
  "mm-runtime",

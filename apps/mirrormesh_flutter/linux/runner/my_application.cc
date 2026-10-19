@@ -1,18 +1,96 @@
 #include "my_application.h"
 
+#include <cstdint>
+#include <cstddef>
+#include <memory>
+
 #include <flutter_linux/flutter_linux.h>
+#include <flutter_linux/fl_method_call.h>
+#include <flutter_linux/fl_method_channel.h>
+#include <flutter_linux/fl_method_response.h>
+#include <flutter_linux/fl_standard_method_codec.h>
+#include <flutter_linux/fl_value.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
 
+extern "C" int32_t mirrormesh_linux_prepare_pairing_runtime(
+    uint8_t* device_id_out,
+    size_t device_id_capacity);
+
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* pairing_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+struct PairingRuntimeReply {
+  FlMethodCall* method_call;
+  int32_t status;
+  uint8_t device_id[16];
+};
+
+static gboolean respond_pairing_runtime(gpointer user_data) {
+  std::unique_ptr<PairingRuntimeReply> reply(
+      static_cast<PairingRuntimeReply*>(user_data));
+  g_autoptr(FlMethodResponse) response = nullptr;
+
+  if (reply->status == 0) {
+    g_autofree gchar* device_id = g_strdup_printf(
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        reply->device_id[0], reply->device_id[1], reply->device_id[2],
+        reply->device_id[3], reply->device_id[4], reply->device_id[5],
+        reply->device_id[6], reply->device_id[7], reply->device_id[8],
+        reply->device_id[9], reply->device_id[10], reply->device_id[11],
+        reply->device_id[12], reply->device_id[13], reply->device_id[14],
+        reply->device_id[15]);
+    g_autoptr(FlValue) result = fl_value_new_string(device_id);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "pairing_runtime_unavailable",
+        "Linux could not open local pairing storage.", nullptr));
+  }
+
+  g_autoptr(GError) error = nullptr;
+  if (!fl_method_call_respond(reply->method_call, response, &error)) {
+    g_warning("Failed to return Linux pairing status: %s", error->message);
+  }
+  g_object_unref(reply->method_call);
+  return G_SOURCE_REMOVE;
+}
+
+static gpointer initialize_pairing_runtime(gpointer user_data) {
+  auto* reply = static_cast<PairingRuntimeReply*>(user_data);
+  reply->status = mirrormesh_linux_prepare_pairing_runtime(
+      reply->device_id, sizeof(reply->device_id));
+  g_main_context_invoke(nullptr, respond_pairing_runtime, reply);
+  return nullptr;
+}
+
+static void pairing_method_call_cb(FlMethodChannel* channel,
+                                   FlMethodCall* method_call,
+                                   gpointer user_data) {
+  (void)channel;
+  (void)user_data;
+  if (g_strcmp0(fl_method_call_get_name(method_call),
+                "preparePairingRuntime") != 0) {
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  auto* reply = new PairingRuntimeReply{
+      FL_METHOD_CALL(g_object_ref(method_call)), 2, {0}};
+  GThread* worker = g_thread_new(
+      "mirrormesh-pairing-runtime", initialize_pairing_runtime, reply);
+  g_thread_unref(worker);
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -75,6 +153,14 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  g_clear_object(&self->pairing_channel);
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->pairing_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "com.mirrormesh/linux_pairing", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->pairing_channel, pairing_method_call_cb, nullptr, nullptr);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -121,6 +207,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->pairing_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

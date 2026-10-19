@@ -122,6 +122,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_custom_target(mirrormesh_rust_bridge_linux
     DEPENDS "${MIRRORMESH_FFI_SO}")
   add_dependencies(${BINARY_NAME} mirrormesh_rust_bridge_linux)
+  target_link_libraries(${BINARY_NAME} PRIVATE "${MIRRORMESH_FFI_SO}")
   install(FILES "${MIRRORMESH_FFI_SO}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)

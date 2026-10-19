@@ -7,6 +7,7 @@ import 'android_pairing_bootstrap.dart';
 import 'annotation_geometry.dart';
 import 'annotation_overlay.dart';
 import 'ios_pairing_bootstrap.dart';
+import 'linux_pairing_bootstrap.dart';
 import 'rust_session_status.dart';
 import 'windows_pairing_bootstrap.dart';
 
@@ -249,6 +250,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       final deviceId = switch (Platform.operatingSystem) {
         'android' => await const AndroidPairingBootstrap().prepare(),
         'ios' => await const IosPairingBootstrap().prepare(),
+        'linux' => await const LinuxPairingBootstrap().prepare(),
         'windows' => await const WindowsPairingBootstrap().prepare(),
         _ => throw PlatformException(
           code: 'pairing_runtime_unsupported',
@@ -801,7 +803,10 @@ class _DevicesPage extends StatelessWidget {
           title: 'Live pairing is not available yet',
           message: 'Network discovery, identity verification, trusted-device storage, and revocation are not implemented in this shell.',
         ),
-        if (Platform.isWindows || Platform.isAndroid || Platform.isIOS) ...[
+        if (Platform.isLinux ||
+            Platform.isWindows ||
+            Platform.isAndroid ||
+            Platform.isIOS) ...[
           const SizedBox(height: 16),
           Card(
             child: Padding(
@@ -815,7 +820,9 @@ class _DevicesPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'This opens the local ${Platform.isWindows
+                    'This opens the local ${Platform.isLinux
+                        ? 'Linux'
+                        : Platform.isWindows
                         ? 'Windows'
                         : Platform.isIOS
                         ? 'iOS'
@@ -824,7 +831,9 @@ class _DevicesPage extends StatelessWidget {
                   const SizedBox(height: 12),
                   FilledButton.icon(
                     key: Key(
-                      Platform.isWindows
+                      Platform.isLinux
+                          ? 'prepare-linux-pairing-button'
+                          : Platform.isWindows
                           ? 'prepare-windows-pairing-button'
                           : Platform.isIOS
                           ? 'prepare-ios-pairing-button'

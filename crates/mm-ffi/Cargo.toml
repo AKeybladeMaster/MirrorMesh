@@ -17,6 +17,9 @@ mm-adapter-android.workspace = true
 jni.workspace = true
 ndk-context.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+mm-adapter-linux.workspace = true
+
 [target.'cfg(target_os = "windows")'.dependencies]
 mm-adapter-win.workspace = true
 
