@@ -22,6 +22,8 @@
 
 The pairing runtime now reserves a per-source attempt before proof verification and keeps the source address attached through explicit approval. This remains a proposed security/API candidate; no signaling listener or network pairing flow is implemented.
 
+A native Rustls TLS 1.3 raw-public-key pinning candidate now binds the receiver’s presented Ed25519 key to the pairing QR fingerprint. Its in-memory handshakes pass, but no OS identity adapter implements its TLS signing port, and no socket listener or app startup uses it. Browser WSS still requires a normally trusted HTTPS endpoint.
+
 ## Vision
 
 Mirror a computer, phone or tablet to another supported device on an authorized LAN connection; control the session, take immediate snapshots, annotate over received video, and display it on TVs with a supported receiver. Work offline on supported native receivers, with an optional online HTTPS service for TV browser pairing.

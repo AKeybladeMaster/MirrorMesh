@@ -1,6 +1,6 @@
 # MirrorMesh session context
 
-Updated: 2026-10-18
+Updated: 2026-10-19
 
 ## Active objective and user direction
 
@@ -328,3 +328,15 @@ The session credit percentage is not exposed to this agent, so the 98% threshold
 - Final checks on Rust 1.99.1: workspace format, strict Clippy, full locked/offline all-feature tests (141 unit +26 integration +doc tests), and `git diff --check` pass. Focused application/runtime tests pass on Rust 1.99.1 and 1.85 (15 application +17 runtime unit +6 pairing/SQLite integration +1 revocation integration). GNU/Linux `mm-runtime` target checks pass on both toolchains; no Linux runtime ran.
 - Task 17 is complete on `task_17`: feature commit `41606a1 feat(core): create signed pairing proofs` and handoff commit `500604d docs: record Task 17 pairing proof handoff` are pushed to `origin/task_17`. `git status --short --branch` is clean and the branch tracks `origin/task_17`. Keep the final `dev` merge deferred.
 - The user asked to pause work for tonight after pushing and save the current state. The project Goal remains `paused`; the Goal API has no resume operation, and session-credit percentage is not exposed. When resumed, continue with the authenticated signaling listener boundary. First prepare its patch plan and resolve TLS peer identity / certificate handling via authoritative API/security requirements; then implement only a reviewed candidate without weakening TLS or claiming end-to-end evidence.
+
+## Continued implementation: native TLS 1.3 raw-public-key pinning (2026-10-19)
+
+- Resumed from clean pushed `task_17` at `d6e4a3e` and created `task_18` as a separate CORE branch.
+- Added `LocalTlsIdentityPort`, separate from the pairing-proof signing interface. Added `mm-adapter-tls` with Rustls 0.23.46 and the `ring` 0.17.14 provider, pinned in `Cargo.lock`. The server advertises the same Ed25519 identity used by the QR fingerprint as an RFC 7250 raw public key; the native client hashes the 32 raw key bytes, checks the validated QR fingerprint, and verifies TLS 1.3 CertificateVerify.
+- TLS 1.2, client session resumption, server session storage/tickets, and early data are disabled. Seven in-memory handshake/parser tests cover matching pin success and rejection of a wrong pin, malformed SPKI, non-Ed25519 key, signer failure, signer/public-key mismatch, and application-shaped signing input. The signer checks the exact TLS 1.3 server CertificateVerify context and supported transcript-hash lengths before forwarding to the identity port. The adapter does not call Rustls `CertifiedKey::keys_match()` because that helper parses X.509; the actual pinned TLS handshake verifies the RPK signer.
+- Proposed ADR-0023 and protocol/security/implementation/status/verification/device-compatibility/Task-03 docs now describe the candidate. The browser fallback remains a separately trusted WSS endpoint. No socket, WebSocket, browser, OS key store, app startup, pairing flow, device, or network was exercised; no OS adapter implements the TLS port yet.
+- Verification on Rust 1.99.1: workspace format, strict Clippy, and locked/offline all-feature tests pass (148 unit tests, 26 integration tests, doc tests). Focused `mm-adapter-tls` tests pass on Rust 1.85 (seven tests). `cargo metadata --locked --offline --format-version 1` passes; dependency license metadata was reviewed and ISC was added to `deny.toml`. The `cargo-deny` executable is not installed, so its full gate remains unrun.
+- GNU/Linux cross-target checks fail because the Windows runner lacks `x86_64-linux-gnu-gcc`; the Android target check lacks Android NDK clang. iOS cross-build was not available on this Windows runner. No platform build has been claimed.
+- `git diff --check` passes and final review is complete. Feature commit b4e38f2 is complete; documentation handoff and push to `origin/task_18` remain outstanding. Do not merge into `dev`; keep final merge for completion of all tasks.
+- Next single code task: implement the bounded WSS listener around the TLS config. Obtain `peer_addr`, reserve source admission before frame parsing, route only `pair.begin` through `PairingRuntime`, and surface pending approval to user UI. Add a local two-process exchange before any end-to-end claim.
+- Project Goal remains `paused` because no resume API exists; continue user-requested repository work without claiming the Goal timer changed. Session-credit percentage is not exposed.

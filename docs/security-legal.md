@@ -49,7 +49,7 @@ The Android TV debug workflow pins Syft 1.50.0 to inspect the exact APK file and
 | Threat | Mitigation | Verification |
 |---|---|---|
 | Unauthorized stream startup | OS consent on sender and explicit paired receiver acceptance | test no stream before permission |
-| LAN spoofing, MITM | cryptographic peer identity + pinned fingerprint from QR; DTLS/SRTP media; TLS signaling | fake cert/identity blocked |
+| LAN spoofing, MITM | cryptographic peer identity + pinned fingerprint from QR; DTLS/SRTP media; TLS signaling | matching RPK handshake passes; wrong pin, malformed key, mismatched signer, and signer failure abort in Rust tests; no socket test |
 | Replayed QR code | short expiry (e.g. 120s), one-time nonce and replay cache | reusing code rejected |
 | Brute force numeric PIN | only authenticated PAKE + throttling + lockout | wrong-code budget/rate test |
 | Cross-session abuse | per-session access tokens/scopes, nonce, session-id binding | message from wrong session rejected |
@@ -69,6 +69,12 @@ QR encodes `mirrormesh://pair?v=1&host=<numeric-IP>&port=8765&device=<uuid>&fp=<
 The current manual-address parser accepts numeric IPv4 and bracketed IPv6 only, and only when the caller supplies the port in its explicitly user-approved list. It never resolves a hostname. Do not add hostname-based manual connections until the network adapter pins a single resolution result for the connection, rejects redirects, and verifies the expected peer fingerprint; the parser alone does not authenticate or connect to a peer.
 
 **Cloud TV pairing (optional):** a narrowly scoped HTTPS broker maps short-lived room codes to signaling messages, authenticates both ends, and never handles video plaintext. The TV browser uses HTTPS origin; ICE tries direct local UDP. TURN is optional and relay bandwidth incurs costs. Explain cloud dependence in UI and privacy policy.
+
+### Native TLS identity pinning candidate
+
+Proposed [ADR-0023](adr/0023-tls13-raw-public-key-pinning-candidate.md) adds a native TLS 1.3 raw-public-key verifier that pins the receiver’s Ed25519 identity to the QR fingerprint and checks TLS CertificateVerify. It rejects malformed or different keys and disables TLS resumption, server tickets, and early data. This is not wired to a socket listener or platform startup; no OS key store or network was exercised. `LocalTlsIdentityPort` is separate from the pairing-proof signer and must keep the private key in the platform adapter. Security and cross-track review remain required.
+
+The adapter is intended for native Rust clients. Browser WSS fallback requires an ordinary certificate trusted by the browser, such as a hosted endpoint; the application must not disable browser certificate validation. The local QR-pinned raw-key path does not establish browser compatibility.
 
 ## External data / user controls
 
