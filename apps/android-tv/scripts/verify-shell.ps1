@@ -148,21 +148,23 @@ if ($appGradle -notmatch 'androidx\.test:runner:1\.7\.0' -or
 }
 $loopbackTestPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/TvWebRtcLoopbackIntegrationTest.java'
 $syntheticCapturerPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/SyntheticVideoCapturer.java'
-$loopbackSignalPath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/LoopbackApprovedSignalingChannel.java'
-foreach ($testFile in @($loopbackTestPath, $syntheticCapturerPath, $loopbackSignalPath)) {
+$loopbackBridgePath = Join-Path $appRoot 'app/src/androidTest/java/com/mirrormesh/tv/LoopbackNativeApprovedControlBridge.java'
+foreach ($testFile in @($loopbackTestPath, $syntheticCapturerPath, $loopbackBridgePath)) {
     if (!(Test-Path -LiteralPath $testFile)) {
         throw "The Android native WebRTC loopback test source is missing: $testFile."
     }
 }
 $loopbackTest = Get-Content -LiteralPath $loopbackTestPath -Raw
 if ($loopbackTest -notmatch 'createWithDecoderFactoryForTest' -or
+    $loopbackTest -notmatch 'new RustApprovedSignalingChannel' -or
+    $loopbackTest -notmatch 'LoopbackNativeApprovedControlBridge' -or
     $loopbackTest -notmatch 'SoftwareVideoEncoderFactory' -or
     $loopbackTest -notmatch 'SoftwareVideoDecoderFactory' -or
     $loopbackTest -notmatch 'PlatformSoftwareVideoDecoderFactory' -or
     $loopbackTest -notmatch 'Assume\.assumeTrue' -or
     $loopbackTest -notmatch 'requestScreenshotCapture\(' -or
     $loopbackTest -notmatch 'frameReceived\.await\(') {
-    throw 'The Android instrumentation test must exercise H.264, a decoded receiver frame, and explicit screenshot capture.'
+    throw 'The Android instrumentation test must exercise the production signaling adapter, H.264, a decoded receiver frame, and explicit screenshot capture.'
 }
 $syntheticCapturer = Get-Content -LiteralPath $syntheticCapturerPath -Raw
 if ($syntheticCapturer -notmatch 'JavaI420Buffer\.allocate\(' -or

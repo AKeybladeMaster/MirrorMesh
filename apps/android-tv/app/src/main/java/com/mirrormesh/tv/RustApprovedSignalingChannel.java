@@ -31,8 +31,51 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
         }
     }
 
+    interface NativeApprovedControlBridge {
+        String pollControlMessage(long connectionId) throws InterruptedException;
+
+        String sendSessionAnswer(long connectionId, String sdp);
+
+        String sendSessionIce(
+                long connectionId,
+                String mediaId,
+                int mediaLineIndex,
+                String candidate);
+
+        boolean closeControlChannel(long connectionId);
+    }
+
+    private static final class JniApprovedControlBridge
+            implements NativeApprovedControlBridge {
+        @Override
+        public String pollControlMessage(long connectionId) {
+            return NativePairingBridge.pollControlMessage(connectionId);
+        }
+
+        @Override
+        public String sendSessionAnswer(long connectionId, String sdp) {
+            return NativePairingBridge.sendSessionAnswer(connectionId, sdp);
+        }
+
+        @Override
+        public String sendSessionIce(
+                long connectionId,
+                String mediaId,
+                int mediaLineIndex,
+                String candidate) {
+            return NativePairingBridge.sendSessionIce(
+                    connectionId, mediaId, mediaLineIndex, candidate);
+        }
+
+        @Override
+        public boolean closeControlChannel(long connectionId) {
+            return NativePairingBridge.closeControlChannel(connectionId);
+        }
+    }
+
     private final long connectionId;
     private final String fingerprint;
+    private final NativeApprovedControlBridge nativeBridge;
     private final ExecutorService receiveWorker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Object listenerLock = new Object();
@@ -49,11 +92,22 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
     private volatile boolean initialOfferReceived;
 
     RustApprovedSignalingChannel(long connectionId, String fingerprint) {
+        this(connectionId, fingerprint, new JniApprovedControlBridge());
+    }
+
+    RustApprovedSignalingChannel(
+            long connectionId,
+            String fingerprint,
+            NativeApprovedControlBridge nativeBridge) {
         if (connectionId <= 0 || fingerprint == null || fingerprint.length() != 64) {
             throw new IllegalArgumentException("An approved connection and peer fingerprint are required.");
         }
+        if (nativeBridge == null) {
+            throw new IllegalArgumentException("The approved native control bridge is required.");
+        }
         this.connectionId = connectionId;
         this.fingerprint = fingerprint;
+        this.nativeBridge = nativeBridge;
     }
 
     void start(TextListener onInitialOffer) {
@@ -81,12 +135,12 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
 
     @Override
     public void sendAnswer(String sdp) {
-        requireSuccess(NativePairingBridge.sendSessionAnswer(connectionId, sdp));
+        requireSuccess(nativeBridge.sendSessionAnswer(connectionId, sdp));
     }
 
     @Override
     public void sendLocalIceCandidate(String mediaId, int mediaLineIndex, String candidate) {
-        requireSuccess(NativePairingBridge.sendSessionIce(
+        requireSuccess(nativeBridge.sendSessionIce(
                 connectionId, mediaId, mediaLineIndex, candidate));
     }
 
@@ -168,7 +222,7 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
         receiveWorker.shutdownNow();
         clearListeners();
         try {
-            return NativePairingBridge.closeControlChannel(connectionId);
+            return nativeBridge.closeControlChannel(connectionId);
         } catch (LinkageError error) {
             Log.w(TAG, "Rust control-channel close failed", error);
             return false;
@@ -179,7 +233,7 @@ final class RustApprovedSignalingChannel implements ApprovedSignalingChannel {
         while (!closed.get()) {
             try {
                 JSONObject message = requireSuccess(
-                        NativePairingBridge.pollControlMessage(connectionId));
+                        nativeBridge.pollControlMessage(connectionId));
                 if (message.optBoolean("pending")) {
                     continue;
                 }

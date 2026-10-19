@@ -76,7 +76,7 @@ public final class TvWebRtcLoopbackIntegrationTest {
         AtomicReference<String> receiverFailure = new AtomicReference<>();
         AtomicReference<SurfaceViewRenderer> rendererReference = new AtomicReference<>();
         AtomicReference<TvWebRtcReceiver> receiverReference = new AtomicReference<>();
-        AtomicReference<LoopbackApprovedSignalingChannel> signalingReference =
+        AtomicReference<LoopbackNativeApprovedControlBridge> bridgeReference =
                 new AtomicReference<>();
         AtomicReference<PeerConnection> senderReference = new AtomicReference<>();
 
@@ -85,9 +85,9 @@ public final class TvWebRtcLoopbackIntegrationTest {
                 new PeerConnection.Observer() {
                     @Override
                     public void onIceCandidate(IceCandidate candidate) {
-                        LoopbackApprovedSignalingChannel signaling = signalingReference.get();
-                        if (signaling != null) {
-                            signaling.onSenderIceCandidate(candidate);
+                        LoopbackNativeApprovedControlBridge bridge = bridgeReference.get();
+                        if (bridge != null) {
+                            bridge.onSenderIceCandidate(candidate);
                         }
                     }
 
@@ -145,9 +145,13 @@ public final class TvWebRtcLoopbackIntegrationTest {
                 h264SendCodecs.isEmpty());
         senderVideo.setCodecPreferences(h264SendCodecs);
 
-        LoopbackApprovedSignalingChannel signaling =
-                new LoopbackApprovedSignalingChannel(sender);
-        signalingReference.set(signaling);
+        LoopbackNativeApprovedControlBridge bridge =
+                new LoopbackNativeApprovedControlBridge(sender);
+        bridgeReference.set(bridge);
+        RustApprovedSignalingChannel signaling = new RustApprovedSignalingChannel(
+                1L,
+                "a".repeat(64),
+                bridge);
         capturer.initialize(
                 surfaceTextureHelper,
                 context,
@@ -210,7 +214,19 @@ public final class TvWebRtcLoopbackIntegrationTest {
         try {
             SessionDescription offer = createOffer(sender);
             setDescription(sender, offer);
-            receiver.start(signaling, offer.description);
+            CountDownLatch offerReceived = new CountDownLatch(1);
+            AtomicReference<String> receivedOffer = new AtomicReference<>();
+            bridge.sendOffer(offer.description);
+            signaling.start(sdp -> {
+                receivedOffer.set(sdp);
+                offerReceived.countDown();
+            });
+            assertTrue(
+                    "production signaling adapter did not deliver the session offer",
+                    offerReceived.await(10, TimeUnit.SECONDS));
+            assertTrue("production signaling adapter changed the offer SDP",
+                    offer.description.equals(receivedOffer.get()));
+            receiver.start(signaling, receivedOffer.get());
             capturer.startCapture(WIDTH, HEIGHT, FRAMES_PER_SECOND);
 
             assertTrue(
@@ -232,13 +248,18 @@ public final class TvWebRtcLoopbackIntegrationTest {
                     "received frame screenshot has no JPEG marker",
                     new byte[] {(byte) 0xff, (byte) 0xd8},
                     new byte[] {screenshot.get()[0], screenshot.get()[1]});
-            signaling.answerApplied().get(10, TimeUnit.SECONDS);
+            bridge.answerApplied().get(10, TimeUnit.SECONDS);
+            assertTrue("TV adapter did not send ICE through the native bridge",
+                    bridge.localIceCandidatesSent() > 0);
+            assertTrue("sender did not send ICE through the production signaling adapter",
+                    bridge.senderIceCandidatesSent() > 0);
         } finally {
             capturer.dispose();
             if (receiverReference.get() != null) {
                 InstrumentationRegistry.getInstrumentation().runOnMainSync(
                         () -> receiverReference.get().close());
             }
+            signaling.close();
             if (senderReference.get() != null) {
                 senderReference.get().close();
                 senderReference.get().dispose();

@@ -201,6 +201,20 @@ Task 50 changes no protocol or FFI schema. It is `SOURCE_IMPLEMENTED`; `BUILD_VE
 
 Task 51 changes the Windows Dart state enum/controller but no signaling schema, Rust FFI, permission, or capture API. It is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` remain pending. Proposed [ADR-0051](adr/0051-windows-peer-reconnect.md) records the bounded same-peer recovery behavior. See the [Task 51 brief](../codex/51-windows-peer-reconnect.md).
 
+## Task 52 verification — Android TV production signaling adapter loopback
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `gradle :app:connectedDebugAndroidTest -PmmAndroidAbi=x86_64` | unavailable (exit 1) | The command could not start because `gradle` is not installed; Android SDK/emulator are also unavailable. The Android TV workflow is configured to run the test on an API 35 x86_64 emulator. |
+| `gradle :app:assembleDebug` | unavailable (exit 1) | The command could not start because `gradle` is not installed; no APK was produced here. |
+| Instrumentation source | authored only | Synthetic I420 frames and real libwebrtc peers now pass offer/answer/ICE through `RustApprovedSignalingChannel`; its Rust JNI calls are replaced with a test-only bridge. The test asserts connection, H.264 decode, and explicit JPEG capture. |
+| `cargo fmt --all -- --check` | pass (exit 0) | Rust source and protocol were not changed in this task. |
+| `git diff --check` | pass (exit 0) | No whitespace errors; Git reports only configured LF-to-CRLF working-copy notices. |
+| Direct JDK TV state/policy/screenshot tests | pass (exit 0) | Six existing Java test classes compiled with `javac --release 17` and passed. They do not compile the Android signaling adapter or instrumentation test. |
+| Production authentication / Windows interoperability / hardware | not verified | The bridge double does not run the Rust WSS service, the Windows sender, hardware MediaCodec, or a physical TV. |
+
+Task 52 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` remain pending. It changes no wire protocol or shared session engine. See the [Task 52 brief](../codex/52-android-tv-production-signaling-loopback.md).
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |
