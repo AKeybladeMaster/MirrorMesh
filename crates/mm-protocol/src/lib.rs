@@ -248,7 +248,7 @@ pub struct SessionStart {
     pub source_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionStop {
     pub reason: String,
@@ -568,6 +568,25 @@ pub fn encode_session_start(
 ) -> Result<Vec<u8>, ProtocolError> {
     encode_session_control(
         "session.start",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes an explicit sender-initiated session stop in the common v1 envelope.
+pub fn encode_session_stop(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionStop,
+) -> Result<Vec<u8>, ProtocolError> {
+    bounded_text(&payload.reason, 1, 128)?;
+    encode_session_control(
+        "session.stop",
         message_id,
         session_id,
         sequence,
@@ -1015,9 +1034,9 @@ mod tests {
     use super::{
         Capabilities, MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairApprove,
         PairBegin, PairReject, ProtocolError, SequenceTracker, SessionAnswer, SessionIce,
-        SessionOffer, SessionStart, encode_pair_approve, encode_pair_begin, encode_pair_reject,
-        encode_session_answer, encode_session_ice, encode_session_offer, encode_session_start,
-        parse_message, preflight_json, validate_version,
+        SessionOffer, SessionStart, SessionStop, encode_pair_approve, encode_pair_begin,
+        encode_pair_reject, encode_session_answer, encode_session_ice, encode_session_offer,
+        encode_session_start, encode_session_stop, parse_message, preflight_json, validate_version,
     };
     use mm_domain::{DeviceId, MessageId, SessionId};
 
@@ -1237,6 +1256,39 @@ mod tests {
         for source_id in [String::new(), "x".repeat(129), "window\nname".to_owned()] {
             assert_eq!(
                 encode_session_start(message_id, session_id, 2, 301, &SessionStart { source_id },),
+                Err(ProtocolError::InvalidPayload)
+            );
+        }
+    }
+
+    #[test]
+    fn encodes_session_stop_only_with_bounded_reason() {
+        let session_id = SessionId::parse("8b3d8788-1476-4aae-a287-334a428b5b6f").unwrap();
+        let stop = SessionStop {
+            reason: "user-disconnected".to_owned(),
+        };
+        let message_id = MessageId::from_bytes(id(0xd5));
+        let frame = encode_session_stop(message_id, session_id, 3, 302, &stop).unwrap();
+        let parsed = parse_message(&frame).unwrap();
+
+        assert_eq!(parsed.header.kind, super::MessageKind::SessionStop);
+        assert_eq!(parsed.header.message_id, message_id);
+        assert_eq!(parsed.header.session_id, Some(session_id));
+        assert_eq!(parsed.header.sequence, 3);
+        match parsed.payload {
+            MessagePayload::SessionStop(parsed) => {
+                assert_eq!(parsed.reason, "user-disconnected");
+            }
+            _ => panic!("encoded stop parsed as a different message"),
+        }
+
+        assert_eq!(
+            encode_session_stop(message_id, session_id, 0, 302, &stop),
+            Err(ProtocolError::InvalidSequence)
+        );
+        for reason in [String::new(), "x".repeat(129), "user\nname".to_owned()] {
+            assert_eq!(
+                encode_session_stop(message_id, session_id, 3, 302, &SessionStop { reason }),
                 Err(ProtocolError::InvalidPayload)
             );
         }

@@ -48,6 +48,7 @@ final class WindowsSenderSessionController {
   Timer? _pollTimer;
   Timer? _statsTimer;
   Completer<void>? _localIceDrainComplete;
+  Future<void>? _stopOperation;
   String? _sessionId;
   int? _requestId;
   int _pendingLocalIceBytes = 0;
@@ -59,6 +60,7 @@ final class WindowsSenderSessionController {
   bool _sessionStartQueued = false;
   bool _transportReady = false;
   bool _starting = false;
+  bool _stopping = false;
   bool _closed = false;
   Object? _lastError;
 
@@ -81,7 +83,11 @@ final class WindowsSenderSessionController {
     required int requestId,
     required String sourceId,
   }) async {
-    if (_closed || _starting || _sessionId != null || _engine != null) {
+    if (_closed ||
+        _starting ||
+        _stopping ||
+        _sessionId != null ||
+        _engine != null) {
       throw StateError('Windows sender session is already active or closed.');
     }
     _starting = true;
@@ -89,6 +95,7 @@ final class WindowsSenderSessionController {
     _sessionStartInFlight = false;
     _sessionStartQueued = false;
     _transportReady = false;
+    _stopOperation = null;
     _lastError = null;
     _setState(WindowsSenderSessionState.negotiating);
     final engine = FlutterWebRtcEngine(factory: _engineFactory);
@@ -138,10 +145,41 @@ final class WindowsSenderSessionController {
     }
   }
 
-  Future<void> stop() async {
-    if (_closed) return;
-    await _closePeer();
-    await _closePairingChannel();
+  Future<void> stop() {
+    if (_closed) return Future<void>.value();
+    final stopping = _stopOperation;
+    if (stopping != null) return stopping;
+    _stopping = true;
+    final operation = _stopAndCleanup();
+    final completed = operation.whenComplete(() => _stopping = false);
+    _stopOperation = completed;
+    return completed;
+  }
+
+  Future<void> _stopAndCleanup() async {
+    final requestId = _requestId;
+    final sessionActive = _sessionId != null;
+    try {
+      await _closePeer();
+    } catch (error) {
+      _lastError = error;
+    }
+    if (requestId != null && sessionActive) {
+      try {
+        await pairing.stopSenderSession(
+          requestId: requestId,
+          reason: 'user-disconnected',
+        );
+      } catch (error) {
+        // Local media must still stop if the control channel is already gone.
+        _lastError = error;
+      }
+    }
+    try {
+      await _closePairingChannel();
+    } catch (error) {
+      _lastError ??= error;
+    }
     _setState(WindowsSenderSessionState.stopped);
   }
 
@@ -347,6 +385,7 @@ final class WindowsSenderSessionController {
 
   Future<void> _closePairingChannel() async {
     final requestId = _requestId;
+    _requestId = null;
     if (requestId == null) return;
     try {
       await pairing.cancelSenderPairing(requestId);

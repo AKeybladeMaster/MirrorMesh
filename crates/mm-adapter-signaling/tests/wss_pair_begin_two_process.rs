@@ -12,7 +12,8 @@ use mm_ports::{
     LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError, TrustedPeerPort,
 };
 use mm_protocol::{
-    MessagePayload, SessionStart, encode_session_offer, encode_session_start, parse_message,
+    MessagePayload, SessionStart, SessionStop, encode_session_offer, encode_session_start,
+    encode_session_stop, parse_message,
 };
 use mm_runtime::{PairingRuntime, PairingRuntimeError};
 use mm_security::parse_pairing_qr;
@@ -238,7 +239,19 @@ fn run_server_child() {
                 }
                 _ => panic!("session start had a different payload"),
             }
-            println!("CONTROL_EXCHANGED=session.offer/session.answer/session.start");
+            let stop = connection
+                .receive_control_message()
+                .expect("receive the explicit sender disconnect message");
+            assert_eq!(stop.header.kind, mm_protocol::MessageKind::SessionStop);
+            assert_eq!(stop.header.session_id, offer.header.session_id);
+            assert_eq!(stop.header.sequence, start.header.sequence + 1);
+            match stop.payload {
+                MessagePayload::SessionStop(stop) => {
+                    assert_eq!(stop.reason, "user-disconnected");
+                }
+                _ => panic!("session stop had a different payload"),
+            }
+            println!("CONTROL_EXCHANGED=session.offer/session.answer/session.start/session.stop");
             std::io::stdout()
                 .flush()
                 .expect("flush control exchange result");
@@ -418,9 +431,26 @@ fn run_client_parent(decision: TestDecision) {
                 .connection
                 .send_control_message(&start)
                 .expect("send session start after the peer answer");
+            let stop = encode_session_stop(
+                mm_domain::MessageId::from_bytes([0xd6; 16]),
+                session_id,
+                sequence + 2,
+                sent_at_ms + 2,
+                &SessionStop {
+                    reason: "user-disconnected".to_owned(),
+                },
+            )
+            .expect("encode the explicit session stop");
+            approved
+                .connection
+                .send_control_message(&stop)
+                .expect("send session stop before closing the approved WSS channel");
             let exchanged_line =
                 read_prefixed_line(&mut output, &mut transcript, "CONTROL_EXCHANGED=");
-            assert_eq!(exchanged_line, "session.offer/session.answer/session.start");
+            assert_eq!(
+                exchanged_line,
+                "session.offer/session.answer/session.start/session.stop"
+            );
         }
         TestDecision::Cancel => {
             client.cancel();

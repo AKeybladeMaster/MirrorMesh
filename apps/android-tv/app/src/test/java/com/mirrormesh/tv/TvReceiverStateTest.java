@@ -34,6 +34,15 @@ public final class TvReceiverStateTest {
         failedStream.onFirstFramePresented();
         expect(true, failedStream.fail(), "streaming session can enter failed state");
         expect(TvReceiverState.Phase.FAILED, failedStream.phase(), "failed stream state");
+
+        TvReceiverState senderStoppedStream = new TvReceiverState();
+        senderStoppedStream.showAuthenticatedRequest();
+        senderStoppedStream.approve();
+        senderStoppedStream.beginConnecting();
+        senderStoppedStream.onFirstFramePresented();
+        expect(true, senderStoppedStream.disconnect(), "sender stop ends the active session");
+        expect(TvReceiverState.Phase.STOPPED, senderStoppedStream.phase(), "sender stop state");
+        expect(false, senderStoppedStream.beginReconnect(), "stopped session cannot reconnect");
         System.out.println("Android TV receiver lifecycle checks passed.");
     }
 

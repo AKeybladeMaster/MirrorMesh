@@ -116,6 +116,11 @@ if ($receiverSource -notmatch 'requestScreenshotCapture\(' -or
     $receiverSource -notmatch 'screenshotExecutor\.shutdownNow\(') {
     throw 'The receiver must capture one bounded decoded frame on request and close the snapshot worker.'
 }
+if ($receiverSource -notmatch 'setRemoteStopListener\(this::stopByRemoteSender\)' -or
+    $receiverSource -notmatch 'state\.disconnect\(' -or
+    $receiverSource -notmatch 'Sender disconnected') {
+    throw 'A remote sender stop must end the TV session normally and release its receiver resources.'
+}
 $videoActivityPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvVideoActivity.java'
 $videoActivitySource = Get-Content -LiteralPath $videoActivityPath -Raw
 if ($videoActivitySource -notmatch 'onScreenshotCaptured\(' -or
@@ -168,7 +173,7 @@ if (!(Test-Path -LiteralPath $approvedChannelPath)) {
     throw 'The Rust-backed approved signaling channel adapter is missing.'
 }
 $approvedChannel = Get-Content -LiteralPath $approvedChannelPath -Raw
-foreach ($requiredSignal in @('NativePairingBridge.pollControlMessage', 'NativePairingBridge.sendSessionAnswer', 'NativePairingBridge.sendSessionIce', 'MAX_BUFFERED_ICE_CANDIDATES', 'setRemoteIceCandidateListener', 'setRemoteStartListener', 'case "start"', 'source_id')) {
+foreach ($requiredSignal in @('NativePairingBridge.pollControlMessage', 'NativePairingBridge.sendSessionAnswer', 'NativePairingBridge.sendSessionIce', 'MAX_BUFFERED_ICE_CANDIDATES', 'setRemoteIceCandidateListener', 'setRemoteStartListener', 'setRemoteStopListener', 'case "start"', 'case "stop"', 'source_id')) {
     if ($approvedChannel -notmatch [regex]::Escape($requiredSignal)) {
         throw "The approved WebRTC signaling adapter is missing $requiredSignal."
     }
@@ -182,6 +187,7 @@ if ($nativePairing -notmatch 'try_receive_control_message' -or
     $nativePairing -notmatch 'MessagePayload::SessionOffer' -or
     $nativePairing -notmatch 'MessagePayload::SessionIce' -or
     $nativePairing -notmatch 'MessagePayload::SessionStart' -or
+    $nativePairing -notmatch 'MessagePayload::SessionStop' -or
     $nativePairing -notmatch 'PeerGrant::View') {
     throw 'Rust must validate the approved view grant and typed session offer/ICE before crossing JNI.'
 }

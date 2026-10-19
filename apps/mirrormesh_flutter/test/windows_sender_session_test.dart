@@ -44,6 +44,7 @@ void main() {
             return switch (call.method) {
               'beginSenderSession' => sessionId,
               'startSenderSession' => true,
+              'stopSenderSession' => true,
               'sendSenderSessionIce' => true,
               'pollSenderPairing' => <String, Object?>{
                 'state': WindowsSenderPairingState.approved.nativeValue,
@@ -119,12 +120,28 @@ void main() {
       });
       expect(controller.state, WindowsSenderSessionState.transportConnected);
 
+      await Future.wait(<Future<void>>[
+        controller.stop(),
+        controller.stop(),
+      ]);
       await controller.dispose();
       final statsPollsAfterClose = peer.statsPollCalls;
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(peer.statsPollCalls, statsPollsAfterClose);
       expect(peer.stopDesktopCaptureCalls, 1);
       expect(peer.closeCalls, 1);
+      final stopCallIndex = calls.indexWhere(
+        (call) => call.method == 'stopSenderSession',
+      );
+      final cancelCallIndex = calls.indexWhere(
+        (call) => call.method == 'cancelSenderPairing',
+      );
+      expect(stopCallIndex, greaterThanOrEqualTo(0));
+      expect(cancelCallIndex, greaterThan(stopCallIndex));
+      expect(calls[stopCallIndex].arguments, <String, Object?>{
+        'requestId': 41,
+        'reason': 'user-disconnected',
+      });
       expect(
         calls.where((call) => call.method == 'cancelSenderPairing'),
         hasLength(1),

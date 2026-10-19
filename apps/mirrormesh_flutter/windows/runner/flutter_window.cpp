@@ -21,6 +21,7 @@ constexpr char kPollSenderPairingMethod[] = "pollSenderPairing";
 constexpr char kCancelSenderPairingMethod[] = "cancelSenderPairing";
 constexpr char kBeginSenderSessionMethod[] = "beginSenderSession";
 constexpr char kStartSenderSessionMethod[] = "startSenderSession";
+constexpr char kStopSenderSessionMethod[] = "stopSenderSession";
 constexpr char kSendSenderSessionIceMethod[] = "sendSenderSessionIce";
 constexpr char kPollSenderSessionEventMethod[] = "pollSenderSessionEvent";
 constexpr char kPreparePairingRuntimeSymbol[] =
@@ -37,6 +38,8 @@ constexpr char kBeginSenderSessionSymbol[] =
     "mirrormesh_windows_begin_sender_session";
 constexpr char kStartSenderSessionSymbol[] =
     "mirrormesh_windows_start_sender_session";
+constexpr char kStopSenderSessionSymbol[] =
+    "mirrormesh_windows_stop_sender_session";
 constexpr char kSendSenderSessionIceSymbol[] =
     "mirrormesh_windows_send_sender_session_ice";
 constexpr char kPollSenderSessionEventSymbol[] =
@@ -187,6 +190,22 @@ int32_t StartSenderSession(uint64_t request_id, const std::string& source_id) {
   return start_session(
       request_id, reinterpret_cast<const uint8_t*>(source_id.data()),
       source_id.size());
+}
+
+int32_t StopSenderSession(uint64_t request_id, const std::string& reason) {
+  HMODULE rust_bridge = ::GetModuleHandleW(L"mm_ffi.dll");
+  if (rust_bridge == nullptr) {
+    return 2;
+  }
+  using StopSession = int32_t (*)(uint64_t, const uint8_t*, size_t);
+  auto stop_session = reinterpret_cast<StopSession>(
+      ::GetProcAddress(rust_bridge, kStopSenderSessionSymbol));
+  if (stop_session == nullptr) {
+    return 2;
+  }
+  return stop_session(
+      request_id, reinterpret_cast<const uint8_t*>(reason.data()),
+      reason.size());
 }
 
 int32_t PollSenderSessionEvent(uint64_t request_id, std::string* event_json) {
@@ -463,6 +482,28 @@ bool FlutterWindow::OnCreate() {
                               ? "The peer connection must be ready before capture starts."
                               : (status == 3 ? "The session start was already requested."
                                              : "Windows could not report the active source."));
+            return;
+          }
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
+
+        if (call.method_name() == kStopSenderSessionMethod) {
+          const auto request_id = ReadIntegerMapValue(call.arguments(), "requestId");
+          const auto reason = ReadStringMapValue(call.arguments(), "reason");
+          if (!request_id.has_value() || *request_id <= 0 || !reason.has_value()) {
+            result->Error("invalid_argument",
+                          "A pairing request ID and stop reason are required.");
+            return;
+          }
+          const int32_t status = StopSenderSession(
+              static_cast<uint64_t>(*request_id), *reason);
+          if (status != 0) {
+            result->Error(status == 5 ? "session_not_ready"
+                                     : "session_stop_unavailable",
+                          status == 5
+                              ? "There is no active sender session to stop."
+                              : "Windows could not send the session stop message.");
             return;
           }
           result->Success(flutter::EncodableValue(true));

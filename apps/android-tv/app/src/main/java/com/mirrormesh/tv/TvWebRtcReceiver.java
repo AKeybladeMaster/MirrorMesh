@@ -275,8 +275,18 @@ public final class TvWebRtcReceiver implements AutoCloseable {
             }
             close();
         });
-        channel.setRemoteStopListener(() -> fail("remote_session_stopped"));
+        channel.setRemoteStopListener(this::stopByRemoteSender);
         channel.setFailureListener(this::fail);
+    }
+
+    private void stopByRemoteSender() {
+        if (closed.get()) {
+            return;
+        }
+        if (state.disconnect()) {
+            listener.onStatus("Sender disconnected");
+        }
+        close();
     }
 
     private void reconnectWithOffer(String remoteOfferSdp) {

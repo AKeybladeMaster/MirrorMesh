@@ -2,18 +2,20 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mm_adapter_signaling::{PairingConnection, WssClientError, WssPairingClient};
 use mm_domain::{MessageId, PeerGrant, SessionId, TrustedPeerGrants};
 use mm_protocol::{
     Capabilities, MessagePayload, SessionAnswer, SessionIce, SessionOffer, SessionStart,
-    encode_session_ice, encode_session_offer, encode_session_start,
+    SessionStop, encode_session_ice, encode_session_offer, encode_session_start,
+    encode_session_stop,
 };
 
 use crate::{WindowsPairingIdentity, initialize_pairing_runtime};
 
 pub const MAX_PAIRING_INVITATION_BYTES: usize = 4096;
+pub const MAX_SESSION_STOP_REASON_BYTES: usize = 128;
 const ANDROID_TV_PAIRING_PORT: u16 = 8765;
 const LOCAL_DISPLAY_NAME: &str = "MirrorMesh Windows PC";
 
@@ -135,6 +137,11 @@ enum SenderSessionCommand {
     Start {
         id: SessionId,
         source_id: String,
+    },
+    Stop {
+        id: SessionId,
+        reason: String,
+        response: SyncSender<Result<(), SenderPairingError>>,
     },
 }
 
@@ -310,10 +317,54 @@ pub fn start_sender_session(request_id: u64, source_id: &str) -> Result<(), Send
     Ok(())
 }
 
+/// Sends a bounded explicit stop and waits briefly for the worker's write result.
+/// The caller should still close local media and signaling if the acknowledgement is lost.
+pub fn stop_sender_session(request_id: u64, reason: &str) -> Result<(), SenderPairingError> {
+    validate_session_stop_reason(reason)?;
+
+    let (commands, session_id) = {
+        let slot = lock_recover(task_slot());
+        let task = slot
+            .as_ref()
+            .filter(|task| task.request_id == request_id)
+            .ok_or(SenderPairingError::UnknownRequest)?;
+        if lock_recover(&task.snapshot).state != SenderPairingState::Approved {
+            return Err(SenderPairingError::SessionNotStarted);
+        }
+        let session_id = lock_recover(&task.session_id)
+            .as_ref()
+            .copied()
+            .ok_or(SenderPairingError::SessionNotStarted)?;
+        (task.commands.clone(), session_id)
+    };
+
+    let (response_sender, response_receiver) = sync_channel(1);
+    commands
+        .try_send(SenderSessionCommand::Stop {
+            id: session_id,
+            reason: reason.to_owned(),
+            response: response_sender,
+        })
+        .map_err(|_| SenderPairingError::Unavailable)?;
+    response_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|_| SenderPairingError::Unavailable)?
+}
+
 fn validate_session_source_id(source_id: &str) -> Result<(), SenderPairingError> {
     if source_id.is_empty()
         || source_id.len() > MAX_SESSION_SOURCE_ID_BYTES
         || source_id.chars().any(char::is_control)
+    {
+        return Err(SenderPairingError::InvalidSessionMessage);
+    }
+    Ok(())
+}
+
+fn validate_session_stop_reason(reason: &str) -> Result<(), SenderPairingError> {
+    if reason.is_empty()
+        || reason.len() > MAX_SESSION_STOP_REASON_BYTES
+        || reason.chars().any(char::is_control)
     {
         return Err(SenderPairingError::InvalidSessionMessage);
     }
@@ -524,6 +575,52 @@ fn run_sender_session_worker(
                     }
                     current.outbound_sequence = next_sequence;
                     current.started = true;
+                }
+                Ok(SenderSessionCommand::Stop {
+                    id,
+                    reason,
+                    response,
+                }) => {
+                    let Some(current) = session.as_mut().filter(|current| current.id == id) else {
+                        let _ = response.send(Err(SenderPairingError::SessionNotStarted));
+                        continue;
+                    };
+                    let Some(next_sequence) = current.outbound_sequence.checked_add(1) else {
+                        let _ = response.send(Err(SenderPairingError::Unavailable));
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    let Some(message_id) = random_message_id() else {
+                        let _ = response.send(Err(SenderPairingError::Unavailable));
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+                        let _ = response.send(Err(SenderPairingError::Unavailable));
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    let stop = SessionStop { reason };
+                    let Ok(frame) = encode_session_stop(
+                        message_id,
+                        id,
+                        next_sequence,
+                        now.as_millis().min(u64::MAX as u128) as u64,
+                        &stop,
+                    ) else {
+                        let _ = response.send(Err(SenderPairingError::InvalidSessionMessage));
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    };
+                    if connection.send_control_message(&frame).is_err() {
+                        let _ = response.send(Err(SenderPairingError::ControlFailed));
+                        fail_sender_session_worker(snapshot, session_id_slot);
+                        return;
+                    }
+                    current.outbound_sequence = next_sequence;
+                    session = None;
+                    lock_recover(session_id_slot).take();
+                    let _ = response.send(Ok(()));
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -886,8 +983,8 @@ fn set_terminal_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_PAIRING_INVITATION_BYTES, SenderPairingState, validate_invitation_uri,
-        validate_session_source_id,
+        MAX_PAIRING_INVITATION_BYTES, SenderPairingError, SenderPairingState, stop_sender_session,
+        validate_invitation_uri, validate_session_source_id, validate_session_stop_reason,
     };
 
     #[test]
@@ -916,6 +1013,27 @@ mod tests {
         assert!(validate_session_source_id("").is_err());
         assert!(validate_session_source_id("x".repeat(129).as_str()).is_err());
         assert!(validate_session_source_id("window\nname").is_err());
+    }
+
+    #[test]
+    fn accepts_only_bounded_control_free_session_stop_reasons() {
+        assert!(validate_session_stop_reason("user-disconnected").is_ok());
+        assert!(validate_session_stop_reason("x".repeat(128).as_str()).is_ok());
+        assert!(validate_session_stop_reason("").is_err());
+        assert!(validate_session_stop_reason("x".repeat(129).as_str()).is_err());
+        assert!(validate_session_stop_reason("user\nname").is_err());
+    }
+
+    #[test]
+    fn stop_sender_session_validates_reason_before_pairing_lookup() {
+        assert_eq!(
+            stop_sender_session(0, ""),
+            Err(SenderPairingError::InvalidSessionMessage)
+        );
+        assert_eq!(
+            stop_sender_session(0, "user-disconnected"),
+            Err(SenderPairingError::UnknownRequest)
+        );
     }
 
     #[test]

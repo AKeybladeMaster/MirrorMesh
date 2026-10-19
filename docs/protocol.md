@@ -4,7 +4,7 @@ The Rust parser is implemented in `crates/mm-protocol` and is covered by the `se
 
 This document defines the **app-owned control protocol**; WebRTC media conforms to negotiated SDP/ICE/DTLS-SRTP RFC behavior, not a homegrown packet protocol. No claim of interoperability with AirPlay, Cast or Miracast.
 
-Task 47 adds a bounded `session.start` encoder to the Windows sender path and routes the existing v1 message to the Android TV status adapter. It does not change the message schema or protocol version. The two-process test covers offer/answer/start envelopes only; it is not an app-level WebRTC or media test.
+Tasks 47–48 add bounded `session.start` and `session.stop` encoders to the Windows sender path and route the existing v1 messages to Android TV. They do not change the message schema or protocol version. The two-process test covers offer/answer/start/stop envelopes only; it is not an app-level WebRTC or media test.
 
 ## Endpoints
 

@@ -17,6 +17,8 @@ The native Android TV app now has D-pad QR pairing and explicit grant approval t
 
 Task 47 routes the existing bounded `session.start` source label through the Rust-approved channel. The TV verifies that the notice matches its active session and reports that the sender says capture started. Direct JDK tests cover valid, missing, oversized, and control-bearing source IDs. This does not prove frame delivery or decoding. The shell PowerShell check is blocked by the workstation's execution policy; Android Gradle/APK build remains unavailable.
 
+Task 48 handles the existing `session.stop` as a normal disconnect: the receiver state becomes `STOPPED`, the UI reports sender disconnect, and the native peer, renderer, decoder, and approved channel close. The two-process WSS test checks the stop sequence. Direct JDK lifecycle testing is run outside the blocked PowerShell script; no Android APK, live WebRTC peer, decoded frame, or hardware result is claimed.
+
 ## Next implementation slice
 
 Implement a native synthetic H.264 sender against the shared Rust-backed authenticated signaling contract and verify sender-to-TV negotiation and decoded-frame arrival on an Android build runner. Keep WGC capture and hardware encoding behind their native adapters. Then validate screenshot saving against a received frame and add persisted trusted-peer revocation.

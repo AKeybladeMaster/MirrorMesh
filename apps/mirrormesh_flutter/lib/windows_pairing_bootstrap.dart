@@ -13,6 +13,7 @@ class WindowsPairingBootstrap {
   static const _cancelSenderPairingMethod = 'cancelSenderPairing';
   static const _beginSenderSessionMethod = 'beginSenderSession';
   static const _startSenderSessionMethod = 'startSenderSession';
+  static const _stopSenderSessionMethod = 'stopSenderSession';
   static const _sendSenderSessionIceMethod = 'sendSenderSessionIce';
   static const _pollSenderSessionEventMethod = 'pollSenderSessionEvent';
 
@@ -114,6 +115,22 @@ class WindowsPairingBootstrap {
       throw PlatformException(
         code: 'session_start_unavailable',
         message: 'Windows did not start the approved sender source.',
+      );
+    }
+  }
+
+  Future<void> stopSenderSession({
+    required int requestId,
+    required String reason,
+  }) async {
+    final stopped = await _channel.invokeMethod<bool>(
+      _stopSenderSessionMethod,
+      <String, Object?>{'requestId': requestId, 'reason': reason},
+    );
+    if (stopped != true) {
+      throw PlatformException(
+        code: 'session_stop_unavailable',
+        message: 'Windows could not send the session stop message.',
       );
     }
   }

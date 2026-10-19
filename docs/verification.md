@@ -123,6 +123,8 @@ Task 45 is **SOURCE_IMPLEMENTED** for sender-side diagnostics, not media deliver
 
 **Task 47 source update:** The Windows sender queues the existing `session.start` message once the peer reports `connected`, after any pending local ICE send drains. Its source ID is the generic `desktop-capture` label; the local capture ID/name stays on Windows. The Rust sender worker requires the approved connection, active session, answer receipt, bounded source label, and next sequence. Android TV JNI verifies that the message belongs to the approved session and forwards bounded metadata to a status listener. This reports sender intent only and does not confirm video frames.
 
+**Task 48 source update:** Explicit Windows disconnect closes the native capture and peer, queues the bounded existing v1 `session.stop` message through the worker-owned WSS connection, and then cancels pairing. The worker waits at most two seconds for its local write result; a lost acknowledgement does not prevent local cleanup. Android TV handles remote stop as a normal `STOPPED` transition and releases receiver resources instead of reporting a transport failure. The two-process WSS test checks offer/answer/start/stop sequencing, and JDK state tests check the normal stop transition. This does not prove remote delivery, WebRTC teardown, decoded media, or hardware behavior.
+
 | Command / check | Exit | Result |
 |---|---:|---|
 | `cargo fmt --all -- --check` | 0 | Workspace formatting passes. |
@@ -141,6 +143,26 @@ Task 45 is **SOURCE_IMPLEMENTED** for sender-side diagnostics, not media deliver
 | App-to-app WSS/ICE/RTP and TV decode | not run | Two-process WSS covers control messages only. No live app peer, H.264 frame, TV decode, screenshot, WGC, or hardware test ran. |
 
 The Task 47 API/FFI changes use the existing v1 message vocabulary and require cross-track review. Proposed [ADR-0047](adr/0047-windows-session-start-control.md) records the decision and limits. `BUILD_VERIFIED` applies to Rust Windows adapter/FFI code and the optimized DLL, not the Flutter bundle, C++ method-channel source, Android TV APK, or media path. `HARDWARE_VERIFIED` remains pending.
+
+## Task 48 verification — explicit sender disconnect
+
+| Command / check | Exit | Result |
+|---|---:|---|
+| `cargo fmt --all -- --check` | 0 after `cargo fmt --all` | Workspace format check passes. |
+| `cargo test -p mm-protocol -p mm-adapter-signaling -p mm-adapter-win -p mm-ffi --locked --offline` | 0 | Protocol stop validation, Windows stop-reason validation, FFI input bounds, and two-process WSS offer/answer/start/stop order pass. |
+| `cargo test --workspace --all-features --locked --offline --quiet` | 0 | All workspace unit/integration tests and doc tests pass. |
+| `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | 0 | Strict workspace Clippy passes. |
+| `cargo test -p mm-adapter-win -p mm-ffi --target x86_64-pc-windows-msvc --locked --offline` | 0 | 25 Windows adapter tests, 4 FFI unit tests, and 3 FFI integration tests pass. |
+| `cargo clippy -p mm-adapter-win -p mm-ffi --target x86_64-pc-windows-msvc --all-targets --locked --offline -- -D warnings` | 0 | Windows-target Clippy passes. |
+| `cargo build -p mm-ffi --target x86_64-pc-windows-msvc --release --locked --offline` | 0 | Optimized Windows FFI DLL links with the new stop export source. |
+| Direct JDK compile (`javac --release 17`, JDK 21.0.10) and six TV Java test classes | 0 | Pairing, H.264, receiver lifecycle including STOPPED, screenshot conversion, and session-start validator pass. |
+| `dumpbin /exports target\x86_64-pc-windows-msvc\release\mm_ffi.dll` | unavailable | `dumpbin` is not on PATH; export-table inspection was not performed. |
+| Flutter/Dart analysis and focused Flutter test | unavailable | Flutter and Dart executables are not on PATH in this session. The changed Dart/controller test and C++ method-channel translation unit are not compile-verified. |
+| Android TV shell script | blocked | PowerShell execution policy prevents loading the repository script. No policy change or bypass was used; its JDK tests were compiled and run directly. |
+| Android TV APK build | unavailable | Gradle and Android SDK/NDK are not installed/configured here. |
+| App-to-app WebRTC, RTP/H.264 decode, screenshot write, hardware | not run | Stop control sequencing is tested over two-process WSS only; no peer connection, media, screenshot storage, or hardware scenario ran. |
+
+Task 48 changes only the existing v1 `session.stop` message handling, with no schema or protocol-version change. Proposed [ADR-0048](adr/0048-windows-tv-session-stop.md) records the API and teardown contract and awaits CORE/Windows/TV review. Rust Windows-target build evidence does not cover the Flutter runner or Android APK. Media and physical-device verification remain pending.
 
 ## Current CORE kickoff evidence
 

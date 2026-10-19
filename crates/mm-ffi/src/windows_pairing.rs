@@ -1,10 +1,11 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use mm_adapter_win::{
-    MAX_PAIRING_INVITATION_BYTES, SenderPairingError, SenderPairingSnapshot, SenderSessionEvent,
-    begin_sender_pairing, begin_sender_session, cancel_sender_pairing, initialize_pairing_runtime,
-    poll_sender_pairing, poll_sender_session_event, send_sender_session_ice,
-    shutdown_sender_pairing, start_sender_session,
+    MAX_PAIRING_INVITATION_BYTES, MAX_SESSION_STOP_REASON_BYTES, SenderPairingError,
+    SenderPairingSnapshot, SenderSessionEvent, begin_sender_pairing, begin_sender_session,
+    cancel_sender_pairing, initialize_pairing_runtime, poll_sender_pairing,
+    poll_sender_session_event, send_sender_session_ice, shutdown_sender_pairing,
+    start_sender_session, stop_sender_session,
 };
 
 const DEVICE_ID_BYTES: usize = 16;
@@ -231,6 +232,31 @@ pub unsafe extern "C" fn mirrormesh_windows_start_sender_session(
     }
 }
 
+/// Sends a bounded explicit stop over the approved sender control channel.
+///
+/// # Safety
+/// `reason` must point to `reason_length` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mirrormesh_windows_stop_sender_session(
+    request_id: u64,
+    reason: *const u8,
+    reason_length: usize,
+) -> i32 {
+    if reason.is_null() || reason_length == 0 || reason_length > MAX_SESSION_STOP_REASON_BYTES {
+        return SENDER_PAIRING_INVALID_ARGUMENT;
+    }
+    // SAFETY: The C caller provides the readable byte range documented above.
+    let reason = unsafe { std::slice::from_raw_parts(reason, reason_length) };
+    let Ok(reason) = std::str::from_utf8(reason) else {
+        return SENDER_PAIRING_INVALID_ARGUMENT;
+    };
+    match catch_unwind(AssertUnwindSafe(|| stop_sender_session(request_id, reason))) {
+        Ok(Ok(())) => SENDER_PAIRING_OK,
+        Ok(Err(error)) => sender_pairing_error_code(error),
+        Err(_) => SENDER_PAIRING_UNAVAILABLE,
+    }
+}
+
 /// Polls one bounded response from the TV over the approved control channel as JSON.
 ///
 /// # Safety
@@ -334,13 +360,13 @@ fn sender_pairing_error_code(error: SenderPairingError) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SESSION_EVENT_JSON_BYTES, MAX_SESSION_SOURCE_ID_BYTES,
+        MAX_SESSION_EVENT_JSON_BYTES, MAX_SESSION_SOURCE_ID_BYTES, MAX_SESSION_STOP_REASON_BYTES,
         PAIRING_RUNTIME_INVALID_ARGUMENT, SENDER_PAIRING_INVALID_ARGUMENT,
         SENDER_PAIRING_UNKNOWN_REQUEST, mirrormesh_windows_begin_sender_pairing,
         mirrormesh_windows_begin_sender_session, mirrormesh_windows_cancel_sender_pairing,
         mirrormesh_windows_poll_sender_pairing, mirrormesh_windows_poll_sender_session_event,
         mirrormesh_windows_prepare_pairing_runtime, mirrormesh_windows_send_sender_session_ice,
-        mirrormesh_windows_start_sender_session,
+        mirrormesh_windows_start_sender_session, mirrormesh_windows_stop_sender_session,
     };
 
     #[test]
@@ -468,6 +494,36 @@ mod tests {
         );
         assert_eq!(
             unsafe { mirrormesh_windows_start_sender_session(0, b"desktop-capture".as_ptr(), 15) },
+            SENDER_PAIRING_UNKNOWN_REQUEST
+        );
+        assert_eq!(
+            unsafe { mirrormesh_windows_stop_sender_session(0, std::ptr::null(), 0) },
+            SENDER_PAIRING_INVALID_ARGUMENT
+        );
+        let invalid_stop_reason = [0xff_u8];
+        assert_eq!(
+            unsafe {
+                mirrormesh_windows_stop_sender_session(
+                    0,
+                    invalid_stop_reason.as_ptr(),
+                    invalid_stop_reason.len(),
+                )
+            },
+            SENDER_PAIRING_INVALID_ARGUMENT
+        );
+        let oversized_stop_reason = [b'x'; MAX_SESSION_STOP_REASON_BYTES + 1];
+        assert_eq!(
+            unsafe {
+                mirrormesh_windows_stop_sender_session(
+                    0,
+                    oversized_stop_reason.as_ptr(),
+                    oversized_stop_reason.len(),
+                )
+            },
+            SENDER_PAIRING_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            unsafe { mirrormesh_windows_stop_sender_session(0, b"user-disconnected".as_ptr(), 17) },
             SENDER_PAIRING_UNKNOWN_REQUEST
         );
 
