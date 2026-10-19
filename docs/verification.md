@@ -175,6 +175,19 @@ Task 48 changes only the existing v1 `session.stop` message handling, with no sc
 
 Task 49 is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED` and `AUTOMATED_INTEGRATION_VERIFIED` remain pending until the Android workflow passes. The emulator test uses exact-pinned AndroidX Test runner/JUnit artifacts (Apache-2.0), and it makes no protocol or production signaling changes. See the [Task 49 brief](../codex/49-tv-synthetic-h264-loopback.md).
 
+## Task 50 verification — Windows first-encoded-frame gate
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `dart format --output=none --set-exit-if-changed lib/windows_sender_session.dart lib/app.dart test/windows_sender_session_test.dart` | unavailable | `dart` is not installed or on `PATH` in this workstation session. |
+| `flutter analyze` | unavailable | `flutter` is not installed or on `PATH` in this workstation session. |
+| `flutter test test/windows_sender_session_test.dart` | unavailable | The focused test command could not start because `flutter` is unavailable. The delayed-first-frame and timeout-cleanup cases are source-authored, not test-verified. |
+| `git diff --check` | pass (exit 0) | No whitespace errors; Git reports only its configured LF-to-CRLF working-copy notices. |
+| Flutter workflow on `task_*` | configured; result pending | The workflow filter includes task branches. No hosted run result is visible in this workspace. |
+| RTP / TV decode / hardware | not verified | `session.start` now waits for a local encoded-frame counter. This does not prove packet delivery, Android TV decode/render, WGC, hardware encoder selection, or a physical-device result. |
+
+Task 50 changes no protocol or FFI schema. It is `SOURCE_IMPLEMENTED`; `BUILD_VERIFIED`, `AUTOMATED_INTEGRATION_VERIFIED`, and `HARDWARE_VERIFIED` are pending. The timeout begins after the WebRTC transport is connected and a session ID exists. See the [Task 50 brief](../codex/50-windows-first-encoded-frame-gate.md) and proposed follow-up in [ADR-0047](adr/0047-windows-session-start-control.md).
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

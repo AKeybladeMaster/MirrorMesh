@@ -16,11 +16,13 @@ Task 47 wires the existing `session.start` message through the Windows C ABI and
 
 Task 48 sends the existing `session.stop` message through the Windows worker before the approved pairing channel closes. The controller releases the local capture and WebRTC peer first, then sends a bounded generic reason and cancels pairing; failed signaling does not block local cleanup. Rust tests and the two-process WSS stop-sequence test pass. Flutter/Dart and current C++ runner builds are unverified because their SDK tools are unavailable. Proposed [ADR-0048](../docs/adr/0048-windows-tv-session-stop.md) records the public API change. No app-to-TV media is verified.
 
+Task 50 separates `transportConnected` from sender-reported `streaming`. The Windows controller sends the existing `session.start` notice only after WebRTC reports a connected peer and outbound statistics report at least one encoded video frame. It waits up to 15 seconds after connection for that first frame, then closes capture/peer and the approved pairing channel on timeout. This is a local sender-side encoding gate; it does not prove RTP delivery or a TV-decoded frame. The tests cover delayed first-frame reporting and timeout cleanup, but Flutter/Dart are unavailable on this workstation, so formatting, analysis, tests, and the Windows app build are not verified. The Flutter CI workflow now runs on `task_*` pushes as well as `main`.
+
 1. Create conditional adapter crate, CI compile target `x86_64-pc-windows-msvc`; explicitly state supported Windows version/SDK.
 2. Source selection and consent with Windows Graphics Capture (WGC). Implement window/display lifecycle and device-loss/restart test harness.
 3. Send hardware H.264 via Media Foundation and Direct3D native textures with bounded queue and no frame bytes over Dart; test fallback codec errors.
 4. Receive/decoder native GPU surface and Flutter external texture binding; attach/detach, resize and GPU-device reset tests.
-5. Replace the plugin source path with an OS-owned Windows Graphics Capture picker/capture adapter, then generate a bounded native synthetic H.264 source and verify sender-to-TV decoding. Add WGC texture and hardware-encoder integration without passing frames over Dart/FFI.
+5. Implement a native synthetic H.264 sender source and prove it reaches the Android TV receiver through the existing authenticated signaling/WebRTC path. Then replace plugin capture with Windows Graphics Capture and add WGC texture/hardware-encoder integration without passing frames over Dart/FFI.
 6. Include user-confirmed disconnect, frame snapshot and Flutter overlay alignment, test 100 start/stops.
 7. Prototype MSIX or signed installer packaging; run on physical Intel/AMD/NVIDIA available GPU as fixture. Hardware profile MUST be logged.
 
