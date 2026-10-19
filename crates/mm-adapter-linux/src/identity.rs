@@ -3,11 +3,12 @@
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
 use mm_domain::{MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, PeerFingerprint, PeerPublicKey};
-use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError};
+use mm_ports::{LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError};
 use zeroize::Zeroizing;
 
 const ED25519_SEED_BYTES: usize = 32;
 const PAIRING_PROOF_DOMAIN: &[u8] = b"MirrorMesh.PairingProof.v1\0";
+const TLS13_SERVER_CERT_VERIFY_CONTEXT: &[u8; 34] = b"TLS 1.3, server CertificateVerify\0";
 
 pub(super) trait CredentialStore: Send + Sync {
     fn read_seed(&self) -> Result<Option<Zeroizing<Vec<u8>>>, PortError>;
@@ -86,6 +87,20 @@ impl<S: CredentialStore> LocalPairingIdentityPort for IdentityCore<S> {
     }
 }
 
+impl<S: CredentialStore> LocalTlsIdentityPort for IdentityCore<S> {
+    fn tls_server_public_key(&self) -> Result<PeerPublicKey, PortError> {
+        self.local_public_key()
+    }
+
+    fn sign_tls13_certificate_verify(&self, message: &[u8]) -> Result<Vec<u8>, PortError> {
+        if !is_tls13_server_certificate_verify_input(message) {
+            return Err(PortError::InvalidConfiguration);
+        }
+        let signing_key = self.read_signing_key()?;
+        Ok(signing_key.sign(message).to_bytes().to_vec())
+    }
+}
+
 impl<S: CredentialStore> PairingIdentityPort for IdentityCore<S> {
     fn fingerprint_public_key(
         &self,
@@ -150,6 +165,22 @@ fn is_canonical_pairing_message(message: &[u8]) -> bool {
     grants != 0 && grants & !0b111 == 0
 }
 
+fn is_tls13_server_certificate_verify_input(message: &[u8]) -> bool {
+    const SIGNATURE_INPUT_PREFIX_BYTES: usize = 64;
+
+    let context_start = SIGNATURE_INPUT_PREFIX_BYTES;
+    let transcript_hash_start = context_start + TLS13_SERVER_CERT_VERIFY_CONTEXT.len();
+    let Some(transcript_hash_bytes) = message.len().checked_sub(transcript_hash_start) else {
+        return false;
+    };
+
+    message[..SIGNATURE_INPUT_PREFIX_BYTES]
+        .iter()
+        .all(|byte| *byte == 0x20)
+        && message[context_start..transcript_hash_start] == *TLS13_SERVER_CERT_VERIFY_CONTEXT
+        && matches!(transcript_hash_bytes, 32 | 48)
+}
+
 #[cfg(target_os = "linux")]
 mod secret_service_store {
     use std::env;
@@ -160,7 +191,9 @@ mod secret_service_store {
     use std::path::PathBuf;
 
     use mm_domain::{PeerFingerprint, PeerPublicKey};
-    use mm_ports::{LocalPairingIdentityPort, PairingIdentityPort, PortError};
+    use mm_ports::{
+        LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError,
+    };
     use secret_service::blocking::{Item, SecretService};
     use secret_service::{EncryptionType, SearchItemsResult};
     use zeroize::Zeroizing;
@@ -210,6 +243,18 @@ mod secret_service_store {
         fn delete_identity(&self) -> Result<(), PortError> {
             let _identity_lock = IdentityLock::acquire()?;
             self.inner.delete_identity()
+        }
+    }
+
+    impl LocalTlsIdentityPort for LinuxPairingIdentity {
+        fn tls_server_public_key(&self) -> Result<PeerPublicKey, PortError> {
+            let _identity_lock = IdentityLock::acquire()?;
+            self.inner.tls_server_public_key()
+        }
+
+        fn sign_tls13_certificate_verify(&self, message: &[u8]) -> Result<Vec<u8>, PortError> {
+            let _identity_lock = IdentityLock::acquire()?;
+            self.inner.sign_tls13_certificate_verify(message)
         }
     }
 
