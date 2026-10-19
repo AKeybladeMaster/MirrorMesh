@@ -36,13 +36,14 @@ const SOCKET_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const LISTENER_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SOCKET_READ_BUFFER_BYTES: usize = 8 * 1024;
 const SOCKET_WRITE_BUFFER_BYTES: usize = 4 * 1024;
+const CONTROL_READ_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub type PendingPairingWebSocket =
     WebSocket<StreamOwned<ServerConnection, HandshakeDeadlineStream>>;
 
 trait WssSocket: Send {
     fn send_message(&mut self, message: Message) -> Result<(), WebSocketError>;
-    fn read_message(&mut self) -> Result<Message, WebSocketError>;
+    fn read_message(&mut self) -> Result<Option<Message>, WebSocketError>;
     fn flush_socket(&mut self) -> Result<(), WebSocketError>;
     fn close_socket(&mut self) -> Result<(), WebSocketError>;
 }
@@ -55,8 +56,19 @@ where
         self.send(message)
     }
 
-    fn read_message(&mut self) -> Result<Message, WebSocketError> {
-        self.read()
+    fn read_message(&mut self) -> Result<Option<Message>, WebSocketError> {
+        match self.read() {
+            Ok(message) => Ok(Some(message)),
+            Err(WebSocketError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn flush_socket(&mut self) -> Result<(), WebSocketError> {
@@ -222,32 +234,46 @@ impl PairingConnection {
     /// This is blocking I/O and belongs on a dedicated worker. Ping frames are answered by
     /// flushing the WebSocket; binary frames are never accepted as protocol messages.
     pub fn receive_control_message(&mut self) -> Result<ValidatedMessage, WssControlChannelError> {
-        self.ensure_control_ready()?;
         loop {
-            let frame = match self.socket.read_message() {
-                Ok(Message::Text(text)) => text,
-                Ok(Message::Ping(_)) => {
-                    self.socket
-                        .flush_socket()
-                        .map_err(WssControlChannelError::WebSocket)?;
-                    continue;
-                }
-                Ok(Message::Pong(_)) => continue,
-                Ok(Message::Binary(_)) => {
-                    return Err(WssControlChannelError::UnexpectedBinaryMessage);
-                }
-                Ok(Message::Close(_)) => return Err(WssControlChannelError::Closed),
-                Ok(Message::Frame(_)) => unreachable!("tungstenite does not expose raw frames"),
-                Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
-                    return Err(WssControlChannelError::Closed);
-                }
-                Err(error) => return Err(WssControlChannelError::WebSocket(error)),
-            };
-            let message = parse_post_approval_control_frame(frame.as_str().as_bytes())?;
-            self.inbound_sequences
-                .accept(self.peer_id, &message.header)?;
-            return Ok(message);
+            if let Some(message) = self.try_receive_control_message()? {
+                return Ok(message);
+            }
         }
+    }
+
+    /// Polls the approved WSS channel for one validated message without blocking past its
+    /// bounded read interval. Platform bridges can share a connection between reads, sends,
+    /// and shutdown without holding a connection lock indefinitely.
+    pub fn try_receive_control_message(
+        &mut self,
+    ) -> Result<Option<ValidatedMessage>, WssControlChannelError> {
+        self.ensure_control_ready()?;
+        let frame = match self.socket.read_message() {
+            Ok(Some(Message::Text(text))) => text,
+            Ok(Some(Message::Ping(_))) => {
+                self.socket
+                    .flush_socket()
+                    .map_err(WssControlChannelError::WebSocket)?;
+                return Ok(None);
+            }
+            Ok(Some(Message::Pong(_))) => return Ok(None),
+            Ok(Some(Message::Binary(_))) => {
+                return Err(WssControlChannelError::UnexpectedBinaryMessage);
+            }
+            Ok(Some(Message::Close(_))) => return Err(WssControlChannelError::Closed),
+            Ok(Some(Message::Frame(_))) => {
+                unreachable!("tungstenite does not expose raw frames")
+            }
+            Ok(None) => return Ok(None),
+            Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
+                return Err(WssControlChannelError::Closed);
+            }
+            Err(error) => return Err(WssControlChannelError::WebSocket(error)),
+        };
+        let message = parse_post_approval_control_frame(frame.as_str().as_bytes())?;
+        self.inbound_sequences
+            .accept(self.peer_id, &message.header)?;
+        Ok(Some(message))
     }
 
     /// Releases sequence-tracker capacity after the caller has fully closed a session.
@@ -510,6 +536,11 @@ impl WssPairingClient {
             .sock
             .clear_deadline()
             .map_err(WssClientError::Io)?;
+        websocket
+            .get_mut()
+            .sock
+            .set_control_poll_timeout()
+            .map_err(WssClientError::Io)?;
         let text = String::from_utf8(frame)
             .map_err(|_| WssClientError::Protocol(ProtocolError::InvalidUtf8))?;
         websocket
@@ -538,17 +569,21 @@ impl PendingWssPairingClient {
     pub fn wait_for_decision(mut self) -> Result<WssClientApprovedPairing, WssClientError> {
         loop {
             let frame = match self.socket.read_message() {
-                Ok(Message::Text(text)) => text,
-                Ok(Message::Ping(_)) => {
+                Ok(Some(Message::Text(text))) => text,
+                Ok(Some(Message::Ping(_))) => {
                     self.socket
                         .flush_socket()
                         .map_err(WssClientError::WebSocket)?;
                     continue;
                 }
-                Ok(Message::Pong(_)) => continue,
-                Ok(Message::Binary(_)) => return Err(WssClientError::UnexpectedBinaryMessage),
-                Ok(Message::Close(_)) => return Err(WssClientError::Closed),
-                Ok(Message::Frame(_)) => unreachable!("tungstenite does not expose raw frames"),
+                Ok(Some(Message::Pong(_))) | Ok(None) => continue,
+                Ok(Some(Message::Binary(_))) => {
+                    return Err(WssClientError::UnexpectedBinaryMessage);
+                }
+                Ok(Some(Message::Close(_))) => return Err(WssClientError::Closed),
+                Ok(Some(Message::Frame(_))) => {
+                    unreachable!("tungstenite does not expose raw frames")
+                }
                 Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
                     return Err(WssClientError::Closed);
                 }
@@ -756,6 +791,11 @@ impl HandshakeDeadlineStream {
         self.socket.set_write_timeout(None)
     }
 
+    fn set_control_poll_timeout(&self) -> io::Result<()> {
+        self.socket
+            .set_read_timeout(Some(CONTROL_READ_POLL_INTERVAL))
+    }
+
     fn update_read_timeout(&self) -> io::Result<()> {
         if let Some(deadline) = self.deadline {
             self.socket
@@ -920,6 +960,11 @@ impl WssPairingListener {
             .get_mut()
             .sock
             .clear_deadline()
+            .map_err(WssListenerError::Io)?;
+        websocket
+            .get_mut()
+            .sock
+            .set_control_poll_timeout()
             .map_err(WssListenerError::Io)?;
         let peer_id = admitted.approval().peer_id();
 

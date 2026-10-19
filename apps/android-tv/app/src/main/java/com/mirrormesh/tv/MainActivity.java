@@ -34,7 +34,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Native TV pairing UI. Approved pairing opens signaling only; media is not connected yet. */
+/** Native TV pairing UI with an approved signaling handoff to the fullscreen receiver. */
 public final class MainActivity extends Activity {
     private static final int PAIRING_PORT = 8765;
 
@@ -60,6 +60,8 @@ public final class MainActivity extends Activity {
     private CheckBox grantView;
     private CheckBox grantSend;
     private CheckBox grantAnnotate;
+    private RustApprovedSignalingChannel activeSignaling;
+    private TvReceiverState tvReceiverState;
 
     private boolean nativeReady;
     private boolean decisionInProgress;
@@ -299,23 +301,63 @@ public final class MainActivity extends Activity {
                         requestId, view, send, annotate));
                 long connectionId = result.getLong("connection_id");
                 String peerId = result.optString("peer_id", "paired peer");
+                RustApprovedSignalingChannel signaling = view
+                        ? new RustApprovedSignalingChannel(
+                                connectionId, result.getString("peer_fingerprint"))
+                        : null;
+                TvReceiverState sessionState = null;
+                if (view) {
+                    sessionState = new TvReceiverState();
+                    if (!sessionState.showAuthenticatedRequest() || !sessionState.approve()) {
+                        throw new IllegalStateException("Approved receiver state could not start.");
+                    }
+                }
+                TvReceiverState approvedSessionState = sessionState;
                 runOnUiThread(() -> {
                     if (destroyed) {
+                        if (signaling != null) {
+                            signaling.close();
+                        } else {
+                            NativePairingBridge.closeControlChannel(connectionId);
+                        }
                         return;
                     }
                     decisionInProgress = false;
                     if (!pairingState.requestApproved(connectionId)) {
+                        if (signaling != null) {
+                            signaling.close();
+                        }
                         return;
                     }
+                    activeSignaling = signaling;
+                    tvReceiverState = approvedSessionState;
                     requestDetails.setText("Paired sender: " + peerId
-                            + "\nAuthenticated control channel is open.\nVideo streaming is not connected yet.");
+                            + (view
+                                    ? "\nWaiting for the sender's H.264 screen offer."
+                                    : "\nScreen viewing was not approved."));
                     invitationQr.setVisibility(View.GONE);
                     invitationText.setVisibility(View.GONE);
                     serviceState.setText(R.string.pairing_paired);
-                    helpText.setText("Close channel ends this connection. The approved peer remains trusted.");
+                    helpText.setText(view
+                            ? "The approved sender may begin a screen session. Press Back during video to disconnect."
+                            : "Close channel ends this connection. The approved peer remains trusted.");
                     clearGrantSelection();
                     renderState();
                     closeChannelButton.requestFocus();
+                    if (signaling != null) {
+                        signaling.setRevokedListener(() -> runOnUiThread(() -> {
+                            if (tvReceiverState != null) {
+                                tvReceiverState.revoke();
+                            }
+                            finishReturnedVideoSession();
+                        }));
+                        signaling.setRemoteStopListener(() -> runOnUiThread(
+                                this::finishReturnedVideoSession));
+                        signaling.setFailureListener(code -> runOnUiThread(
+                                this::finishReturnedVideoSession));
+                        signaling.start(sdp -> runOnUiThread(() ->
+                                launchApprovedOffer(signaling, approvedSessionState, sdp)));
+                    }
                 });
             } catch (Exception | LinkageError error) {
                 runOnUiThread(() -> {
@@ -391,7 +433,10 @@ public final class MainActivity extends Activity {
         long connectionId = pairingState.connectionId();
         controlWorker.execute(() -> {
             try {
-                if (!NativePairingBridge.closeControlChannel(connectionId)) {
+                boolean closedChannel = activeSignaling == null
+                        ? NativePairingBridge.closeControlChannel(connectionId)
+                        : activeSignaling.closeForUser();
+                if (!closedChannel) {
                     throw new IllegalStateException("The signaling channel could not be closed cleanly.");
                 }
                 FreshInvitation freshInvitation = null;
@@ -412,6 +457,8 @@ public final class MainActivity extends Activity {
                     if (!pairingState.controlChannelClosed()) {
                         return;
                     }
+                    activeSignaling = null;
+                    tvReceiverState = null;
                     requestDetails.setText(R.string.pairing_trust_remains);
                     if (refreshed != null) {
                         displayInvitation(refreshed);
@@ -425,6 +472,82 @@ public final class MainActivity extends Activity {
             } catch (Exception | LinkageError error) {
                 showOperationFailure("Channel close failed", error);
             }
+        });
+    }
+
+    private void launchApprovedOffer(
+            RustApprovedSignalingChannel signaling,
+            TvReceiverState state,
+            String offerSdp) {
+        if (destroyed || signaling != activeSignaling || state == null
+                || state.phase() != TvReceiverState.Phase.APPROVED) {
+            signaling.close();
+            return;
+        }
+        try {
+            TvApprovedSessionLauncher.open(this, signaling, offerSdp, state);
+            serviceState.setText("Starting the approved H.264 screen session...");
+        } catch (RuntimeException error) {
+            state.fail();
+            signaling.close();
+            serviceState.setText("Screen offer rejected: "
+                    + (error.getMessage() == null ? "unsupported offer" : error.getMessage()));
+            finishReturnedVideoSession();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pairingState.canCloseChannel()
+                && activeSignaling != null
+                && !activeSignaling.isAuthenticatedAndApproved()) {
+            finishReturnedVideoSession();
+        }
+    }
+
+    private void finishReturnedVideoSession() {
+        boolean revoked = tvReceiverState != null
+                && tvReceiverState.phase() == TvReceiverState.Phase.REVOKED;
+        activeSignaling = null;
+        tvReceiverState = null;
+        if (!pairingState.controlChannelClosed()) {
+            return;
+        }
+        decisionInProgress = true;
+        serviceState.setText(revoked
+                ? "Sender revoked this connection. Refreshing the pairing code..."
+                : "Screen session ended. Refreshing the pairing code...");
+        renderState();
+        int refreshGeneration = serviceGeneration;
+        controlWorker.execute(() -> {
+            FreshInvitation freshInvitation = null;
+            String refreshFailure = null;
+            try {
+                freshInvitation = fetchFreshInvitation();
+            } catch (Exception | LinkageError error) {
+                refreshFailure = error.getMessage() == null
+                        ? "Could not create a new pairing code." : error.getMessage();
+            }
+            FreshInvitation refreshed = freshInvitation;
+            String invitationError = refreshFailure;
+            runOnUiThread(() -> {
+                if (destroyed || refreshGeneration != serviceGeneration) {
+                    return;
+                }
+                decisionInProgress = false;
+                requestDetails.setText(revoked
+                        ? "Sender signaled revocation; the local trust record still needs revocation handling."
+                        : getString(R.string.pairing_trust_remains));
+                if (refreshed != null) {
+                    displayInvitation(refreshed);
+                    serviceState.setText(R.string.pairing_ready);
+                } else {
+                    serviceState.setText("Session ended. Pairing code refresh failed: " + invitationError);
+                }
+                renderState();
+                waitButton.requestFocus();
+            });
         });
     }
 
@@ -492,6 +615,9 @@ public final class MainActivity extends Activity {
 
     private void stopReceiver() {
         boolean wasActive = pairingState.phase() != TvPairingState.Phase.STOPPED;
+        RustApprovedSignalingChannel signaling = activeSignaling;
+        activeSignaling = null;
+        tvReceiverState = null;
         serviceGeneration++;
         pairingState.receiverStopped();
         decisionInProgress = false;
@@ -503,6 +629,9 @@ public final class MainActivity extends Activity {
         if (wasActive || nativeReady) {
             controlWorker.execute(() -> {
                 try {
+                    if (signaling != null) {
+                        signaling.close();
+                    }
                     NativePairingBridge.stopPairing();
                 } catch (LinkageError ignored) {
                     // The activity remains usable if the packaged Rust library is unavailable.

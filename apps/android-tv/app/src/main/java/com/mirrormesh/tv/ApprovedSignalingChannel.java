@@ -24,6 +24,10 @@ interface ApprovedSignalingChannel extends AutoCloseable {
 
     void setRevokedListener(Runnable listener);
 
+    void setRemoteStopListener(Runnable listener);
+
+    void setFailureListener(TextListener listener);
+
     void clearListeners();
 
     @Override
@@ -35,5 +39,9 @@ interface ApprovedSignalingChannel extends AutoCloseable {
 
     interface RemoteOfferListener {
         void onOffer(String sdp);
+    }
+
+    interface TextListener {
+        void onText(String value);
     }
 }

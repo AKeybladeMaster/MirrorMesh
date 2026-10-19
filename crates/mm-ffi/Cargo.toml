@@ -15,7 +15,9 @@ mm-runtime.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 mm-adapter-android.workspace = true
 mm-adapter-signaling.workspace = true
+getrandom.workspace = true
 jni.workspace = true
+mm-protocol.workspace = true
 ndk-context.workspace = true
 serde_json.workspace = true
 

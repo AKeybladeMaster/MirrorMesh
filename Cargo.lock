@@ -1257,12 +1257,14 @@ name = "mm-ffi"
 version = "0.1.0"
 dependencies = [
  "flutter_rust_bridge",
+ "getrandom 0.4.3",
  "jni",
  "mm-adapter-android",
  "mm-adapter-linux",
  "mm-adapter-signaling",
  "mm-adapter-win",
  "mm-domain",
+ "mm-protocol",
  "mm-runtime",
  "ndk-context",
  "serde_json",

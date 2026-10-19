@@ -227,14 +227,14 @@ pub struct SessionOffer {
     pub sdp: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionAnswer {
     pub sdp: String,
     pub selected_codec: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionIce {
     pub candidate: String,
@@ -515,6 +515,82 @@ pub fn encode_pair_reject(
         return Err(ProtocolError::FrameTooLarge);
     }
     Ok(bytes)
+}
+
+/// Encodes a session answer in the common v1 control envelope.
+pub fn encode_session_answer(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionAnswer,
+) -> Result<Vec<u8>, ProtocolError> {
+    encode_session_control(
+        "session.answer",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes a trickled ICE candidate in the common v1 control envelope.
+pub fn encode_session_ice(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionIce,
+) -> Result<Vec<u8>, ProtocolError> {
+    encode_session_control(
+        "session.ice",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+fn encode_session_control<T: Serialize>(
+    message_type: &'static str,
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &T,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    let envelope = SessionControlEnvelopeRef {
+        v: 1,
+        message_type,
+        message_id: message_id.to_string(),
+        session_id: session_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload,
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    parse_message(&bytes)?;
+    Ok(bytes)
+}
+
+#[derive(Serialize)]
+struct SessionControlEnvelopeRef<'a, T> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    session_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: &'a T,
 }
 
 /// Parses a complete v1 JSON control message with strict envelope and payload schemas.
@@ -897,8 +973,9 @@ impl SequenceTracker {
 mod tests {
     use super::{
         MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, MessagePayload, PairApprove, PairBegin,
-        PairReject, ProtocolError, SequenceTracker, encode_pair_approve, encode_pair_begin,
-        encode_pair_reject, parse_message, preflight_json, validate_version,
+        PairReject, ProtocolError, SequenceTracker, SessionAnswer, SessionIce, encode_pair_approve,
+        encode_pair_begin, encode_pair_reject, encode_session_answer, encode_session_ice,
+        parse_message, preflight_json, validate_version,
     };
     use mm_domain::{DeviceId, MessageId, SessionId};
 
@@ -1024,6 +1101,36 @@ mod tests {
             }
             _ => panic!("encoded frame must decode to PairApprove"),
         }
+    }
+
+    #[test]
+    fn encodes_validated_session_answer_and_ice_envelopes() {
+        let message_id = MessageId::from_bytes([0xd1; 16]);
+        let mut session_bytes = id(2);
+        session_bytes[6] = 0x42;
+        session_bytes[8] = 0x82;
+        let session_id = SessionId::from_bytes(session_bytes);
+        let answer = SessionAnswer {
+            sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=MirrorMesh TV answer\r\nt=0 0\r\n"
+                .to_owned(),
+            selected_codec: "H264".to_owned(),
+        };
+        let answer_frame = encode_session_answer(message_id, session_id, 1, 300, &answer).unwrap();
+        let parsed_answer = parse_message(&answer_frame).unwrap();
+        assert_eq!(parsed_answer.header.kind, super::MessageKind::SessionAnswer);
+        assert_eq!(parsed_answer.header.session_id, Some(session_id));
+        assert_eq!(parsed_answer.header.sequence, 1);
+
+        let candidate = SessionIce {
+            candidate: "candidate:1 1 udp 2122260223 192.0.2.2 6000 typ host".to_owned(),
+            sdp_mid: Some("video0".to_owned()),
+            mline_index: Some(0),
+        };
+        let ice_frame = encode_session_ice(message_id, session_id, 2, 301, &candidate).unwrap();
+        let parsed_ice = parse_message(&ice_frame).unwrap();
+        assert_eq!(parsed_ice.header.kind, super::MessageKind::SessionIce);
+        assert_eq!(parsed_ice.header.session_id, Some(session_id));
+        assert_eq!(parsed_ice.header.sequence, 2);
     }
 
     #[test]

@@ -10,6 +10,7 @@ $nativeBridgePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/Nati
 $repoRoot = Split-Path (Split-Path $appRoot -Parent) -Parent
 $nativePairingPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_tv_pairing.rs'
 $nativeContextPath = Join-Path $repoRoot 'crates/mm-ffi/src/android_context.rs'
+$approvedChannelPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/RustApprovedSignalingChannel.java'
 $pairingStatePath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvPairingState.java'
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
 
@@ -105,7 +106,7 @@ if ($appGradle -notmatch 'com\.google\.zxing:core:3\.5\.4') {
     throw 'The Android TV QR encoder dependency must use the reviewed pinned ZXing core version.'
 }
 $bridge = Get-Content -LiteralPath $nativeBridgePath -Raw
-foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'refreshPairingInvitation', 'cancelPairingWait', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
+foreach ($method in @('initializeRustAndroidContext', 'startPairing', 'refreshPairingInvitation', 'cancelPairingWait', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'pollControlMessage', 'sendSessionAnswer', 'sendSessionIce', 'closeControlChannel')) {
     $methodPattern = "native\s+\w+\s+$([regex]::Escape($method))\s*\("
     if ($bridge -notmatch $methodPattern) {
         throw "Native TV pairing bridge is missing $method."
@@ -118,7 +119,7 @@ if ($appGradle -notmatch 'aarch64-linux-android' -or $appGradle -notmatch 'libmm
     throw 'The Android TV Gradle build must package the Rust ARM64 library.'
 }
 $nativePairing = Get-Content -LiteralPath $nativePairingPath -Raw
-foreach ($jniName in @('startPairing', 'refreshPairingInvitation', 'cancelPairingWait', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'closeControlChannel')) {
+foreach ($jniName in @('startPairing', 'refreshPairingInvitation', 'cancelPairingWait', 'waitForPairingRequest', 'approvePairing', 'rejectPairing', 'stopPairing', 'pollControlMessage', 'sendSessionAnswer', 'sendSessionIce', 'closeControlChannel')) {
     if ($nativePairing -notmatch [regex]::Escape("NativePairingBridge_$jniName")) {
         throw "Rust JNI implementation is missing $jniName."
     }
@@ -128,6 +129,26 @@ foreach ($requiredSource in @('NativePairingBridge.startPairing', 'NativePairing
     if ($mainActivity -notmatch [regex]::Escape($requiredSource)) {
         throw "Android TV activity is missing the real pairing flow element: $requiredSource."
     }
+}
+if ($mainActivity -notmatch 'RustApprovedSignalingChannel' -or
+    $mainActivity -notmatch 'TvApprovedSessionLauncher\.open' -or
+    $mainActivity -notmatch 'signaling\.start\(') {
+    throw 'The approved TV pairing flow must route an authenticated sender offer into the native WebRTC receiver.'
+}
+if (!(Test-Path -LiteralPath $approvedChannelPath)) {
+    throw 'The Rust-backed approved signaling channel adapter is missing.'
+}
+$approvedChannel = Get-Content -LiteralPath $approvedChannelPath -Raw
+foreach ($requiredSignal in @('NativePairingBridge.pollControlMessage', 'NativePairingBridge.sendSessionAnswer', 'NativePairingBridge.sendSessionIce', 'MAX_BUFFERED_ICE_CANDIDATES', 'setRemoteIceCandidateListener')) {
+    if ($approvedChannel -notmatch [regex]::Escape($requiredSignal)) {
+        throw "The approved WebRTC signaling adapter is missing $requiredSignal."
+    }
+}
+if ($nativePairing -notmatch 'try_receive_control_message' -or
+    $nativePairing -notmatch 'MessagePayload::SessionOffer' -or
+    $nativePairing -notmatch 'MessagePayload::SessionIce' -or
+    $nativePairing -notmatch 'PeerGrant::View') {
+    throw 'Rust must validate the approved view grant and typed session offer/ICE before crossing JNI.'
 }
 if ($mainActivity -notmatch 'grantView\.setChecked\(false\)' -or
     $mainActivity -notmatch 'grantSend\.setChecked\(false\)' -or
@@ -156,4 +177,4 @@ if ($null -eq $pairingMediaStatus -or $pairingMediaStatus.InnerText -notmatch 'v
     throw 'The pairing UI must state that an approved control channel does not imply a video stream.'
 }
 
-Write-Output "Android TV source checks passed: $($resourceFiles.Count) XML resources, $($buttons.Count) D-pad buttons, native pairing bridge, QR invitation, explicit grant approval, INTERNET only, hardware H.264 receiver, no local capture permissions."
+Write-Output "Android TV source checks passed: $($resourceFiles.Count) XML resources, $($buttons.Count) D-pad buttons, native pairing/signaling bridge, QR invitation, explicit grant approval, H.264 receiver handoff, INTERNET only, no local capture permissions."

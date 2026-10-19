@@ -7,10 +7,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
-use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jlong, jstring};
+use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jlong, jstring};
 use mm_adapter_android::{AndroidTvPairingServiceHandle, PendingAndroidTvPairing};
 use mm_adapter_signaling::PairingConnection;
-use mm_domain::TrustedPeerGrants;
+use mm_domain::{MessageId, PeerGrant, SessionId, TrustedPeerGrants};
+use mm_protocol::{
+    MessagePayload, SessionAnswer, SessionIce, encode_session_answer, encode_session_ice,
+};
 use serde_json::{Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -19,7 +22,7 @@ const PAIRING_WORKER_STOP_TIMEOUT: Duration = Duration::from_secs(11);
 
 static SERVICE: OnceLock<Mutex<Option<Arc<AndroidTvPairingServiceHandle>>>> = OnceLock::new();
 static PENDING: OnceLock<Mutex<Option<(i64, PendingAndroidTvPairing)>>> = OnceLock::new();
-static CONNECTIONS: OnceLock<Mutex<HashMap<i64, PairingConnection>>> = OnceLock::new();
+static CONNECTIONS: OnceLock<Mutex<HashMap<i64, ApprovedControlConnection>>> = OnceLock::new();
 static NEXT_REQUEST_ID: AtomicI64 = AtomicI64::new(1);
 static NEXT_CONNECTION_ID: AtomicI64 = AtomicI64::new(1);
 static WAITING_FOR_REQUEST: AtomicBool = AtomicBool::new(false);
@@ -34,8 +37,16 @@ fn pending_slot() -> &'static Mutex<Option<(i64, PendingAndroidTvPairing)>> {
     PENDING.get_or_init(|| Mutex::new(None))
 }
 
-fn connection_slot() -> &'static Mutex<HashMap<i64, PairingConnection>> {
+fn connection_slot() -> &'static Mutex<HashMap<i64, ApprovedControlConnection>> {
     CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct ApprovedControlConnection {
+    channel: PairingConnection,
+    peer_fingerprint: String,
+    grants: TrustedPeerGrants,
+    session_id: Option<SessionId>,
+    outbound_sequence: u64,
 }
 
 fn monotonic_millis() -> u64 {
@@ -235,11 +246,21 @@ fn approve_request(
     connection_slot()
         .lock()
         .map_err(|_| "approved connection registry is unavailable".to_owned())?
-        .insert(connection_id, connection);
+        .insert(
+            connection_id,
+            ApprovedControlConnection {
+                channel: connection,
+                peer_fingerprint: peer.fingerprint().to_hex(),
+                grants: peer.grants(),
+                session_id: None,
+                outbound_sequence: 0,
+            },
+        );
     drop(service_guard);
     Ok(json!({
         "ok": true,
         "peer_id": peer.id().to_string(),
+        "peer_fingerprint": peer.fingerprint().to_hex(),
         "connection_id": connection_id
     }))
 }
@@ -283,7 +304,7 @@ fn stop_pairing() -> Result<Value, String> {
     let closed_connections = connections.len();
     let mut close_failures = 0;
     for connection in connections.values_mut() {
-        if connection.close().is_err() {
+        if connection.channel.close().is_err() {
             close_failures += 1;
         }
     }
@@ -325,9 +346,192 @@ fn close_connection(connection_id: i64) -> Result<bool, String> {
         return Ok(false);
     };
     connection
+        .channel
         .close()
         .map_err(|_| "the approved control channel could not close cleanly".to_owned())?;
     Ok(true)
+}
+
+fn poll_control_message(connection_id: i64) -> Result<Value, String> {
+    let mut connections = connection_slot()
+        .lock()
+        .map_err(|_| "approved connection registry is unavailable".to_owned())?;
+    let connection = connections
+        .get_mut(&connection_id)
+        .ok_or_else(|| "approved control connection is unavailable".to_owned())?;
+    if !connection.grants.allows(PeerGrant::View) {
+        return Err("screen viewing was not approved for this sender".to_owned());
+    }
+
+    let Some(message) = connection
+        .channel
+        .try_receive_control_message()
+        .map_err(|_| "approved control message failed protocol or transport checks".to_owned())?
+    else {
+        return Ok(json!({ "ok": true, "pending": true }));
+    };
+
+    match message.payload {
+        MessagePayload::SessionOffer(offer) => {
+            if offer.role != "sender" {
+                return Err("incoming TV sessions must be offered by a sender".to_owned());
+            }
+            let session_id = message
+                .header
+                .session_id
+                .ok_or_else(|| "session offer has no session identifier".to_owned())?;
+            if connection
+                .session_id
+                .is_some_and(|current| current != session_id)
+            {
+                return Err("sender attempted to replace the approved TV session".to_owned());
+            }
+            connection.session_id = Some(session_id);
+            Ok(json!({
+                "ok": true,
+                "pending": false,
+                "kind": "offer",
+                "session_id": session_id.to_string(),
+                "peer_fingerprint": connection.peer_fingerprint.clone(),
+                "sdp": offer.sdp
+            }))
+        }
+        MessagePayload::SessionIce(candidate) => {
+            let session_id = message
+                .header
+                .session_id
+                .ok_or_else(|| "ICE candidate has no session identifier".to_owned())?;
+            if connection.session_id != Some(session_id) {
+                return Err("ICE candidate does not belong to the approved TV session".to_owned());
+            }
+            let media_id = candidate
+                .sdp_mid
+                .ok_or_else(|| "ICE candidate has no media identifier".to_owned())?;
+            let media_line_index = candidate
+                .mline_index
+                .ok_or_else(|| "ICE candidate has no media line index".to_owned())?;
+            Ok(json!({
+                "ok": true,
+                "pending": false,
+                "kind": "ice",
+                "media_id": media_id,
+                "media_line_index": media_line_index,
+                "candidate": candidate.candidate
+            }))
+        }
+        MessagePayload::SessionStop(stop) => {
+            if message.header.session_id != connection.session_id {
+                return Err("session stop does not belong to the approved TV session".to_owned());
+            }
+            Ok(json!({
+                "ok": true,
+                "pending": false,
+                "kind": "stop",
+                "reason": stop.reason
+            }))
+        }
+        MessagePayload::SessionStart(_) => Ok(json!({
+            "ok": true,
+            "pending": false,
+            "kind": "start"
+        })),
+        MessagePayload::PairRevoke(_) => Ok(json!({
+            "ok": true,
+            "pending": false,
+            "kind": "revoke"
+        })),
+        _ => Err("approved TV channel received an unsupported control message".to_owned()),
+    }
+}
+
+fn send_session_answer(connection_id: i64, sdp: &str) -> Result<Value, String> {
+    let mut connections = connection_slot()
+        .lock()
+        .map_err(|_| "approved connection registry is unavailable".to_owned())?;
+    let connection = connections
+        .get_mut(&connection_id)
+        .ok_or_else(|| "approved control connection is unavailable".to_owned())?;
+    if !connection.grants.allows(PeerGrant::View) {
+        return Err("screen viewing was not approved for this sender".to_owned());
+    }
+    let session_id = connection
+        .session_id
+        .ok_or_else(|| "a sender offer must be received before answering".to_owned())?;
+    let sequence = next_outbound_sequence(connection)?;
+    let frame = encode_session_answer(
+        random_message_id()?,
+        session_id,
+        sequence,
+        unix_millis()?,
+        &SessionAnswer {
+            sdp: sdp.to_owned(),
+            selected_codec: "H264".to_owned(),
+        },
+    )
+    .map_err(|_| "WebRTC answer failed the shared protocol checks".to_owned())?;
+    connection
+        .channel
+        .send_control_message(&frame)
+        .map_err(|_| "WebRTC answer could not be sent".to_owned())?;
+    Ok(json!({ "ok": true }))
+}
+
+fn send_session_ice(
+    connection_id: i64,
+    media_id: &str,
+    media_line_index: i64,
+    candidate: &str,
+) -> Result<Value, String> {
+    let media_line_index: u16 = media_line_index
+        .try_into()
+        .map_err(|_| "ICE media line index is invalid".to_owned())?;
+    let mut connections = connection_slot()
+        .lock()
+        .map_err(|_| "approved connection registry is unavailable".to_owned())?;
+    let connection = connections
+        .get_mut(&connection_id)
+        .ok_or_else(|| "approved control connection is unavailable".to_owned())?;
+    if !connection.grants.allows(PeerGrant::View) {
+        return Err("screen viewing was not approved for this sender".to_owned());
+    }
+    let session_id = connection
+        .session_id
+        .ok_or_else(|| "a sender offer must be received before ICE".to_owned())?;
+    let sequence = next_outbound_sequence(connection)?;
+    let frame = encode_session_ice(
+        random_message_id()?,
+        session_id,
+        sequence,
+        unix_millis()?,
+        &SessionIce {
+            candidate: candidate.to_owned(),
+            sdp_mid: Some(media_id.to_owned()),
+            mline_index: Some(media_line_index),
+        },
+    )
+    .map_err(|_| "WebRTC ICE candidate failed the shared protocol checks".to_owned())?;
+    connection
+        .channel
+        .send_control_message(&frame)
+        .map_err(|_| "WebRTC ICE candidate could not be sent".to_owned())?;
+    Ok(json!({ "ok": true }))
+}
+
+fn next_outbound_sequence(connection: &mut ApprovedControlConnection) -> Result<u64, String> {
+    connection.outbound_sequence = connection
+        .outbound_sequence
+        .checked_add(1)
+        .ok_or_else(|| "TV control sequence space is exhausted".to_owned())?;
+    Ok(connection.outbound_sequence)
+}
+
+fn random_message_id() -> Result<MessageId, String> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes)
+        .map_err(|_| "operating-system randomness is unavailable".to_owned())?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(MessageId::from_bytes(bytes))
 }
 
 fn response_json(result: Result<Value, String>) -> String {
@@ -432,6 +636,55 @@ pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_stopPairing(
 ) -> jstring {
     let result = catch_unwind(AssertUnwindSafe(stop_pairing))
         .unwrap_or_else(|_| Err("receiver pairing could not stop cleanly".to_owned()));
+    java_string(&mut env, response_json(result))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_pollControlMessage(
+    mut env: JNIEnv,
+    _bridge: JClass,
+    connection_id: jlong,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| poll_control_message(connection_id)))
+        .unwrap_or_else(|_| Err("approved control message failed unexpectedly".to_owned()));
+    java_string(&mut env, response_json(result))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_sendSessionAnswer(
+    mut env: JNIEnv,
+    _bridge: JClass,
+    connection_id: jlong,
+    sdp: JString,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let sdp = java_input(&mut env, sdp)?;
+        send_session_answer(connection_id, &sdp)
+    }))
+    .unwrap_or_else(|_| Err("WebRTC answer failed unexpectedly".to_owned()));
+    java_string(&mut env, response_json(result))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_sendSessionIce(
+    mut env: JNIEnv,
+    _bridge: JClass,
+    connection_id: jlong,
+    media_id: JString,
+    media_line_index: jint,
+    candidate: JString,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let media_id = java_input(&mut env, media_id)?;
+        let candidate = java_input(&mut env, candidate)?;
+        send_session_ice(
+            connection_id,
+            &media_id,
+            i64::from(media_line_index),
+            &candidate,
+        )
+    }))
+    .unwrap_or_else(|_| Err("WebRTC ICE candidate failed unexpectedly".to_owned()));
     java_string(&mut env, response_json(result))
 }
 

@@ -32,6 +32,16 @@ final class NativePairingBridge {
     /** Stops pairing, cancels an idle accept worker, and closes pending/approved channels. */
     static native String stopPairing();
 
+    /** Polls one bounded approved WSS message and returns validated session metadata as JSON. */
+    static native String pollControlMessage(long connectionId);
+
+    /** Sends a validated H.264 WebRTC answer for the active session. */
+    static native String sendSessionAnswer(long connectionId, String sdp);
+
+    /** Sends one validated WebRTC ICE candidate for the active session. */
+    static native String sendSessionIce(
+            long connectionId, String mediaId, int mediaLineIndex, String candidate);
+
     /** Releases an approved signaling connection when the TV session ends. */
     static native boolean closeControlChannel(long connectionId);
 }

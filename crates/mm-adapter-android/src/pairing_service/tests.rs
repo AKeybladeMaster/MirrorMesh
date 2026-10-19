@@ -171,10 +171,19 @@ fn explicit_android_tv_service_pairs_over_the_shared_client_and_control_channel(
     assert_eq!(peers.get_peer(SENDER_ID).unwrap(), Some(approved));
 
     let mut sender_connection = pending_client.wait_for_decision().unwrap().connection;
+    assert!(
+        receiver_connection
+            .try_receive_control_message()
+            .unwrap()
+            .is_none()
+    );
     sender_connection
         .send_control_message(OFFER.as_bytes())
         .unwrap();
-    let received_offer = receiver_connection.receive_control_message().unwrap();
+    let received_offer = receiver_connection
+        .try_receive_control_message()
+        .unwrap()
+        .expect("a sent offer is available after the bounded poll");
     assert_eq!(
         received_offer.header.kind,
         mm_protocol::MessageKind::SessionOffer
