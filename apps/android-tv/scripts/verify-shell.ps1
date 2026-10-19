@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $appRoot = Split-Path $PSScriptRoot -Parent
 $manifestPath = Join-Path $appRoot 'app/src/main/AndroidManifest.xml'
 $layoutPath = Join-Path $appRoot 'app/src/main/res/layout/activity_main.xml'
+$videoLayoutPath = Join-Path $appRoot 'app/src/main/res/layout/activity_tv_video.xml'
 $stringsPath = Join-Path $appRoot 'app/src/main/res/values/strings.xml'
 $javaPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/MainActivity.java'
 $appGradlePath = Join-Path $appRoot 'app/build.gradle.kts'
@@ -35,6 +36,9 @@ if ('android.permission.INTERNET' -notin $permissions) {
 if ($permissions | Where-Object { $_ -match 'CAMERA|RECORD_AUDIO|MediaProjection|FOREGROUND_SERVICE' }) {
     throw 'The receive-only TV target must not request capture, camera, or microphone permissions.'
 }
+if ($permissions | Where-Object { $_ -match 'WRITE_EXTERNAL_STORAGE|READ_MEDIA_IMAGES|MANAGE_EXTERNAL_STORAGE' }) {
+    throw 'Saving a user-requested TV screenshot must not require broad storage permissions.'
+}
 if ($manifest.SelectSingleNode("//*[local-name()='application']").GetAttribute('usesCleartextTraffic', $androidNamespace) -ne 'false') {
     throw 'TV signaling must use TLS; cleartext traffic must remain disabled.'
 }
@@ -53,6 +57,7 @@ foreach ($file in $resourceFiles) {
 }
 
 $layout = [xml](Get-Content -LiteralPath $layoutPath -Raw)
+$videoLayout = [xml](Get-Content -LiteralPath $videoLayoutPath -Raw)
 $buttons = $layout.SelectNodes("//*[local-name()='Button']")
 if ($buttons.Count -lt 5) {
     throw 'TV screen must include its focusable pairing action buttons.'
@@ -62,6 +67,15 @@ foreach ($button in $buttons) {
         $button.GetAttribute('focusableInTouchMode', $androidNamespace) -ne 'true') {
         throw 'Every TV action button must support D-pad focus.'
     }
+}
+$screenshotButton = $videoLayout.SelectNodes("//*[local-name()='Button']") |
+    Where-Object { $_.GetAttribute('id', $androidNamespace) -eq '@+id/video_screenshot_button' } |
+    Select-Object -First 1
+if ($null -eq $screenshotButton -or
+    $screenshotButton.GetAttribute('focusable', $androidNamespace) -ne 'true' -or
+    $screenshotButton.GetAttribute('focusableInTouchMode', $androidNamespace) -ne 'true' -or
+    $screenshotButton.GetAttribute('enabled', $androidNamespace) -ne 'false') {
+    throw 'The screenshot action must be D-pad accessible and disabled until a frame is rendered.'
 }
 $grantControls = $layout.SelectNodes("//*[local-name()='CheckBox']")
 if ($grantControls.Count -ne 3) {
@@ -94,6 +108,20 @@ if ($receiverSource -notmatch 'HardwareVideoDecoderFactory' -or
     $receiverSource -notmatch 'setRemoteDescription\(' -or
     $receiverSource -notmatch '\.dispose\(') {
     throw 'The native receive adapter must require H.264, use hardware decoding, and render to a native surface.'
+}
+if ($receiverSource -notmatch 'requestScreenshotCapture\(' -or
+    $receiverSource -notmatch 'TvScreenshotFrame\.toNv21\(' -or
+    $receiverSource -notmatch 'YuvImage' -or
+    $receiverSource -notmatch 'screenshotExecutor\.shutdownNow\(') {
+    throw 'The receiver must capture one bounded decoded frame on request and close the snapshot worker.'
+}
+$videoActivityPath = Join-Path $appRoot 'app/src/main/java/com/mirrormesh/tv/TvVideoActivity.java'
+$videoActivitySource = Get-Content -LiteralPath $videoActivityPath -Raw
+if ($videoActivitySource -notmatch 'onScreenshotCaptured\(' -or
+    $videoActivitySource -notmatch 'MediaStore\.Images\.Media\.EXTERNAL_CONTENT_URI' -or
+    $videoActivitySource -notmatch 'getExternalFilesDir\(' -or
+    $videoActivitySource -notmatch 'requestScreenshotCapture\(') {
+    throw 'The fullscreen receiver must save an explicitly requested frame to a bounded user-visible destination.'
 }
 if ($receiverSource -match 'MediaProjection|ScreenCapturerAndroid|Camera2Enumerator|Camera1Enumerator') {
     throw 'The TV receiver must not start local screen or camera capture.'

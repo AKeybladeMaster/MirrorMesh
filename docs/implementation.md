@@ -26,6 +26,12 @@ Before opening the selected capture source, the pinned WebRTC adapter checks the
 
 This proves only source-level codec preference behavior. A reported H.264 capability does not establish that the Windows plugin selected a hardware encoder; no Windows build, SDP exchange, RTP frame, TV decode, or hardware test has run. Proposed [ADR-0044](adr/0044-windows-h264-codec-preference.md) records the negotiation boundary. Next: add a native synthetic source and verify the complete offer-to-decoded-frame path.
 
+## Task 44 — Android TV received-frame screenshot
+
+The fullscreen receiver now enables a D-pad accessible **Save screenshot** action after its first rendered frame. A click requests only the next decoded frame; the WebRTC I420 buffer is converted once to bounded NV21 memory, released immediately, and JPEG-compressed on a worker. The image is written to `Pictures/MirrorMesh` through MediaStore on Android 10+, or to the app-specific Pictures directory on earlier versions. The TV manifest gains no storage permission. A five-second timeout cancels a request if no new frame arrives. Proposed [ADR-0045](adr/0045-android-tv-received-frame-screenshot.md) records the memory and storage boundary.
+
+JDK-only conversion tests pass for padded planes, stride handling, ordering, and size checks. The Android SDK build and actual decoded-frame screenshot remain unverified, and no media source has delivered a TV frame yet. Next: implement and verify the synthetic H.264 sender-to-TV path.
+
 ## Task 25 Android explicit-action runtime assembly (2026-10-19)
 
 The Android phone app now opens `AndroidPairingIdentity` and `SqliteTrustedPeers` only after the user presses **Prepare pairing support**. JNI creates one process-owned `PairingRuntime`, stored beneath `noBackupFilesDir`, and returns a stable local UUIDv8 derived from the public-key fingerprint. The action opens local state only: it does not discover or contact peers, grant trust, request capture, or stream. Proposed [ADR-0030](adr/0030-android-pairing-runtime-assembly.md) records the assembly and its limits. Host Rust and Flutter gates pass; Android ARM64 compilation stops in `dart-sys` because NDK clang is unavailable, so no APK or device behavior is verified.

@@ -93,6 +93,18 @@ Task 42 is **SOURCE_IMPLEMENTED** for plugin-backed desktop track attachment onl
 
 Task 43 is **SOURCE_IMPLEMENTED** for H.264 sender preferences only. It does not prove hardware H.264 encoding, synthetic media generation, WGC capture, Android TV build/decode, or app-to-app operation. Keep those work items open.
 
+**Task 44 verification update:** The TV screenshot button stays disabled until the renderer reports its first frame. A user click arms a one-frame request; the receiver converts that next decoded I420 buffer to NV21 with a 3840x2160 and 12,441,600-byte bound, releases the WebRTC buffer immediately, then compresses one JPEG off the receive thread. Android 10+ writes to `Pictures/MirrorMesh` with MediaStore; older versions use app-specific Pictures storage. The manifest adds no broad storage permission. A five-second timeout clears an unanswered request.
+
+| Command / check | Result | Evidence and limits |
+|---|---:|---|
+| `javac --release 17` and five JDK-only Android TV test mains | 0 | Explicit compilation and execution cover local demo state, H.264 SDP policy, receiver state, pairing state, and screenshot plane conversion. The screenshot test validates padded planes, non-zero ByteBuffer positions, NV21 VU order, invalid dimensions, and short strides. |
+| `apps/android-tv/scripts/test-demo-state.ps1` | blocked | PowerShell refused to load the script because script execution is disabled in this environment. No execution-policy change or bypass was used; the same Java source list and test classes were compiled and run directly. |
+| `apps/android-tv/scripts/verify-shell.ps1` | not run | The source checks were updated for the D-pad screenshot button, storage-permission boundary, one-shot conversion, and output paths. The script could not be invoked under the current PowerShell execution policy; equivalent inline XML, permission, and source checks passed. |
+| Android TV APK / JNI / MediaStore screenshot | unavailable / not verified | Gradle and Android SDK/NDK are absent. No Android target compilation, MediaStore write, received WebRTC frame, screenshot artifact, emulator, or TV test ran. |
+| `git diff --check` | 0 | Task 44 source, resource, and documentation patch is whitespace-clean. |
+
+Task 44 is **SOURCE_IMPLEMENTED** for the user-triggered snapshot path. The JDK tests verify only I420-to-NV21 bounds and conversion; they do not compile Android classes or prove JPEG/MediaStore behavior. A decoded sender frame and actual saved image remain unverified; physical TV testing stays deferred.
+
 ## Current CORE kickoff evidence
 
 | Requirement | Source present | Verification status |

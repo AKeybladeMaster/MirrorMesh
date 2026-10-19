@@ -1,11 +1,18 @@
 package com.mirrormesh.tv;
 
 import android.content.Context;
+import android.graphics.ImageFormat;
+import android.graphics.Rect;
+import android.graphics.YuvImage;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Queue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.webrtc.AudioTrack;
 import org.webrtc.EglBase;
@@ -34,6 +41,8 @@ public final class TvWebRtcReceiver implements AutoCloseable {
     private static final int MAX_CANDIDATE_CHARS = 4096;
     private static final int MAX_MEDIA_ID_CHARS = 256;
     private static final int MAX_ICE_SERVERS = 8;
+    private static final int JPEG_QUALITY = 90;
+    private static final int MAX_JPEG_BYTES = 32 * 1024 * 1024;
     private static final Object FACTORY_LOCK = new Object();
     private static boolean factoryInitialized;
 
@@ -43,6 +52,10 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         void onFrameReceived(int width, int height, long frameCount);
 
         void onFirstFrameRendered();
+
+        void onScreenshotCaptured(byte[] jpeg, int width, int height);
+
+        void onScreenshotFailed();
 
         void onFailure(String code);
 
@@ -85,6 +98,26 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         }
     }
 
+    private static final class BoundedJpegOutputStream extends ByteArrayOutputStream {
+        @Override
+        public synchronized void write(int value) {
+            requireCapacity(1);
+            super.write(value);
+        }
+
+        @Override
+        public synchronized void write(byte[] bytes, int offset, int length) {
+            requireCapacity(length);
+            super.write(bytes, offset, length);
+        }
+
+        private void requireCapacity(int incomingBytes) {
+            if (incomingBytes < 0 || incomingBytes > MAX_JPEG_BYTES - count) {
+                throw new IllegalStateException("JPEG output exceeds the screenshot limit.");
+            }
+        }
+    }
+
     private final EglBase eglBase;
     private final PeerConnectionFactory factory;
     private final HardwareVideoDecoderFactory decoderFactory;
@@ -95,6 +128,12 @@ public final class TvWebRtcReceiver implements AutoCloseable {
     private final Object candidateLock = new Object();
     private final Queue<RemoteCandidate> pendingRemoteCandidates = new ArrayDeque<>();
     private final Queue<IceCandidate> pendingLocalCandidates = new ArrayDeque<>();
+    private final AtomicBoolean screenshotRequested = new AtomicBoolean();
+    private final ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "mirrormesh-tv-screenshot");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private volatile ApprovedSignalingChannel signaling;
     private volatile PeerConnection peerConnection;
@@ -210,6 +249,16 @@ public final class TvWebRtcReceiver implements AutoCloseable {
                 receivedFrameCount,
                 lastFrameWidth,
                 lastFrameHeight);
+    }
+
+    /** Captures only the next decoded frame after an explicit user action. */
+    public boolean requestScreenshotCapture() {
+        return !closed.get() && receivedFrameCount > 0
+                && screenshotRequested.compareAndSet(false, true);
+    }
+
+    public void cancelScreenshotCapture() {
+        screenshotRequested.set(false);
     }
 
     private void attachSignalingListeners(ApprovedSignalingChannel channel) {
@@ -510,10 +559,78 @@ public final class TvWebRtcReceiver implements AutoCloseable {
             long count = ++receivedFrameCount;
             listener.onFrameReceived(width, height, count);
             renderer.onFrame(frame);
+            if (screenshotRequested.compareAndSet(true, false)) {
+                queueScreenshotEncoding(frame);
+            }
         };
         remoteVideoTrack = videoTrack;
         videoSink = sink;
         videoTrack.addSink(sink);
+    }
+
+    private void queueScreenshotEncoding(VideoFrame frame) {
+        VideoFrame.I420Buffer i420 = null;
+        byte[] nv21;
+        int width;
+        int height;
+        try {
+            i420 = frame.getBuffer().toI420();
+            width = i420.getWidth();
+            height = i420.getHeight();
+            nv21 = TvScreenshotFrame.toNv21(
+                    width,
+                    height,
+                    i420.getDataY(),
+                    i420.getStrideY(),
+                    i420.getDataU(),
+                    i420.getStrideU(),
+                    i420.getDataV(),
+                    i420.getStrideV());
+        } catch (RuntimeException error) {
+            if (!closed.get()) {
+                listener.onScreenshotFailed();
+            }
+            return;
+        } finally {
+            if (i420 != null) {
+                i420.release();
+            }
+        }
+
+        try {
+            screenshotExecutor.execute(() -> {
+                if (closed.get()) {
+                    return;
+                }
+                try {
+                    byte[] jpeg = encodeJpeg(nv21, width, height);
+                    if (!closed.get()) {
+                        listener.onScreenshotCaptured(jpeg, width, height);
+                    }
+                } catch (RuntimeException error) {
+                    if (!closed.get()) {
+                        listener.onScreenshotFailed();
+                    }
+                }
+            });
+        } catch (RejectedExecutionException error) {
+            if (!closed.get()) {
+                listener.onScreenshotFailed();
+            }
+        }
+    }
+
+    private static byte[] encodeJpeg(byte[] nv21, int width, int height) {
+        YuvImage image = new YuvImage(nv21, ImageFormat.NV21, width, height, null);
+        BoundedJpegOutputStream output = new BoundedJpegOutputStream();
+        if (!image.compressToJpeg(new Rect(0, 0, width, height), JPEG_QUALITY, output)) {
+            throw new IllegalStateException("JPEG compression failed.");
+        }
+        byte[] jpeg = output.toByteArray();
+        if (jpeg.length == 0 || jpeg.length > MAX_JPEG_BYTES) {
+            throw new IllegalStateException("JPEG output exceeds the screenshot limit.");
+        }
+        return jpeg;
     }
 
     private void fail(String code) {
@@ -658,5 +775,7 @@ public final class TvWebRtcReceiver implements AutoCloseable {
         factory.dispose();
         renderer.release();
         eglBase.release();
+        screenshotRequested.set(false);
+        screenshotExecutor.shutdownNow();
     }
 }

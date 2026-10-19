@@ -21,5 +21,10 @@
     <string name="video_receiving">Receiving H.264 video</string>
     <string name="video_session_failed">The approved video session could not start. Return to pairing and try again.</string>
     <string name="video_session_revoked">Access was revoked. The video session has ended.</string>
+    <string name="video_screenshot_button">Save screenshot</string>
+    <string name="video_screenshot_waiting">Saving the next received frame...</string>
+    <string name="video_screenshot_timeout">No received frame arrived. Try again.</string>
+    <string name="video_screenshot_saved">Screenshot saved: %1$d x %2$d (%3$s)</string>
+    <string name="video_screenshot_failed">Could not save the received frame screenshot.</string>
     <string name="video_frame_diagnostics">Received %1$d × %2$d frame; %3$d frames received.</string>
 </resources>
