@@ -35,6 +35,7 @@ adb install -r .\releases\android-tv\MirrorMesh-tv-arm64-v8a-debug.apk
    sufficient; MirrorMesh does not need an account or a third-party identity connector.
 4. Paste the full invitation into the Windows app and choose **Pair with receiver**.
    An invitation expires after two minutes and is single use. Refresh it before retrying.
+   Refreshing the code also resumes the receiver's listener; no separate Wait press is needed.
 5. On Android, inspect the sender name, LAN address and fingerprint. Select **Allow view**
    and **Approve selected**. Reject unfamiliar requests. Approval alone does not start capture.
 6. On Windows choose **Choose what to share**, then select a screen or window.

@@ -1230,6 +1230,7 @@ dependencies = [
  "mm-ports",
  "mm-protocol",
  "mm-runtime",
+ "mm-security",
  "mm-store",
  "windows-sys 0.61.2",
  "zeroize",

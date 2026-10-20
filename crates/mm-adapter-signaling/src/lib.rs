@@ -486,6 +486,12 @@ impl WssPairingClient {
     {
         let invitation = parse_pairing_qr(invitation_uri, now_unix_seconds, approved_ports)
             .map_err(WssClientError::PairingQr)?;
+        let decision_deadline = Instant::now()
+            + Duration::from_secs(
+                invitation
+                    .expires_at_unix_seconds()
+                    .saturating_sub(now_unix_seconds),
+            );
         let proof = PairingProof::create_signed(
             invitation.device_id(),
             invitation.nonce(),
@@ -552,6 +558,7 @@ impl WssPairingClient {
             receiver_id: invitation.device_id(),
             peer_fingerprint: invitation.fingerprint(),
             requested_grants,
+            decision_deadline,
         })
     }
 }
@@ -562,6 +569,7 @@ pub struct PendingWssPairingClient {
     receiver_id: DeviceId,
     peer_fingerprint: PeerFingerprint,
     requested_grants: TrustedPeerGrants,
+    decision_deadline: Instant,
 }
 
 impl PendingWssPairingClient {
@@ -582,6 +590,13 @@ impl PendingWssPairingClient {
     pub fn try_wait_for_decision(
         &mut self,
     ) -> Result<Option<WssClientApprovedPairing>, WssClientError> {
+        if self.socket.is_none() {
+            return Err(WssClientError::Closed);
+        }
+        if Instant::now() >= self.decision_deadline {
+            self.cancel();
+            return Err(WssClientError::ApprovalTimedOut);
+        }
         let socket = self.socket.as_mut().ok_or(WssClientError::Closed)?;
         let frame = match socket.read_message() {
             Ok(Some(Message::Text(text))) => text,
@@ -657,6 +672,7 @@ pub struct WssClientApprovedPairing {
 /// Errors from QR-pinned sender-side pairing and decision handling.
 #[derive(Debug)]
 pub enum WssClientError {
+    ApprovalTimedOut,
     PairingQr(PairingQrError),
     Proof(PairingProofSigningError),
     Tls(TlsAdapterError),
@@ -677,6 +693,9 @@ pub enum WssClientError {
 impl fmt::Display for WssClientError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ApprovalTimedOut => {
+                formatter.write_str("receiver approval was not received before invitation expiry")
+            }
             Self::PairingQr(error) => write!(formatter, "pairing QR is invalid: {error:?}"),
             Self::Proof(error) => write!(formatter, "sender proof could not be created: {error}"),
             Self::Tls(error) => write!(formatter, "pinned TLS setup failed: {error}"),

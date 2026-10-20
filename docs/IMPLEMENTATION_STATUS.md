@@ -17,13 +17,29 @@ This document supersedes historical increment counts for this release candidate.
 | --- | --- | --- | --- |
 | Windows local identity and QR-pinned WSS client | Implemented | Rust workspace compiled | Pending |
 | Android identity, TLS listener, approval, SQLite trust | Implemented | ARM64 JNI compiled | Pending |
-| Windows real pairing and source-selection UI | Implemented; demo home removed | Flutter analysis passes; final EXE rebuild in progress | Pending |
-| Windows native desktop capture, H.264 WebRTC sender | Implemented through pinned plugin | Earlier Windows native build passed; final rebuild in progress | Pending |
+| Windows real pairing and source-selection UI | Implemented; demo home removed | Flutter analysis and 0.1.1 EXE packaging passed | Pending |
+| Windows native desktop capture, H.264 WebRTC sender | Implemented through pinned plugin | 0.1.1 Windows native build passed | Pending |
 | Android receive-only WebRTC, hardware H.264, fullscreen surface | Implemented | Phone and TV APK assembly passed | Pending |
 | Receiver screenshots | Implemented using received native frame | APK assembly passed | Pending |
-| Stop/reconnect/startup deadlines and cleanup | Implemented | Final compilation in progress | Pending |
+| Stop/reconnect/startup deadlines and cleanup | Implemented | Windows and Android builds passed | Pending |
 | Persisted receiver revocation and authenticated notification | Integrated | Android APK assembly passed | Pending |
 | Android 17 local-network consent, phone layout, invitation sharing | Integrated | Android APK assembly passed | Pending |
+
+## Pairing feedback and 0.1.1 checkpoint (2026-10-20)
+
+The user reports that Windows rejected an invitation or did not reach receiver approval.
+The exact error and receiver device model are pending; no device is attached to ADB.
+This failure has not been reproduced here and is not claimed resolved.
+
+Source changes add fixed `MM-PAIR-*` diagnostics for invitation, network, secure-handshake
+and approval failures, and bound the approval wait by invitation expiry. Android invitation
+refresh resumes listening and ignores callbacks from a cancelled older wait. TLS pinning,
+signed identity proof and explicit receiver consent remain enforced (ADR 0056).
+
+Windows x64 portable packaging and Android ARM64 phone/TV debug and unsigned release
+assembly succeeded. Installable debug previews and the Windows bundle are in `releases/`;
+large binaries are local, Git-ignored artifacts. These are **BUILD_VERIFIED**, not
+**HARDWARE_VERIFIED**. Successful pairing and received video remain unconfirmed.
 
 ## Remaining product work
 

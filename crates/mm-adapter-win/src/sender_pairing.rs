@@ -28,6 +28,34 @@ const PAIRING_ERROR_INVALID_APPROVAL: u32 = 5;
 const PAIRING_ERROR_INTERNAL: u32 = 6;
 const PAIRING_ERROR_CONTROL_CHANNEL: u32 = 7;
 
+// Stable diagnostic codes cross the existing scalar status ABI; never include invitation data.
+fn pairing_failure_code(error: &WssClientError) -> u32 {
+    use mm_security::PairingQrError;
+    match error {
+        WssClientError::PairingQr(PairingQrError::Expired) => 11,
+        WssClientError::PairingQr(PairingQrError::ExpiryTooFar) => 12,
+        WssClientError::PairingQr(_) => 10,
+        WssClientError::Io(error) => match error.kind() {
+            std::io::ErrorKind::ConnectionRefused => 13,
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => 14,
+            _ => 15,
+        },
+        WssClientError::WebSocketHandshake(_) => 16,
+        WssClientError::Proof(_) => 17,
+        WssClientError::PeerIdentityMismatch => 18,
+        WssClientError::Protocol(_)
+        | WssClientError::GrantsNotSubset
+        | WssClientError::UnexpectedMessageKind
+        | WssClientError::UnexpectedBinaryMessage => 19,
+        WssClientError::Tls(_) | WssClientError::TlsSetup(_) => 20,
+        WssClientError::ApprovalTimedOut => 21,
+        WssClientError::Rejected(_) => PAIRING_ERROR_INVITATION_REJECTED,
+        WssClientError::Closed => PAIRING_ERROR_CONTROL_CHANNEL_CLOSED,
+        WssClientError::RandomnessUnavailable => PAIRING_ERROR_INTERNAL,
+        WssClientError::WebSocket(_) => PAIRING_ERROR_SIGNALING_FAILED,
+    }
+}
+
 const MAX_SESSION_DESCRIPTION_BYTES: usize = 128 * 1024;
 const MAX_ICE_CANDIDATE_BYTES: usize = 4 * 1024;
 const MAX_ICE_MEDIA_ID_BYTES: usize = 256;
@@ -860,8 +888,8 @@ fn run_sender_pairing(
             );
             return;
         }
-        Err(_) => {
-            set_error_or_cancel(snapshot, PAIRING_ERROR_SIGNALING_FAILED, cancel_requested);
+        Err(error) => {
+            set_error_or_cancel(snapshot, pairing_failure_code(&error), cancel_requested);
             return;
         }
     };
@@ -935,8 +963,8 @@ fn run_sender_pairing(
                 );
                 return;
             }
-            Err(_) => {
-                set_error_or_cancel(snapshot, PAIRING_ERROR_SIGNALING_FAILED, cancel_requested);
+            Err(error) => {
+                set_error_or_cancel(snapshot, pairing_failure_code(&error), cancel_requested);
                 return;
             }
         }

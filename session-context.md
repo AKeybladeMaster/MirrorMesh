@@ -1,6 +1,40 @@
 # MirrorMesh session context
 
-Updated: 2026-10-19
+## CURRENT CHECKPOINT - 2026-10-20 (supersedes all historical instructions below)
+
+- Work, commit and push **only `test`**. Current base is `441d4f2`; original branch base
+  is `dev` at `5f3c957`. Never update `dev`, `main` or any `task_*` ref.
+- Follow the current short `AGENTS.md`: no test sources, unit/instrumentation suites,
+  fuzz targets or GitHub Actions. Builds, formatting and static analysis only.
+- User reports Windows rejecting an invitation or never reaching approval. Exact error
+  and Android device type remain pending. ADB lists no device; do not claim reproduction
+  or a working physical media path. Ask for the new `MM-PAIR-*` code, not the full link.
+- Version 0.1.1 adds actionable fixed-text pairing codes, an invitation-expiry deadline
+  for pending approval, automatic listening after Android QR refresh, and stale wait
+  callback suppression. Consent, proof verification and TLS pinning are unchanged.
+- Android build script now tolerates native informational stderr in Windows PowerShell
+  while checking process exit codes. No Defender bypass or encoded editing was used.
+- Windows x64 portable ZIP/EXE and Android ARM64 phone/TV debug and unsigned release
+  APKs built successfully. Local outputs are under `releases/`; binaries are Git-ignored.
+  Use debug APKs for installation; unsigned release APKs need the owner's signing key.
+- Rust workspace production check and Clippy, Flutter analysis and both platform builds
+  exited 0. Final post-review builds also exited 0; APK metadata confirms 0.1.1/code 2
+  and ARM64 for both flavors. No tests ran. This checkpoint accompanies the source commit;
+  use Git HEAD/status and origin/test to identify its final commit and push state.
+- Source/build boundaries and remaining products are in `docs/IMPLEMENTATION_STATUS.md`;
+  build commands in `docs/build-release.md`; usage in `docs/USER_GUIDE.md`; ADR 0056 records
+  this change. No project-wide CODE_COMPLETE or HARDWARE_VERIFIED claim is warranted.
+- Resume by collecting the user's exact error/receiver status and tracing that specific
+  stage. Do not repeat completed foundations or weaken identity checks to get a connection.
+- Toolchain: Rust 1.99.1; Flutter at
+  `C:\Users\Beasty\AppData\Local\Programs\MirrorMeshFlutter\flutter` (3.47.7/Dart 3.13.5);
+  JDK `C:\Program Files\Java\jdk-21.0.10`; SDK `.toolchains/android-sdk`, NDK 28.2.13676358;
+  VS 2022 Build Tools. Build/cache writes may need sandbox escalation.
+- Save this file periodically. No session-credit meter is exposed.
+
+## Historical context (retained for reference; not current branch policy)
+
+Historical update: 2026-10-19
 
 ## Active objective and user direction
 

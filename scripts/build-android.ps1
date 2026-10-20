@@ -10,14 +10,20 @@ if (-not $AndroidSdk) { $AndroidSdk = Join-Path $root '.toolchains/android-sdk' 
 $env:ANDROID_SDK_ROOT = (Resolve-Path -LiteralPath $AndroidSdk).Path
 if (-not $env:JAVA_HOME) { throw 'Set JAVA_HOME to a JDK 17 or newer installation.' }
 $rustTarget = if ($Abi -eq 'arm64-v8a') { 'aarch64-linux-android' } else { 'x86_64-linux-android' }
-& rustup target add $rustTarget
+try {
+    # Windows PowerShell treats redirected native stderr as ErrorRecord objects.
+    # Rust/Gradle emit informational messages there; their exit code is authoritative.
+    $ErrorActionPreference = 'Continue'
+    & rustup target add $rustTarget
+} finally { $ErrorActionPreference = 'Stop' }
 if ($LASTEXITCODE -ne 0) { throw 'Rust Android target installation failed.' }
 $variant = (Get-Culture).TextInfo.ToTitleCase($Configuration)
 Push-Location (Join-Path $root 'apps/android-tv')
 try {
+    $ErrorActionPreference = 'Continue'
     & ./gradlew.bat ":app:assemblePhone$variant" ":app:assembleTv$variant" "-PmmAndroidAbi=$Abi" --console=plain --no-daemon
     if ($LASTEXITCODE -ne 0) { throw 'Android APK build failed.' }
-} finally { Pop-Location }
+} finally { $ErrorActionPreference = 'Stop'; Pop-Location }
 
 foreach ($flavor in @('phone', 'tv')) {
     $source = Join-Path $root "apps/android-tv/app/build/outputs/apk/$flavor/$Configuration"

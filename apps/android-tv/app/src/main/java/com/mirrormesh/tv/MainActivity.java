@@ -77,6 +77,7 @@ public final class MainActivity extends Activity {
     private boolean decisionInProgress;
     private boolean destroyed;
     private int serviceGeneration;
+    private int waitGeneration;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -293,13 +294,17 @@ public final class MainActivity extends Activity {
                 + PAIRING_PORT + ".");
         serviceState.setText("Pairing is active. No screen video is connected.");
         renderState();
+        int generation = ++waitGeneration;
         acceptWorker.execute(() -> {
             try {
                 JSONObject request = requireSuccess(NativePairingBridge.waitForPairingRequest());
-                runOnUiThread(() -> showPendingRequest(request));
+                runOnUiThread(() -> {
+                    if (!destroyed && generation == waitGeneration) showPendingRequest(request);
+                });
             } catch (Exception | LinkageError error) {
                 runOnUiThread(() -> {
-                    if (destroyed || pairingState.phase() != TvPairingState.Phase.WAITING_FOR_REQUEST) {
+                    if (destroyed || generation != waitGeneration
+                            || pairingState.phase() != TvPairingState.Phase.WAITING_FOR_REQUEST) {
                         return;
                     }
                     String message = error.getMessage() == null ? "Pairing wait failed" : error.getMessage();
@@ -632,6 +637,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (cancelWait) {
+            ++waitGeneration;
             pairingState.waitFailed();
         }
         decisionInProgress = true;
@@ -654,10 +660,11 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     displayInvitation(freshInvitation);
-                    requestDetails.setText("Fresh invitation created. Select Wait for sender to listen.");
+                    requestDetails.setText("Fresh invitation created. Ready for the PC to pair.");
                     serviceState.setText(R.string.pairing_ready);
                     renderState();
                     refreshQrButton.requestFocus();
+                    waitForSender();
                 });
             } catch (Exception | LinkageError error) {
                 runOnUiThread(() -> {
@@ -693,6 +700,7 @@ public final class MainActivity extends Activity {
         activeSignaling = null;
         tvReceiverState = null;
         serviceGeneration++;
+        waitGeneration++;
         pairingState.receiverStopped();
         decisionInProgress = false;
         clearGrantSelection();

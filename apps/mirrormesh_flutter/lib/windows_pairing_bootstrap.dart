@@ -295,4 +295,29 @@ class WindowsSenderPairingStatus {
   final WindowsSenderPairingState state;
   final int errorCode;
   final String receiverFingerprint;
+
+  String? get failureDescription => switch (errorCode) {
+    0 => null,
+    1 => 'Windows could not open its protected device identity or trust store.',
+    2 =>
+      'The receiver rejected pairing. Refresh its invitation before retrying.',
+    3 => 'The authenticated signaling connection failed. Check the receiver status.',
+    4 => 'The receiver closed the connection before approval. Check its status and refresh the invitation.',
+    5 => 'The receiver did not approve screen viewing. Select Allow view and approve the new request.',
+    6 => 'Windows could not complete a local pairing operation.',
+    7 => 'The approved signaling channel failed.',
+    10 => 'The invitation format is invalid. Copy the entire mirrormesh://pair link, not a browser search or sharing-page URL.',
+    11 => 'This invitation has expired. Refresh the code on Android, then immediately copy and paste the new link.',
+    12 => 'The invitation expiry is ahead of the allowed window. Enable automatic date and time on both devices, then refresh the code.',
+    13 => 'The receiver refused the connection. Start the receiver and check its selected Wi-Fi or Ethernet address.',
+    14 => 'The receiver did not answer in time. Check that both devices are on the same LAN and the receiver is listening.',
+    15 => 'Windows could not reach the receiver. Check the network, selected address and app-specific firewall access.',
+    16 => 'The secure TLS/WebSocket handshake failed. Use a fresh invitation from this receiver and check its status. Identity checks remain enforced.',
+    17 => 'Windows could not sign its pairing request with the local device identity.',
+    18 => 'The receiver identity did not match the invitation. Pairing was blocked.',
+    19 => 'The receiver returned an invalid pairing response. Update both apps to the same build.',
+    20 => 'The pinned TLS connection could not be initialized.',
+    21 => 'The invitation expired while waiting for approval. Refresh the receiver code and approve the next request promptly.',
+    _ => 'Pairing failed with an unrecognized native status. Update both apps to the same build.',
+  };
 }

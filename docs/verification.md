@@ -7,11 +7,20 @@ Historical test evidence on `dev` does not establish correctness of these new ch
 ## Current evidence
 
 - Rust production workspace compilation: passed (`cargo check --workspace --lib --offline`, exit 0).
-- Flutter static analysis: passed after eight brace-style fixes (exit 0).
-- Android ARM64 Rust JNI and Java: compiled; phone and TV release/debug APK assembly passed.
-- Final packaged Windows EXE, updated Android artifacts and checksum inventory: being finalized.
+- Rust production Clippy: `cargo clippy --workspace --lib --locked -- -D warnings`, exit 0.
+- Flutter static analysis: `flutter analyze`, no issues, exit 0.
+- Windows 0.1.1: `scripts/build-windows.ps1`, portable EXE, dependencies and ZIP packaged, exit 0.
+- Android 0.1.1 ARM64 Rust JNI and Java: `scripts/build-android.ps1 -Configuration debug`
+  and `-Configuration release`, phone and TV APK assembly and checksum generation, exit 0.
+  Debug APKs are locally signed previews; release APKs are unsigned.
 - Hardware pairing, capture, transmission, MediaCodec rendering and resource behavior: pending.
 - Release signing, Windows installer, Google Play upload and store acceptance: pending.
+
+Evidence above was collected on 2026-10-20. Gradle reports deprecations for a future Gradle 10
+upgrade; the pinned Gradle 9.8.1 builds succeeded. No dependencies were upgraded for this fix.
+The user reported an invitation/approval failure. No Android device is attached to ADB;
+the exact failure message is pending. The new diagnostics and refresh changes do not prove
+that the original device failure has been resolved.
 
 ## Final user device validation
 
