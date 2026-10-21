@@ -1,5 +1,22 @@
 # MirrorMesh session context
 
+## CURRENT UI CHECKPOINT - test_2 / Android 0.1.2
+
+- User confirms PC-to-Android-phone sharing works on the baseline and requested UI/UX
+  accessibility improvements, exclusively on new `test_2` based on `test` at `d5d6053`.
+  This overrides older branch instructions below. Do not change/push `test` or other refs.
+- Inspected global design-mobile-apps, ui-taste and frontend-design skills; applied
+  frontend-design to the native Views. See docs/android-ui.md for layout/tokens.
+- Implemented staged setup/invitation/approval layouts, scalable 56dp-minimum controls,
+  focus contrast, a labelled network selector, separate scrollable video controls with
+  explicit show/hide, quiet frame details, and a revocation confirmation dialog.
+- Android version is 0.1.2/code 3; identity, transport, media and consent remain intact.
+  Debug/release builds and static lint are pending. No tests or workflows are allowed.
+- Preserve the pre-existing untracked releases/MirrorMesh-win-x64/ directory. Do not
+  stage or delete it. Generated APKs remain ignored; checksums accompany source commits.
+- New UI has not been visually rendered or verified with TalkBack/TV remote. No emulator
+  is installed in the workspace SDK. Baseline success is user-reported, device details unknown.
+
 ## CURRENT CHECKPOINT - 2026-10-20 (supersedes all historical instructions below)
 
 - Work, commit and push **only `test`**. Current base is `441d4f2`; original branch base

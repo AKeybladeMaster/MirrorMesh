@@ -91,9 +91,10 @@ public final class H264SdpPolicy {
                     continue;
                 }
                 String encoding = line.substring(separator + 1).trim().toUpperCase(Locale.ROOT);
-                if (videoMappings.putIfAbsent(payload, encoding) != null) {
+                if (videoMappings.containsKey(payload)) {
                     return false;
                 }
+                videoMappings.put(payload, encoding);
             }
         }
 

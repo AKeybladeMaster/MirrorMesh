@@ -1,7 +1,9 @@
 package com.mirrormesh.tv;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentValues;
+import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -10,7 +12,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.WindowManager;
+import android.view.View;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -24,6 +28,9 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
     private TvPendingApprovedOffer pendingOffer;
     private TvWebRtcReceiver receiver;
     private TextView diagnosticsText;
+    private TextView frameDetails;
+    private View controlsPanel;
+    private Button controlsToggle;
     private Button screenshotButton;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Runnable screenshotTimeout;
@@ -37,9 +44,33 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_tv_video);
+        View root = findViewById(R.id.video_root);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets safe = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+                return insets;
+            }
+            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets;
+        });
 
         SurfaceViewRenderer videoSurface = findViewById(R.id.video_surface);
         diagnosticsText = findViewById(R.id.video_diagnostics);
+        frameDetails = findViewById(R.id.video_frame_details);
+        controlsPanel = findViewById(R.id.video_controls_panel);
+        controlsToggle = findViewById(R.id.video_controls_toggle);
+        adaptViewerLayout();
+        controlsToggle.setOnClickListener(view -> setControlsVisible(controlsPanel.getVisibility() != View.VISIBLE));
+        Button detailsToggle = findViewById(R.id.video_details_toggle);
+        View detailsPanel = findViewById(R.id.video_details_panel);
+        detailsToggle.setOnClickListener(view -> {
+            boolean visible = detailsPanel.getVisibility() != View.VISIBLE;
+            detailsPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
+            detailsToggle.setText(visible ? R.string.hide_details : R.string.show_details);
+        });
         screenshotButton = findViewById(R.id.video_screenshot_button);
         Button disconnectButton = findViewById(R.id.video_disconnect_button);
         screenshotButton.setOnClickListener(view -> requestScreenshotCapture());
@@ -47,16 +78,12 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
         Button revokeButton = findViewById(R.id.video_revoke_button);
         revokeButton.setOnClickListener(view -> {
             if (ended || pendingOffer == null) return;
-            revokeButton.setEnabled(false);
-            pendingOffer.signaling.revoke(message -> runOnUiThread(() -> {
-                if (isDestroyed()) return;
-                if (message.isEmpty()) {
-                    pendingOffer.state.revoke();
-                    finish();
-                }
-                else diagnosticsText.setText(message);
-            }));
-            closeReceiver();
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.revoke_title)
+                    .setMessage(R.string.revoke_help)
+                    .setNegativeButton(R.string.keep_access, null)
+                    .setPositiveButton(R.string.revoke_access, (dialog, which) -> revokeAccess(revokeButton))
+                    .show();
         });
 
         pendingOffer = TvApprovedSessionLauncher.takePending();
@@ -100,8 +127,8 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
             return;
         }
         runOnUiThread(() -> {
-            if (diagnosticsText != null && !ended) {
-                diagnosticsText.setText(getString(
+            if (frameDetails != null && !ended) {
+                frameDetails.setText(getString(
                         R.string.video_frame_diagnostics, width, height, frameCount));
             }
         });
@@ -109,7 +136,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
 
     @Override
     public void onFirstFrameRendered() {
-        onStatus(getString(R.string.video_receiving));
+        onStatus(getString(R.string.receiving_screen));
         runOnUiThread(() -> {
             if (screenshotButton != null && !ended) {
                 screenshotButton.setEnabled(true);
@@ -160,6 +187,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
                         ? R.string.video_reconnect_failed
                         : R.string.video_session_failed;
                 diagnosticsText.setText(getString(status));
+                setControlsVisible(true);
             }
         });
     }
@@ -172,11 +200,6 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
             }
             finish();
         });
-    }
-
-    @Override
-    public void onBackPressed() {
-        endSession();
     }
 
     @Override
@@ -197,6 +220,51 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
     private void endSession() {
         closeReceiver();
         finish();
+    }
+
+    private void setControlsVisible(boolean visible) {
+        controlsPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
+        controlsToggle.setText(visible ? R.string.hide_controls : R.string.show_controls);
+        // Keep an explicit, labelled way back to the controls for touch, TalkBack and D-pad users.
+        if (!visible) controlsToggle.requestFocus();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        adaptViewerLayout();
+    }
+
+    private void adaptViewerLayout() {
+        Configuration configuration = getResources().getConfiguration();
+        boolean stacked = configuration.screenWidthDp < 600;
+        float density = getResources().getDisplayMetrics().density;
+        LinearLayout root = findViewById(R.id.video_root);
+        View stage = findViewById(R.id.video_stage);
+        root.setOrientation(stacked ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        stage.setLayoutParams(new LinearLayout.LayoutParams(
+                stacked ? LinearLayout.LayoutParams.MATCH_PARENT : 0,
+                stacked ? 0 : LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        controlsPanel.setLayoutParams(new LinearLayout.LayoutParams(
+                stacked ? LinearLayout.LayoutParams.MATCH_PARENT : (int) (220 * density),
+                stacked ? (int) (Math.min(280, configuration.screenHeightDp * 0.45f) * density)
+                        : LinearLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private void revokeAccess(Button revokeButton) {
+        if (ended || pendingOffer == null) return;
+        revokeButton.setEnabled(false);
+        pendingOffer.signaling.revoke(message -> runOnUiThread(() -> {
+            if (isDestroyed()) return;
+            if (message.isEmpty()) {
+                pendingOffer.state.revoke();
+                finish();
+            } else {
+                diagnosticsText.setText(message);
+                setControlsVisible(true);
+            }
+        }));
+        closeReceiver();
     }
 
     private void closeReceiver() {

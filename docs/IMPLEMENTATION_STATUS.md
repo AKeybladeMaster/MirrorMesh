@@ -1,6 +1,6 @@
 # Implementation status — test release integration
 
-Branch baseline: `dev` at `5f3c957`. Current work belongs exclusively to `test`.
+Branch baseline: `test` at `d5d6053`. Current work belongs exclusively to `test_2`.
 This document supersedes historical increment counts for this release candidate.
 
 ## Readiness labels
@@ -8,7 +8,8 @@ This document supersedes historical increment counts for this release candidate.
 - **Source implemented:** integrated code exists; this alone does not prove runtime behavior.
 - **Build verified:** an actual compiler/package build succeeded for the stated target.
 - **Automated integration verified:** not claimed for this branch; user requested no test suites.
-- **Hardware verified:** no physical sender/receiver session has been run in this work.
+- **Hardware verified:** the user reports successful Windows-to-Android-phone screen sharing
+  on the 0.1.1 baseline. Device/OS/GPU details, TV behavior and new UI behavior remain unverified.
 - **CODE_COMPLETE:** the complete agreed product requirements are implemented; not yet achieved project-wide.
 
 ## Current reference pipeline
@@ -25,11 +26,23 @@ This document supersedes historical increment counts for this release candidate.
 | Persisted receiver revocation and authenticated notification | Integrated | Android APK assembly passed | Pending |
 | Android 17 local-network consent, phone layout, invitation sharing | Integrated | Android APK assembly passed | Pending |
 
-## Pairing feedback and 0.1.1 checkpoint (2026-10-20)
+## Android 0.1.2 UI checkpoint
+
+The user confirms PC screen sharing works on an Android phone and requested Android
+accessibility/visibility improvements on a new `test_2` branch. Source changes reorganize
+setup, invitation sharing and approval; use scalable text and minimum 56dp controls;
+correct focused-button contrast; and separate video controls from the rendering surface.
+Connection details are expandable and revocation requires confirmation. Frame counters
+no longer replace screenshot feedback. Transport, identity and media code are unchanged.
+Compilation and static analysis of the new UI are in progress; native visual/TalkBack
+verification has not been performed. See `docs/android-ui.md` for design and boundaries.
+
+## Historical pairing feedback and 0.1.1 checkpoint (2026-10-20)
 
 The user reports that Windows rejected an invitation or did not reach receiver approval.
 The exact error and receiver device model are pending; no device is attached to ADB.
-This failure has not been reproduced here and is not claimed resolved.
+This failure was not reproduced here. The later user report confirms successful PC-to-phone
+sharing, without establishing the original failure cause or compatibility with other devices.
 
 Source changes add fixed `MM-PAIR-*` diagnostics for invitation, network, secure-handshake
 and approval failures, and bound the approval wait by invitation expiry. Android invitation
@@ -39,7 +52,7 @@ signed identity proof and explicit receiver consent remain enforced (ADR 0056).
 Windows x64 portable packaging and Android ARM64 phone/TV debug and unsigned release
 assembly succeeded. Installable debug previews and the Windows bundle are in `releases/`;
 large binaries are local, Git-ignored artifacts. These are **BUILD_VERIFIED**, not
-**HARDWARE_VERIFIED**. Successful pairing and received video remain unconfirmed.
+**HARDWARE_VERIFIED** across devices. The later PC-to-phone success is user-reported evidence.
 
 ## Remaining product work
 

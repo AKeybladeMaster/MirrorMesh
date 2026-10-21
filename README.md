@@ -1,8 +1,8 @@
 # MirrorMesh
 
 Local screen sharing from a **Windows x64 PC to a native Android phone, tablet or TV receiver**.
-This `test` branch is the release integration branch. It was created from `dev` at
-`5f3c957`; no other branch is changed by this work.
+This `test_2` branch contains Android UI/accessibility improvements, based on `test` at
+`d5d6053`. The working `test` branch and all other branches remain unchanged.
 
 ## Get started
 

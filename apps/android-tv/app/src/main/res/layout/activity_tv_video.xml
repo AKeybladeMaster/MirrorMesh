@@ -1,64 +1,33 @@
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#000000">
-
-    <org.webrtc.SurfaceViewRenderer
-        android:id="@+id/video_surface"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:contentDescription="Received MirrorMesh screen" />
-
-    <TextView
-        android:id="@+id/video_diagnostics"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_margin="32dp"
-        android:accessibilityLiveRegion="polite"
-        android:background="#B8000000"
-        android:padding="12dp"
-        android:text="Connecting to approved sender"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp" />
-
-    <Button
-        android:id="@+id/video_screenshot_button"
-        android:layout_width="wrap_content"
-        android:layout_height="64dp"
-        android:layout_gravity="bottom|start"
-        android:layout_margin="36dp"
-        android:background="@drawable/tv_button_background"
-        android:contentDescription="@string/video_screenshot_button"
-        android:enabled="false"
-        android:focusable="true"
-        android:focusableInTouchMode="true"
-        android:text="@string/video_screenshot_button"
-        android:textAllCaps="false"
-        android:textSize="18sp" />
-
-    <Button
-        android:id="@+id/video_revoke_button"
-        android:layout_width="wrap_content"
-        android:layout_height="64dp"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="36dp"
-        android:background="@drawable/tv_button_background"
-        android:focusable="true"
-        android:text="Revoke access"
-        android:textAllCaps="false"
-        android:textSize="16sp" />
-
-    <Button
-        android:id="@+id/video_disconnect_button"
-        android:layout_width="wrap_content"
-        android:layout_height="64dp"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="36dp"
-        android:background="@drawable/tv_button_background"
-        android:focusable="true"
-        android:focusableInTouchMode="true"
-        android:text="Disconnect"
-        android:textAllCaps="false"
-        android:textSize="18sp" />
-</FrameLayout>
+﻿<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/video_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="horizontal" android:background="#000000" android:baselineAligned="false">
+    <FrameLayout android:id="@+id/video_stage" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
+        <org.webrtc.SurfaceViewRenderer android:id="@+id/video_surface"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:contentDescription="@string/received_screen_description" />
+        <Button android:id="@+id/video_controls_toggle" style="@style/MeshButton"
+            android:layout_width="wrap_content" android:layout_gravity="top|end"
+            android:layout_margin="8dp" android:text="@string/hide_controls" />
+    </FrameLayout>
+    <ScrollView android:id="@+id/video_controls_panel" android:layout_width="220dp"
+        android:layout_height="match_parent" android:background="@color/screen_background" android:fillViewport="true">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="16dp">
+            <TextView style="@style/MeshText.Heading" android:text="@string/screen_session" />
+            <TextView android:id="@+id/video_diagnostics" style="@style/MeshText"
+                android:layout_marginTop="12dp" android:accessibilityLiveRegion="polite" android:text="@string/connecting_sender" />
+            <Button android:id="@+id/video_screenshot_button" style="@style/MeshButton.Primary"
+                android:enabled="false" android:text="@string/video_screenshot_button" />
+            <TextView style="@style/MeshText.Secondary" android:layout_marginTop="8dp" android:text="@string/screenshot_help" />
+            <Button android:id="@+id/video_disconnect_button" style="@style/MeshButton" android:text="@string/disconnect_sender" />
+            <Button android:id="@+id/video_details_toggle" style="@style/MeshButton" android:text="@string/show_details" />
+            <LinearLayout android:id="@+id/video_details_panel" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                <TextView android:id="@+id/video_frame_details" style="@style/MeshText.Secondary"
+                    android:layout_marginTop="8dp" android:text="@string/waiting_video" />
+                <TextView style="@style/MeshText.Secondary" android:layout_marginTop="16dp" android:text="@string/revoke_help" />
+                <Button android:id="@+id/video_revoke_button" style="@style/MeshButton" android:text="@string/revoke_access" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

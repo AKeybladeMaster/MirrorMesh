@@ -4,7 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -ne 'test') { throw 'Build this release from the test branch.' }
+if ((git -C $root branch --show-current) -ne 'test_2') { throw 'Build this release from the test_2 branch.' }
 if (-not $FlutterRoot) {
     $installedFlutter = Join-Path $env:LOCALAPPDATA 'Programs/MirrorMeshFlutter/flutter'
     if (Test-Path -LiteralPath $installedFlutter) { $FlutterRoot = $installedFlutter }

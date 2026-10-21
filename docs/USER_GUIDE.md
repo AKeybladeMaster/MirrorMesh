@@ -10,7 +10,8 @@ Keep every DLL and the `data` folder beside it. You can also run the executable 
 **Android TV/Google TV:** install the `tv` APK in `releases/android-tv`.
 ARM64 is the default build. The receiver requires an Android device with a hardware
 H.264 decoder. The native receiver supports Android 5/API 21 and newer, subject to that
-codec requirement. Builds have not been installed on physical devices yet.
+codec requirement. The user reported successful PC-to-phone sharing on 0.1.1;
+the 0.1.2 interface changes still need on-device accessibility and layout review.
 
 The `debug` APKs are locally signed previews. The `release-unsigned` APKs cannot be
 installed until signed. Local previews and releases have the same application ID;
@@ -37,11 +38,17 @@ adb install -r .\releases\android-tv\MirrorMesh-tv-arm64-v8a-debug.apk
    An invitation expires after two minutes and is single use. Refresh it before retrying.
    Refreshing the code also resumes the receiver's listener; no separate Wait press is needed.
 5. On Android, inspect the sender name, LAN address and fingerprint. Select **Allow view**
-   and **Approve selected**. Reject unfamiliar requests. Approval alone does not start capture.
+   and **Approve selected permissions**. Reject unfamiliar requests. Approval alone does not start capture.
 6. On Windows choose **Choose what to share**, then select a screen or window.
    The selected source is captured by the native WebRTC plugin and sent as H.264.
 7. Android opens the fullscreen renderer. **Save screenshot** stores a received frame as JPEG.
    Android 10+ uses `Pictures/MirrorMesh`; older devices use the app's external-files Pictures folder.
+
+In Android 0.1.2, **Hide controls** expands the viewing area; **Show controls** remains
+available to reopen the panel. The panel scrolls when text is enlarged. **Connection details**
+contains frame counters and **Revoke access**, which asks for confirmation. **Disconnect**
+ends the current session without revoking saved approval. Screenshot results remain visible
+instead of being replaced by frame counters. Controls never disappear on a timer.
 
 Windows encoded-frame and byte counters confirm sender activity only. A visible changing
 image on Android is needed to confirm reception and presentation.

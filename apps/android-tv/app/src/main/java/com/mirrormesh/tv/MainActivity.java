@@ -87,6 +87,12 @@ public final class MainActivity extends Activity {
         adaptLayout();
         View root = findViewById(android.R.id.content);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets safe = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+                return insets;
+            }
             view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                     insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
             return insets;
@@ -131,7 +137,8 @@ public final class MainActivity extends Activity {
     }
 
     private void adaptLayout() {
-        boolean compact = getResources().getConfiguration().screenWidthDp < 700;
+        Configuration configuration = getResources().getConfiguration();
+        boolean compact = configuration.screenWidthDp / configuration.fontScale < 700;
         LinearLayout columns = findViewById(R.id.pairing_columns);
         columns.setOrientation(compact ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         View codePanel = findViewById(R.id.pairing_code_panel);
@@ -144,6 +151,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams controlsParams = (LinearLayout.LayoutParams) controls.getLayoutParams();
         controlsParams.width = compact ? LinearLayout.LayoutParams.MATCH_PARENT : 0;
         controlsParams.weight = compact ? 0 : 1;
+        controlsParams.topMargin = compact ? (int) (24 * getResources().getDisplayMetrics().density) : 0;
         controls.setLayoutParams(controlsParams);
     }
 
@@ -223,8 +231,8 @@ public final class MainActivity extends Activity {
                 left.address.compareTo(right.address));
 
         ArrayAdapter<LocalEndpoint> adapter = new ArrayAdapter<>(
-                this, android.R.layout.simple_spinner_item, localEndpoints);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                this, R.layout.network_address_item, localEndpoints);
+        adapter.setDropDownViewResource(R.layout.network_address_item);
         endpointSpinner.setAdapter(adapter);
         if (localEndpoints.isEmpty()) {
             serviceState.setText(R.string.pairing_no_address);
@@ -765,7 +773,25 @@ public final class MainActivity extends Activity {
         endpointSpinner.setEnabled(stopped && !localEndpoints.isEmpty());
         startButton.setEnabled(nativeReady && stopped && !decisionInProgress);
         stopButton.setEnabled(!stopped);
-        waitButton.setVisibility(!stopped ? View.VISIBLE : View.GONE);
+        findViewById(R.id.network_setup).setVisibility(stopped ? View.VISIBLE : View.GONE);
+        startButton.setVisibility(stopped ? View.VISIBLE : View.GONE);
+        stopButton.setVisibility(stopped ? View.GONE : View.VISIBLE);
+        findViewById(R.id.pairing_columns).setVisibility(stopped ? View.GONE : View.VISIBLE);
+        findViewById(R.id.pairing_code_panel).setVisibility(pending || paired ? View.GONE : View.VISIBLE);
+        findViewById(R.id.pairing_controls).setVisibility(pending || paired || pairingState.canWait()
+                ? View.VISIBLE : View.GONE);
+        boolean hasInvitation = invitationText.getVisibility() == View.VISIBLE;
+        findViewById(R.id.copy_invitation_button).setEnabled(hasInvitation && !decisionInProgress);
+        findViewById(R.id.share_invitation_button).setEnabled(hasInvitation && !decisionInProgress);
+        approveButton.setVisibility(pending ? View.VISIBLE : View.GONE);
+        rejectButton.setVisibility(pending ? View.VISIBLE : View.GONE);
+        closeChannelButton.setVisibility(paired ? View.VISIBLE : View.GONE);
+        if (!pending) {
+            grantView.setVisibility(View.GONE);
+            grantSend.setVisibility(View.GONE);
+            grantAnnotate.setVisibility(View.GONE);
+        }
+        waitButton.setVisibility(pairingState.canWait() ? View.VISIBLE : View.GONE);
         waitButton.setEnabled(pairingState.canWait() && !decisionInProgress);
         refreshQrButton.setVisibility(!stopped ? View.VISIBLE : View.GONE);
         refreshQrButton.setEnabled((pairingState.canWait() || waiting) && !decisionInProgress);
