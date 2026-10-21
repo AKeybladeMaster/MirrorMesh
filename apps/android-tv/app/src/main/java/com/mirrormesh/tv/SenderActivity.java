@@ -97,7 +97,14 @@ public final class SenderActivity extends Activity {
         if (code != 88 || result != RESULT_OK || data == null) return;
         Intent service = new Intent(this, ScreenSenderService.class).putExtra("projection", data).putExtra("request", requestId);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-        transferred = true; share.setEnabled(false); status.setText("Screen sharing started. Use Stop sharing or the Android notification to end it.");
+        transferred = true; share.setEnabled(false); status.setText("Preparing screen sharing…");
+        handler.postDelayed(this::refreshSharingStatus, 500);
+    }
+
+    private void refreshSharingStatus() {
+        if (destroyed || !transferred) return;
+        status.setText(ScreenSenderService.sharingStatus());
+        handler.postDelayed(this::refreshSharingStatus, 500);
     }
 
     @Override protected void onDestroy() {

@@ -1,5 +1,4 @@
 use mm_adapter_discovery::MdnsDiscoveryAdapter;
-use mm_ports::DiscoveryCandidatesPort;
 use serde_json::json;
 
 #[cfg(windows)]
@@ -10,6 +9,7 @@ static RECEIVER_ADVERTISEMENT: std::sync::OnceLock<mm_adapter_discovery::MdnsSer
 pub(crate) fn publish_receiver(
     id: mm_domain::DeviceId,
     address: std::net::SocketAddr,
+    fingerprint: mm_domain::PeerFingerprint,
 ) -> Result<(), mm_ports::PortError> {
     use mm_domain::{CapabilitySet, Device, DeviceRole};
     let capabilities = CapabilitySet::new(1920, 1080, 60, true, false)
@@ -24,10 +24,11 @@ pub(crate) fn publish_receiver(
     .map_err(|_| mm_ports::PortError::InvalidConfiguration)?;
     RECEIVER_ADVERTISEMENT
         .get_or_init(Default::default)
-        .publish(
+        .publish_with_fingerprint(
             &device,
             &format!("mirrormesh-{short_id}.local."),
             &[address.ip()],
+            Some(fingerprint),
         )
 }
 
@@ -45,11 +46,15 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 #[unsafe(no_mangle)]
 pub extern "C" fn mirrormesh_discover_devices() -> *mut c_char {
     let result = catch_unwind(AssertUnwindSafe(|| {
-        match MdnsDiscoveryAdapter::new().discover_candidates() {
+        match MdnsDiscoveryAdapter::new().discover_services() {
             Ok(candidates) => json!({"ok":true, "devices": candidates.into_iter().map(|candidate| {
                 json!({"id":candidate.device.id.to_string(), "name":candidate.device.display_name,
                     "send":candidate.device.role.can_send(), "receive":candidate.device.role.can_receive(),
-                    "endpoints":candidate.endpoints.iter().map(ToString::to_string).collect::<Vec<_>>()})
+                    "request_fingerprint":candidate.request_fingerprint.map(|fp| fp.to_hex()),
+                    "endpoints":candidate.endpoint.addresses.iter().filter_map(|address| {
+                        format!("{}:{}", address, candidate.endpoint.port).parse::<std::net::SocketAddr>().ok()
+                            .or_else(|| format!("[{}]:{}", address, candidate.endpoint.port).parse().ok())
+                    }).map(|address| address.to_string()).collect::<Vec<_>>()})
             }).collect::<Vec<_>>() }),
             Err(_) => json!({"ok":false,"error":"Local device search is unavailable. Check multicast and app-specific firewall access."}),
         }

@@ -12,6 +12,8 @@ import java.util.concurrent.*;
 
 /** User-consented native capture. No screen pixels cross JNI or Dart. */
 public final class ScreenSenderService extends Service {
+    private static volatile String sharingStatus = "Screen sharing is stopped.";
+    static String sharingStatus() { return sharingStatus; }
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private EglBase egl;
     private PeerConnectionFactory factory;
@@ -25,6 +27,13 @@ public final class ScreenSenderService extends Service {
     private final List<IceCandidate> localIce = new ArrayList<>(), remoteIce = new ArrayList<>();
     private ScheduledFuture<?> polling, deadline;
     private volatile boolean closing;
+    private String stage = "starting screen capture";
+
+    private void fail() {
+        sharingStatus = "Screen sharing failed while " + stage + ". Stop, reconnect and retry.";
+        android.util.Log.e("MirrorMeshSender", sharingStatus);
+        stopSelf();
+    }
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
@@ -44,8 +53,9 @@ public final class ScreenSenderService extends Service {
         if (Build.VERSION.SDK_INT >= 29) startForeground(52, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
         else startForeground(52, notification);
         worker.execute(() -> {
+            sharingStatus = "Preparing screen capture and H.264 video…";
             try { startCapture(projection); }
-            catch (Exception failure) { stopSelf(); }
+            catch (Exception failure) { fail(); }
         });
         return START_NOT_STICKY;
     }
@@ -81,6 +91,7 @@ public final class ScreenSenderService extends Service {
                     if (!started) {
                         SenderActivity.command(new JSONObject().put("op", "send_start").put("id", requestId).put("source", "android-screen"));
                         started = true;
+                        sharingStatus = "Sharing your screen. Use Stop sharing to end it.";
                         if (deadline != null) deadline.cancel(false);
                     }
                 });
@@ -102,13 +113,17 @@ public final class ScreenSenderService extends Service {
         }
         if (codecs.isEmpty()) throw new IllegalStateException("H.264 encoding unavailable");
         transceiver.setCodecPreferences(codecs);
+        stage = "starting Android screen capture";
         capturer.startCapture(1280, 720, 30);
+        stage = "creating the video offer";
         peer.createOffer(new SdpAdapter() {
             @Override public void onCreateSuccess(SessionDescription description) {
                 submit(() -> peer.setLocalDescription(new SdpAdapter() {
                     @Override public void onSetSuccess() { submit(() -> {
                         SenderActivity.command(new JSONObject().put("op", "send_offer").put("id", requestId).put("sdp", description.description));
                         offered = true;
+                        stage = "negotiating video with the receiver";
+                        sharingStatus = "Connecting video to the approved receiver…";
                         for (IceCandidate candidate : new ArrayList<>(localIce)) sendIce(candidate);
                         localIce.clear();
                     }); }
@@ -116,12 +131,15 @@ public final class ScreenSenderService extends Service {
             }
         }, new MediaConstraints());
         polling = worker.scheduleWithFixedDelay(() -> {
-            try { pollEvent(); } catch (Exception failure) { stopSelf(); }
+            try { pollEvent(); } catch (Exception failure) { fail(); }
         }, 0, 100, TimeUnit.MILLISECONDS);
-        deadline = worker.schedule(() -> { stopSelf(); }, 30, TimeUnit.SECONDS);
+        deadline = worker.schedule(this::fail, 30, TimeUnit.SECONDS);
     }
 
     private void pollEvent() throws Exception {
+        // createOffer/setLocalDescription complete asynchronously. There is no Rust session
+        // to poll until send_offer succeeds; polling earlier used to terminate capture.
+        if (!offered) return;
         JSONObject event = command("send_event");
         switch (event.optString("kind")) {
             case "answer":
@@ -155,19 +173,20 @@ public final class ScreenSenderService extends Service {
     private interface Operation { void run() throws Exception; }
     private void submit(Operation operation) {
         if (closing) return;
-        try { worker.execute(() -> { if (!closing) try { operation.run(); } catch (Exception failure) { stopSelf(); } }); }
+        try { worker.execute(() -> { if (!closing) try { operation.run(); } catch (Exception failure) { fail(); } }); }
         catch (RejectedExecutionException ignored) { }
     }
 
     private class SdpAdapter implements SdpObserver {
         @Override public void onCreateSuccess(SessionDescription description) { }
         @Override public void onSetSuccess() { }
-        @Override public void onCreateFailure(String message) { stopSelf(); }
-        @Override public void onSetFailure(String message) { stopSelf(); }
+        @Override public void onCreateFailure(String message) { submit(() -> fail()); }
+        @Override public void onSetFailure(String message) { submit(() -> fail()); }
     }
 
     @Override public void onDestroy() {
         closing = true;
+        if (!sharingStatus.startsWith("Screen sharing failed")) sharingStatus = "Screen sharing is stopped.";
         if (polling != null) polling.cancel(false);
         if (deadline != null) deadline.cancel(false);
         worker.execute(() -> {

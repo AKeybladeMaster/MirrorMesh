@@ -120,11 +120,28 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
                   SelectableText(
                     'Address: ${request['source_ip']}\nFingerprint: ${request['fingerprint']}',
                   ),
+                  if (request['verification_code'] case final String code) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Connection code — compare every group on the sender:',
+                    ),
+                    SelectableText(
+                      code,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const Text(
+                      'Reject unexpected requests or different codes.',
+                    ),
+                  ],
                   CheckboxListTile(
                     value: permission,
                     onChanged: (value) =>
                         update(() => permission = value ?? false),
-                    title: const Text('Allow this device to send its screen'),
+                    title: Text(
+                      request['verification_code'] is String
+                          ? 'The codes match. Allow this device to send its screen'
+                          : 'Allow this device to send its screen',
+                    ),
                   ),
                 ],
               ),

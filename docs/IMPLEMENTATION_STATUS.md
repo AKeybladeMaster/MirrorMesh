@@ -14,6 +14,26 @@ This document supersedes historical increment counts for this release candidate.
 
 ## Current reference pipeline
 
+### 0.2.1 sender startup and direct LAN requests (2026-10-21)
+
+- **Source implemented:** Android sender no longer polls before offer submission; an idle
+  approved shared channel returns Pending. Android displays preparation/negotiation/failure
+  stages. PC receiver errors distinguish protocol rejection and transport/channel closure.
+- **Source implemented:** selecting a compatible discovered receiver sends a direct request;
+  both screens show a matching code, receiver grants remain unchecked and the native sender
+  cannot reach Approved until both receiver approval and sender confirmation. QR remains
+  available. LAN nonce provenance survives listener restarts; source throttling is retained.
+- **Build verified:** final 0.2.1 Windows EXE/ZIP and Android ARM64 phone/TV debug and
+  unsigned release APKs passed with exit 0. Rust check/Clippy, Flutter analysis and Android
+  lint passed with exit 0; lint reports 0 errors and 77 warnings per flavor.
+- **Automated integration verified:** not claimed; no test suites are permitted on this branch.
+- **Hardware verification pending:** owner reported Redmi Note 5 / Android 13 → PC failing
+  after capture approval. A source startup race is fixed, but the physical failure was not
+  reproduced here. Direct request prompts, code comparison and actual media still need the
+  final user-device phase. No project-wide CODE_COMPLETE claim.
+
+See [ADR0058](adr/0058-direct-lan-requests-and-sender-startup.md).
+
 ### 0.2.0 connection checkpoint (2026-10-21)
 
 | Requested integration | Source implemented | Build evidence | Device evidence |

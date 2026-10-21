@@ -280,7 +280,7 @@ public final class MainActivity extends Activity {
                     pairingState.receiverStarted();
                     advertisement.start(response.optString("device_id"),
                             "MirrorMesh " + (getPackageName().endsWith(".tv") ? "TV" : "Android")
-                                    + " " + android.os.Build.MODEL.replace('.', '-'));
+                                    + " " + android.os.Build.MODEL.replace('.', '-'), response.optString("fingerprint"));
                     serviceState.setText(R.string.pairing_ready);
                     requestDetails.setText("Waiting for an explicitly selected sender.");
                     renderState();
@@ -347,6 +347,8 @@ public final class MainActivity extends Activity {
         String name = request.optString("display_name", "Unknown sender");
         String sourceIp = request.optString("source_ip", "Unknown address");
         String fingerprint = request.optString("fingerprint", "Unavailable");
+        String verification = request.optString("verification_code", "");
+        boolean directRequest = !verification.isEmpty() && !"null".equals(verification);
         JSONObject grants = request.optJSONObject("requested_grants");
         boolean requestedView = grants != null && grants.optBoolean("view");
         boolean requestedSend = grants != null && grants.optBoolean("send");
@@ -355,6 +357,7 @@ public final class MainActivity extends Activity {
         grantView.setChecked(false);
         grantSend.setChecked(false);
         grantAnnotate.setChecked(false);
+        grantView.setText(directRequest ? "The code matches the PC. Allow it to send its screen." : getString(R.string.grant_view_label));
         grantView.setVisibility(requestedView ? View.VISIBLE : View.GONE);
         grantSend.setVisibility(requestedSend ? View.VISIBLE : View.GONE);
         grantAnnotate.setVisibility(requestedAnnotate ? View.VISIBLE : View.GONE);
@@ -366,9 +369,11 @@ public final class MainActivity extends Activity {
         requestDetails.setText("Sender: " + name
                 + "\nSource address: " + sourceIp
                 + "\nKey fingerprint: " + fingerprint
-                + "\nRequest ID: " + requestId);
+                + "\nRequest ID: " + requestId
+                + (directRequest ? "\n\nConnection code: " + verification + "\nCompare all four groups with the PC before approving." : ""));
         serviceState.setText(R.string.pairing_request_pending);
-        helpText.setText("Permission boxes are unchecked. Approve only permissions you intend to grant.");
+        helpText.setText(directRequest ? "Connection requested from the local network. Reject if you did not request it or the codes differ."
+                : "Permission boxes are unchecked. Approve only permissions you intend to grant.");
         renderState();
         if (requestedView) {
             grantView.requestFocus();

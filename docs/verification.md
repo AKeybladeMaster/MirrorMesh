@@ -6,6 +6,32 @@ Historical test evidence on `dev` does not establish correctness of these new ch
 
 ## Current evidence
 
+### 0.2.1 on test_3 (2026-10-21)
+
+- `cargo check --workspace --lib --locked`: exit 0.
+- `cargo fmt --all -- --check`: exit 0.
+- `cargo clippy --workspace --lib --locked -- -D warnings`: exit 0.
+- Dart formatting and `flutter analyze`: exit 0, no issues.
+- `scripts/build-windows.ps1`: exit 0; final reviewed EXE/DLLs/data/ZIP packaged.
+  Windows product/file version is 0.2.1+5.
+- `scripts/build-android.ps1 -Configuration debug` and `-Configuration release`: exit 0
+  for both phone/TV ARM64 variants. APK metadata is versionName 0.2.1, versionCode 5.
+  Debug APKs are installable previews; release APKs remain unsigned.
+- `:app:lintPhoneDebug :app:lintTvDebug`: exit 0, 0 errors and 77 warnings per flavor.
+  First invocation exited 1 because ANDROID_SDK_ROOT was absent from that shell;
+  setting the existing SDK path resolved it. No source workaround/suppression was added.
+- Initial Clippy/analyzer findings (nested if / Dart braces) were fixed before passing.
+- Read-only review found and corrected LAN nonce downgrade across listener restarts,
+  bootstrap clock sampling and admission accounting. No unresolved Critical/Important findings.
+- No unit, instrumentation or workflow test suite ran. Lint's empty test-source models
+  do not constitute a device/integration result. No iOS native build was available.
+- Owner reports Android 13 on Redmi Note 5 failing after capture approval. Source startup
+  ordering was corrected, but that failure has not been reproduced or confirmed fixed on
+  physical devices here. Direct LAN approval/code comparison/media also remain unverified.
+
+See [ADR0058](adr/0058-direct-lan-requests-and-sender-startup.md) for the source diagnosis
+and connection authentication design. Detailed local logs are `.toolchains/*0.2.1*.log`.
+
 ### 0.2.0 on test_3 (2026-10-21)
 
 - `cargo check --workspace --lib --offline`: exit 0 (Windows host).

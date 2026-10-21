@@ -93,6 +93,14 @@ where
             .map_err(NativePairingServiceError::Listener)
     }
 
+    pub fn local_fingerprint(&self) -> Result<PeerFingerprint, NativePairingServiceError> {
+        Ok(self
+            .runtime
+            .lock()
+            .map_err(|_| NativePairingServiceError::RuntimeLockPoisoned)?
+            .local_fingerprint())
+    }
+
     /// Creates a short-lived invitation for the explicitly selected numeric LAN endpoint.
     pub fn create_invitation(
         &self,
@@ -141,6 +149,7 @@ where
             display_name: approval.display_name().to_owned(),
             fingerprint: approval.fingerprint(),
             requested_grants: approval.requested_grants(),
+            verification_code: pending.verification_code().map(str::to_owned),
         };
         Ok(PendingNativePairing { request, pending })
     }
@@ -190,6 +199,7 @@ where
 /// Display-safe metadata for a verified request awaiting receiver consent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativePairingRequest {
+    pub verification_code: Option<String>,
     pub source_ip: std::net::IpAddr,
     pub peer_id: DeviceId,
     pub display_name: String,

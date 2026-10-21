@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -96,6 +97,9 @@ where
 {
     coordinator: PairingCoordinator<P, I>,
     attempt_limiter: PairingAttemptLimiter,
+    // Same lifetime and clock as the nonce registry. Listener recreation must not turn a
+    // LAN challenge into a QR invitation that skips connection-code comparison.
+    direct_nonces: HashMap<PairingNonce, u64>,
 }
 
 impl<P, I> PairingRuntime<P, I>
@@ -142,6 +146,7 @@ where
         Ok(Self {
             coordinator,
             attempt_limiter,
+            direct_nonces: HashMap::new(),
         })
     }
 
@@ -166,6 +171,41 @@ where
         )
     }
 
+    pub fn create_direct_invitation(
+        &mut self,
+        endpoint: &str,
+        ports: &[u16],
+        now_ms: u64,
+        unix_seconds: u64,
+    ) -> Result<(PairingInvitation, PairingNonce), PairingRuntimeError> {
+        self.direct_nonces.retain(|_, expiry| *expiry > now_ms);
+        if self.direct_nonces.len() >= mm_security::MAX_PENDING_PAIRING_NONCES {
+            return Err(PairingRuntimeError::CapacityLimited);
+        }
+        let invitation = self.create_invitation(endpoint, ports, now_ms, unix_seconds)?;
+        let parsed = mm_security::parse_pairing_qr(invitation.uri(), unix_seconds, ports)
+            .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
+        self.direct_nonces
+            .insert(parsed.nonce(), invitation.expires_at_monotonic_ms());
+        Ok((invitation, parsed.nonce()))
+    }
+
+    fn check_nonce_route(
+        &mut self,
+        nonce: PairingNonce,
+        direct: Option<PairingNonce>,
+        now_ms: u64,
+    ) -> Result<(), PairingRuntimeError> {
+        self.direct_nonces.retain(|_, expiry| *expiry > now_ms);
+        match direct {
+            Some(expected) if expected == nonce && self.direct_nonces.contains_key(&nonce) => {
+                Ok(())
+            }
+            None if !self.direct_nonces.contains_key(&nonce) => Ok(()),
+            _ => Err(PairingRuntimeError::InvalidPairBegin),
+        }
+    }
+
     /// Reserves an attempt before proof verification and binds the source to pending approval.
     pub fn verify_proof_from(
         &mut self,
@@ -174,6 +214,7 @@ where
         now_monotonic_ms: u64,
     ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
         self.reserve_source_attempt(source_ip, now_monotonic_ms)?;
+        self.check_nonce_route(proof.nonce(), None, now_monotonic_ms)?;
         self.verify_admitted_proof(source_ip, proof, now_monotonic_ms)
     }
 
@@ -215,6 +256,17 @@ where
         frame: &[u8],
         now_monotonic_ms: u64,
     ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
+        self.verify_pair_begin_on_route(source_ip, frame, now_monotonic_ms, None)
+    }
+
+    /// `direct_nonce` belongs only to this live bootstrap socket, never to caller JSON.
+    pub fn verify_pair_begin_on_route(
+        &mut self,
+        source_ip: IpAddr,
+        frame: &[u8],
+        now_monotonic_ms: u64,
+        direct_nonce: Option<PairingNonce>,
+    ) -> Result<AdmittedPendingPairingApproval, PairingRuntimeError> {
         self.reserve_source_attempt(source_ip, now_monotonic_ms)?;
         let message = parse_message(frame).map_err(PairingRuntimeError::Protocol)?;
         let MessagePayload::PairBegin(payload) = message.payload else {
@@ -225,6 +277,7 @@ where
             .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
         let nonce = PairingNonce::from_hex(&payload.nonce)
             .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
+        self.check_nonce_route(nonce, direct_nonce, now_monotonic_ms)?;
         let peer_id =
             DeviceId::parse(&payload.peer_id).map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
         let public_key = PeerPublicKey::new(decode_lower_hex(&payload.public_key, 32)?)

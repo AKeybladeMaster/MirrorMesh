@@ -11,6 +11,7 @@ import 'windows_sender_session.dart';
 import 'network_devices.dart';
 import 'receive_screen_page.dart';
 import 'mobile_connection_home.dart';
+import 'native_connection.dart';
 
 class MirrorMeshApp extends StatelessWidget {
   const MirrorMeshApp({super.key, this.rustSessionStatus});
@@ -54,6 +55,8 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   bool _searching = false;
   List<Map<String, dynamic>> _nearby = [];
   String _deviceFilter = '';
+  String? _directCode;
+  bool _directRequest = false, _directConfirmed = false;
   Timer? _pairingTimer;
   WindowsSenderPairingStatus? _pairingStatus;
   WindowsSenderSessionController? _session;
@@ -97,7 +100,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('MirrorMesh 0.2.0')),
+    appBar: AppBar(title: const Text('MirrorMesh 0.2.1')),
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -152,7 +155,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                       setState(() => _deviceFilter = value.toLowerCase()),
                 ),
                 const Text(
-                  'Discovery results are unverified. Use the selected receiver’s invitation to verify its identity.',
+                  'Select a receiver to request a connection. Compare the connection codes on both screens before approving.',
                 ),
                 for (final device in _nearby.where(
                   (item) => (item['name'] as String).toLowerCase().contains(
@@ -168,9 +171,12 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                       '${device['receive'] == true ? 'Can receive screens' : 'Sender'} · ${(device['endpoints'] as List).join(', ')}',
                     ),
                     trailing: device['receive'] == true
-                        ? const Icon(Icons.qr_code)
+                        ? const Icon(Icons.arrow_forward)
                         : null,
-                    onTap: device['receive'] == true
+                    onTap:
+                        device['receive'] == true &&
+                            !_busy &&
+                            _requestId == null
                         ? () => _selectNearbyDevice(device)
                         : null,
                   ),
@@ -197,6 +203,31 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                       if (_busy) ...[
                         const SizedBox(height: 16),
                         const LinearProgressIndicator(),
+                      ],
+                      if (_directCode case final code?) ...[
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Compare all four groups with the receiver. Reject if they differ.',
+                        ),
+                        SelectableText(
+                          code,
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
+                        FilledButton.icon(
+                          onPressed: _directConfirmed || _busy
+                              ? null
+                              : _confirmDirectCode,
+                          icon: Icon(
+                            _directConfirmed
+                                ? Icons.check
+                                : Icons.verified_user_outlined,
+                          ),
+                          label: Text(
+                            _directConfirmed
+                                ? 'Code confirmed · awaiting receiver approval'
+                                : 'The codes match',
+                          ),
+                        ),
                       ],
                       const SizedBox(height: 24),
                       TextField(
@@ -374,13 +405,57 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
     }
   }
 
-  void _selectNearbyDevice(Map<String, dynamic> device) {
-    showDialog<void>(
+  Future<void> _selectNearbyDevice(Map<String, dynamic> device) async {
+    if (_busy || _requestId != null) return;
+    if (device['request_fingerprint'] is String) {
+      final endpoints = (device['endpoints'] as List).cast<String>().toList()
+        ..sort(
+          (a, b) => a.startsWith('[') == b.startsWith('[')
+              ? a.compareTo(b)
+              : (a.startsWith('[') ? 1 : -1),
+        );
+      if (endpoints.isEmpty) return;
+      String? endpoint = endpoints.first;
+      if (endpoints.length > 1) {
+        endpoint = await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Connect to ${device['name']}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Choose the receiver address on your local network:',
+                ),
+                for (final address in endpoints)
+                  ListTile(
+                    title: Text(address),
+                    trailing: const Icon(Icons.send),
+                    onTap: () => Navigator.pop(context, address),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        );
+      }
+      if (endpoint != null && mounted) {
+        await _connect(device: device, endpoint: endpoint);
+      }
+      return;
+    }
+    if (!mounted) return;
+    await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Connect to ${device['name']}'),
         content: const Text(
-          'Open MirrorMesh on this receiver. Copy its invitation into the field on this PC, then pair. The receiver will ask you to approve this PC. A discovery result alone cannot authorize sharing.',
+          'This receiver uses an older MirrorMesh version. Update it to enable direct requests, or use its invitation for this connection.',
         ),
         actions: [
           TextButton(
@@ -392,21 +467,35 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
     );
   }
 
-  Future<void> _connect() async {
+  Future<void> _connect({
+    Map<String, dynamic>? device,
+    String? endpoint,
+  }) async {
     if (_busy || _requestId != null) return;
     setState(() {
       _busy = true;
       _error = null;
       _sessionState = null;
       _stats = null;
+      _directRequest = device != null;
+      _directCode = null;
+      _directConfirmed = false;
     });
     try {
       final text = _invitation.text.trim();
-      if (text.isEmpty || text.length > 4096) {
+      if (device == null && (text.isEmpty || text.length > 4096)) {
         throw StateError('Paste a complete receiver invitation first.');
       }
       _deviceId ??= await _pairing.prepare();
-      final id = await _pairing.beginSenderPairing(text);
+      final id = device == null
+          ? await _pairing.beginSenderPairing(text)
+          : (await nativeConnection({
+                  'op': 'send_direct',
+                  'endpoint': endpoint,
+                  'receiver_id': device['id'],
+                  'fingerprint': device['request_fingerprint'],
+                }))['id']
+                as int;
       if (!mounted) {
         await _pairing.cancelSenderPairing(id);
         return;
@@ -435,6 +524,14 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
     try {
       final status = await _pairing.pollSenderPairing(id);
       if (!mounted || id != _requestId) return;
+      if (_directRequest && status.state.isActive && _directCode == null) {
+        final verification = await nativeConnection({
+          'op': 'send_verification',
+          'id': id,
+        });
+        if (!mounted || id != _requestId) return;
+        _directCode = verification['code'] as String?;
+      }
       setState(() {
         _pairingStatus = status;
         if (status.failureDescription case final description?) {
@@ -443,9 +540,11 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       });
       if (!status.state.isActive) {
         _pairingTimer?.cancel();
+        _directCode = null;
         if (_session == null) setState(() => _requestId = null);
       } else if (status.state == WindowsSenderPairingState.approved) {
         _pairingTimer?.cancel();
+        if (mounted) setState(() => _directCode = null);
       }
     } catch (error) {
       _pairingTimer?.cancel();
@@ -454,6 +553,20 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       }
     } finally {
       _polling = false;
+    }
+  }
+
+  Future<void> _confirmDirectCode() async {
+    final id = _requestId, code = _directCode;
+    if (id == null || code == null || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await nativeConnection({'op': 'send_confirm', 'id': id, 'code': code});
+      if (mounted && id == _requestId) setState(() => _directConfirmed = true);
+    } catch (error) {
+      if (mounted) setState(() => _error = _describe(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -577,6 +690,8 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
           _requestId = null;
           _pairingStatus = null;
           _sessionState = WindowsSenderSessionState.stopped;
+          _directCode = null;
+          _directConfirmed = false;
         });
       }
     }
@@ -589,7 +704,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Future<void> _copyDiagnostics() => Clipboard.setData(
     ClipboardData(
       text:
-          'MirrorMesh Windows 0.2.0\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
+          'MirrorMesh Windows 0.2.1\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
     ),
   );
 

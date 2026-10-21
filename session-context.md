@@ -1,5 +1,36 @@
 # MirrorMesh session context
 
+## LATEST CHECKPOINT - 2026-10-21 / test_3 / 0.2.1 fixes
+
+- Continue exclusively on test_3. Base ee08e3f; other branches must remain untouched.
+- Owner: Android Redmi Note 5 / Android 13 → Windows failed AFTER capture consent with
+  generic approved-control error. Source defect found: polling before asynchronous offer
+  submission returned SessionNotStarted and stopped the service. Guard polling until offered;
+  shared driver treats idle approved channels as Pending. Android now shows actual stages;
+  Windows reports bounded MM-CONTROL protocol/transport diagnostics, without payloads.
+- Owner also requested LAN selection → receiver approval without invitation copying.
+  Implemented shared pinned WSS invitation bootstrap, signed pair.begin, matching 64-bit
+  connection codes on both screens, receiver permission approval and native sender code
+  confirmation gate. Extended mDNS with public fingerprint + qr,request capability, no nonce.
+  Legacy invitations remain. ADR0058 records protocol/security details and limitations.
+- Reviewer fixed nonce-origin lifetime (now in shared PairingRuntime across listener restart),
+  fresh-clock sampling after bootstrap, and preserved admission-before-parse accounting.
+  Final read-only review: no unresolved Critical/Important findings.
+- Version 0.2.1/code5 completion checkpoint. Rust check/Clippy/format and Flutter analyze
+  exit0. Final Windows packaging and Android ARM64 phone/TV debug + unsigned release builds
+  exit0. Android lint exit0, 0 errors / 77 warnings each. First lint attempt lacked the SDK
+  environment variable (exit1); corrected the shell configuration and reran successfully.
+- Work is ready for the test_3 commit/push; inspect git log/status when resuming to obtain
+  the resulting checkpoint hash and confirm remote synchronization. Other branches unchanged.
+  Latest artifacts: releases/MirrorMesh-windows-x64.zip and releases/android-phone/
+  MirrorMesh-phone-arm64-v8a-debug.apk (locally signed preview). Install both updated apps.
+- No unit/instrumentation/workflow tests are allowed or run. No Redmi/PC hardware reproduction;
+  do not claim the reported device failure is verified fixed. New direct path requires both
+  apps 0.2.1. Generic TVs still require MirrorMesh Android/Google TV receiver.
+- Preserve untracked USER directory releases/MirrorMesh-win-x64/; do not stage or delete it.
+  Build logs .toolchains/*0.2.1*.log. Use isolated GRADLE_USER_HOME=.toolchains/gradle-test3.
+  No exposed credit gauge; save progress periodically rather than claiming an exact percentage.
+
 ## ACTIVE CHECKPOINT - 2026-10-21 / test_3 connection features
 
 - User confirms the app works. First committed/pushed all prior UI changes to `test_2`

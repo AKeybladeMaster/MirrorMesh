@@ -14,5 +14,6 @@ mm-protocol.workspace = true
 mm-runtime.workspace = true
 mm-security.workspace = true
 rustls.workspace = true
+sha2.workspace = true
 tungstenite.workspace = true
 

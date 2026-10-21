@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{PairingConnection, WssClientError, WssPairingClient};
-use mm_domain::{DeviceId, MessageId, PeerGrant, SessionId, TrustedPeerGrants};
+use mm_domain::{DeviceId, MessageId, PeerFingerprint, PeerGrant, SessionId, TrustedPeerGrants};
 use mm_ports::LocalPairingIdentityPort;
 use mm_protocol::{
     Capabilities, MessagePayload, SessionAnswer, SessionIce, SessionOffer, SessionStart,
@@ -14,10 +14,26 @@ use mm_protocol::{
 };
 
 struct SenderInput {
-    invitation_uri: String,
+    target: SenderTarget,
     device_id: DeviceId,
     display_name: String,
     identity: Arc<dyn LocalPairingIdentityPort>,
+    verification: Arc<SenderVerification>,
+}
+
+enum SenderTarget {
+    Invitation(String),
+    Discovered {
+        endpoint: std::net::SocketAddr,
+        receiver_id: DeviceId,
+        fingerprint: PeerFingerprint,
+    },
+}
+
+#[derive(Default)]
+struct SenderVerification {
+    code: Mutex<Option<String>>,
+    confirmed: AtomicBool,
 }
 
 pub const MAX_PAIRING_INVITATION_BYTES: usize = 4096;
@@ -153,6 +169,7 @@ struct SenderPairingTask {
     events: Mutex<Receiver<SenderSessionEvent>>,
     session_id: Arc<Mutex<Option<SessionId>>>,
     session_start_requested: Arc<AtomicBool>,
+    verification: Arc<SenderVerification>,
 }
 
 enum SenderSessionCommand {
@@ -231,7 +248,71 @@ pub fn begin_sender_pairing(
     identity: Arc<dyn LocalPairingIdentityPort>,
 ) -> Result<u64, SenderPairingError> {
     validate_invitation_uri(&invitation_uri)?;
+    begin_pairing_task(
+        SenderTarget::Invitation(invitation_uri),
+        device_id,
+        display_name,
+        identity,
+    )
+}
 
+pub fn begin_direct_pairing(
+    endpoint: std::net::SocketAddr,
+    receiver_id: DeviceId,
+    fingerprint: PeerFingerprint,
+    device_id: DeviceId,
+    display_name: String,
+    identity: Arc<dyn LocalPairingIdentityPort>,
+) -> Result<u64, SenderPairingError> {
+    let local = match endpoint.ip() {
+        std::net::IpAddr::V4(ip) => ip.is_private() || ip.is_link_local(),
+        std::net::IpAddr::V6(ip) => ip.is_unique_local() || ip.is_unicast_link_local(),
+    };
+    if !local || endpoint.port() != ANDROID_TV_PAIRING_PORT {
+        return Err(SenderPairingError::InvalidInvitation);
+    }
+    begin_pairing_task(
+        SenderTarget::Discovered {
+            endpoint,
+            receiver_id,
+            fingerprint,
+        },
+        device_id,
+        display_name,
+        identity,
+    )
+}
+
+pub fn direct_verification_code(request_id: u64) -> Result<Option<String>, SenderPairingError> {
+    let slot = lock_recover(task_slot());
+    let task = slot
+        .as_ref()
+        .filter(|task| task.request_id == request_id)
+        .ok_or(SenderPairingError::UnknownRequest)?;
+    Ok(lock_recover(&task.verification.code).clone())
+}
+
+pub fn confirm_direct_pairing(request_id: u64, code: &str) -> Result<(), SenderPairingError> {
+    let slot = lock_recover(task_slot());
+    let task = slot
+        .as_ref()
+        .filter(|task| task.request_id == request_id)
+        .ok_or(SenderPairingError::UnknownRequest)?;
+    if lock_recover(&task.snapshot).state != SenderPairingState::AwaitingApproval
+        || lock_recover(&task.verification.code).as_deref() != Some(code)
+    {
+        return Err(SenderPairingError::InvalidSessionMessage);
+    }
+    task.verification.confirmed.store(true, Ordering::Release);
+    Ok(())
+}
+
+fn begin_pairing_task(
+    target: SenderTarget,
+    device_id: DeviceId,
+    display_name: String,
+    identity: Arc<dyn LocalPairingIdentityPort>,
+) -> Result<u64, SenderPairingError> {
     let mut slot = lock_recover(task_slot());
     if let Some(task) = slot.as_ref() {
         let state = lock_recover(&task.snapshot).state;
@@ -247,6 +328,8 @@ pub fn begin_sender_pairing(
     let (event_sender, event_receiver) = sync_channel(128);
     let session_id = Arc::new(Mutex::new(None));
     let session_start_requested = Arc::new(AtomicBool::new(false));
+    let verification = Arc::new(SenderVerification::default());
+    let worker_verification = Arc::clone(&verification);
 
     let worker_snapshot = Arc::clone(&snapshot);
     let worker_cancel_requested = Arc::clone(&cancel_requested);
@@ -257,10 +340,11 @@ pub fn begin_sender_pairing(
             let result = catch_unwind(AssertUnwindSafe(|| {
                 run_sender_pairing(
                     SenderInput {
-                        invitation_uri,
+                        target,
                         device_id,
                         display_name,
                         identity,
+                        verification: worker_verification,
                     },
                     &worker_snapshot,
                     &worker_cancel_requested,
@@ -287,6 +371,7 @@ pub fn begin_sender_pairing(
         events: Mutex::new(event_receiver),
         session_id,
         session_start_requested,
+        verification,
     });
     Ok(request_id)
 }
@@ -464,7 +549,11 @@ pub fn poll_sender_session_event(
         .ok_or(SenderPairingError::UnknownRequest)?;
     match lock_recover(&task.events).try_recv() {
         Ok(event) => Ok(event),
-        Err(TryRecvError::Empty) if lock_recover(&task.session_id).is_some() => {
+        Err(TryRecvError::Empty)
+            if lock_recover(&task.snapshot).state == SenderPairingState::Approved =>
+        {
+            // Pairing approval can precede asynchronous capture/SDP setup. An idle approved
+            // channel is pending, not a failed session (also applies after an explicit stop).
             Ok(SenderSessionEvent::Pending)
         }
         Err(TryRecvError::Empty) => Err(SenderPairingError::SessionNotStarted),
@@ -857,16 +946,33 @@ fn run_sender_pairing(
             return;
         }
     };
-    let mut pending = match WssPairingClient::begin_pairing(
-        &input.invitation_uri,
-        now.as_secs(),
-        &[ANDROID_TV_PAIRING_PORT],
-        input.device_id,
-        &input.display_name,
-        requested_grants,
-        input.identity.as_ref(),
-        now.as_millis().min(u64::MAX as u128) as u64,
-    ) {
+    let attempt = match &input.target {
+        SenderTarget::Invitation(uri) => WssPairingClient::begin_pairing(
+            uri,
+            now.as_secs(),
+            &[ANDROID_TV_PAIRING_PORT],
+            input.device_id,
+            &input.display_name,
+            requested_grants,
+            input.identity.as_ref(),
+            now.as_millis().min(u64::MAX as u128) as u64,
+        ),
+        SenderTarget::Discovered {
+            endpoint,
+            receiver_id,
+            fingerprint,
+        } => WssPairingClient::begin_direct(
+            *endpoint,
+            *receiver_id,
+            *fingerprint,
+            input.device_id,
+            &input.display_name,
+            requested_grants,
+            input.identity.as_ref(),
+            now.as_millis().min(u64::MAX as u128) as u64,
+        ),
+    };
+    let mut pending = match attempt {
         Ok(pending) => pending,
         Err(WssClientError::Rejected(_)) => {
             set_error_or_cancel(
@@ -888,6 +994,9 @@ fn run_sender_pairing(
         return;
     }
 
+    let needs_verification = pending.verification_code().is_some();
+    *lock_recover(&input.verification.code) = pending.verification_code().map(str::to_owned);
+
     loop {
         if cancel_requested.load(Ordering::Acquire) {
             pending.cancel();
@@ -898,6 +1007,17 @@ fn run_sender_pairing(
         match pending.try_wait_for_decision() {
             Ok(None) => {}
             Ok(Some(approved)) => {
+                let confirmation_deadline = std::time::Instant::now() + Duration::from_secs(120);
+                while needs_verification && !input.verification.confirmed.load(Ordering::Acquire) {
+                    if cancel_requested.load(Ordering::Acquire)
+                        || std::time::Instant::now() >= confirmation_deadline
+                    {
+                        drop(approved);
+                        set_error_or_cancel(snapshot, 21, cancel_requested);
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
                 if cancel_requested.load(Ordering::Acquire) {
                     drop(approved);
                     set_terminal_state(snapshot, SenderPairingState::Cancelled, PAIRING_ERROR_NONE);

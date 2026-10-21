@@ -21,7 +21,8 @@ pub(crate) fn dispatch(input: &str) -> Result<Value, String> {
     match text("op")? {
         "receive_start" => Ok(
             json!({"ok":true,"invitation":receiver::start_pairing(text("address")?)?,
-            "device_id":native_platform::local_device_id().map_err(|_| "Device identity unavailable")?.to_string()}),
+            "device_id":native_platform::local_device_id().map_err(|_| "Device identity unavailable")?.to_string(),
+            "fingerprint":receiver::get_service()?.local_fingerprint().map_err(|_| "Identity unavailable")?.to_hex()}),
         ),
         "receive_wait" => receiver::accept_one_request(),
         "receive_refresh" => receiver::refresh_pairing_invitation(),
@@ -62,6 +63,31 @@ pub(crate) fn dispatch(input: &str) -> Result<Value, String> {
                 json!({"ok":true,"state":status.state as u32,"error":status.error_code,
                 "fingerprint":mm_domain::PeerFingerprint::from_bytes(status.receiver_fingerprint).to_hex()}),
             )
+        }
+        "send_direct" => {
+            let (id, identity) =
+                native_platform::sender_identity().map_err(|_| "Device identity unavailable")?;
+            let request = sender::begin_direct_pairing(
+                text("endpoint")?
+                    .parse()
+                    .map_err(|_| "Invalid LAN endpoint")?,
+                mm_domain::DeviceId::parse(text("receiver_id")?)
+                    .map_err(|_| "Invalid device ID")?,
+                mm_domain::PeerFingerprint::from_hex(text("fingerprint")?)
+                    .map_err(|_| "Invalid fingerprint")?,
+                id,
+                "MirrorMesh PC".to_owned(),
+                identity,
+            )
+            .map_err(failed)?;
+            Ok(json!({"ok":true,"id":request}))
+        }
+        "send_verification" => Ok(
+            json!({"ok":true,"code":sender::direct_verification_code(number("id")? as u64).map_err(failed)?}),
+        ),
+        "send_confirm" => {
+            sender::confirm_direct_pairing(number("id")? as u64, text("code")?).map_err(failed)?;
+            Ok(json!({"ok":true}))
         }
         "send_cancel" => {
             sender::cancel_sender_pairing(number("id")? as u64).map_err(failed)?;

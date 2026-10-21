@@ -46,7 +46,8 @@ pub extern "system" fn Java_com_mirrormesh_tv_NativePairingBridge_startPairing(
         let uri = start_pairing(&address)?;
         let id = mm_adapter_android::initialize_pairing_runtime()
             .map_err(|_| "identity unavailable".to_owned())?;
-        Ok(json!({ "ok": true, "invitation": uri, "device_id": id.to_string() }))
+        let fingerprint = get_service()?.local_fingerprint().map_err(|_| "Identity unavailable")?;
+        Ok(json!({ "ok": true, "invitation": uri, "device_id": id.to_string(), "fingerprint":fingerprint.to_hex() }))
     }))
     .unwrap_or_else(|_| Err("receiver pairing could not start".to_owned()));
     java_string(&mut env, response_json(result))

@@ -17,7 +17,9 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_ENDPOINT_ADDRESSES: usize = 16;
 const MAX_DISCOVERED_SERVICES: usize = 64;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
-const TXT_KEYS: [&str; 8] = ["v", "id", "roles", "pair", "tls", "video", "audio", "max"];
+const TXT_KEYS: [&str; 9] = [
+    "v", "id", "roles", "pair", "tls", "video", "audio", "max", "fp",
+];
 
 /// A resolved address and signaling port from an unauthenticated mDNS response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +33,7 @@ pub struct DiscoveredEndpoint {
 pub struct DiscoveredService {
     pub device: Device,
     pub endpoint: DiscoveredEndpoint,
+    pub request_fingerprint: Option<mm_domain::PeerFingerprint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +77,7 @@ pub fn parse_advertisement(
             return Err(AdvertisementError::InvalidRecord);
         }
     }
-    if normalized_properties.len() != TXT_KEYS.len()
+    if !(8..=9).contains(&normalized_properties.len())
         || normalized_properties
             .keys()
             .any(|key| !TXT_KEYS.contains(&key.as_str()))
@@ -88,9 +91,19 @@ pub fn parse_advertisement(
             .copied()
             .ok_or(AdvertisementError::InvalidRecord)
     };
-    if value("v")? != "1" || value("pair")? != "qr" || value("tls")? != "1" {
+    if value("v")? != "1" || value("tls")? != "1" {
         return Err(AdvertisementError::InvalidRecord);
     }
+    let request_fingerprint = match value("pair")? {
+        "qr" if normalized_properties.len() == 8 && !normalized_properties.contains_key("fp") => {
+            None
+        }
+        "qr,request" if normalized_properties.len() == 9 => Some(
+            mm_domain::PeerFingerprint::from_hex(value("fp")?)
+                .map_err(|_| AdvertisementError::InvalidRecord)?,
+        ),
+        _ => return Err(AdvertisementError::InvalidRecord),
+    };
 
     let id = DeviceId::parse(value("id")?).map_err(|_| AdvertisementError::InvalidRecord)?;
     let role = parse_roles(value("roles")?)?;
@@ -107,6 +120,7 @@ pub fn parse_advertisement(
 
     Ok(DiscoveredService {
         device,
+        request_fingerprint,
         endpoint: DiscoveredEndpoint {
             port,
             addresses: usable_addresses,
@@ -204,7 +218,17 @@ impl MdnsServicePublisher {
         host_name: &str,
         addresses: &[IpAddr],
     ) -> Result<(), PortError> {
-        let service_info = service_info_for(device, host_name, addresses)
+        self.publish_with_fingerprint(device, host_name, addresses, None)
+    }
+
+    pub fn publish_with_fingerprint(
+        &self,
+        device: &Device,
+        host_name: &str,
+        addresses: &[IpAddr],
+        fingerprint: Option<mm_domain::PeerFingerprint>,
+    ) -> Result<(), PortError> {
+        let service_info = service_info_for(device, host_name, addresses, fingerprint)
             .map_err(|_| PortError::InvalidConfiguration)?;
         let mut active = self
             .active_daemon
@@ -269,6 +293,7 @@ fn service_info_for(
     device: &Device,
     host_name: &str,
     addresses: &[IpAddr],
+    fingerprint: Option<mm_domain::PeerFingerprint>,
 ) -> Result<ServiceInfo, AdvertisementError> {
     if device.display_name.is_empty()
         || device.display_name.len() > 63
@@ -308,11 +333,19 @@ fn service_info_for(
         return Err(AdvertisementError::InvalidEndpoint);
     }
 
-    let properties = [
+    let mut properties = vec![
         ("v", "1".to_owned()),
         ("id", device.id.to_string()),
         ("roles", roles.to_owned()),
-        ("pair", "qr".to_owned()),
+        (
+            "pair",
+            if fingerprint.is_some() {
+                "qr,request"
+            } else {
+                "qr"
+            }
+            .to_owned(),
+        ),
         ("tls", "1".to_owned()),
         ("video", "h264".to_owned()),
         (
@@ -327,6 +360,9 @@ fn service_info_for(
             ),
         ),
     ];
+    if let Some(fingerprint) = fingerprint {
+        properties.push(("fp", fingerprint.to_hex()));
+    }
     ServiceInfo::new(
         MIRRORMESH_SERVICE_TYPE,
         &device.display_name,

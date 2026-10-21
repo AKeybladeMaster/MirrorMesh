@@ -4,7 +4,8 @@ import android.content.Context;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
 
-/** Public discovery hints only. Never publish invitations, fingerprints, nonces or approval. */
+/** Public discovery hints only. The public key fingerprint is not a verified identity.
+ * Never publish invitations, nonces or approval; direct requests require matching codes. */
 final class ReceiverAdvertisement {
     private final NsdManager manager;
     private NsdManager.RegistrationListener active;
@@ -13,7 +14,7 @@ final class ReceiverAdvertisement {
         manager = (NsdManager) context.getSystemService(Context.NSD_SERVICE);
     }
 
-    void start(String id, String name) {
+    void start(String id, String name, String fingerprint) {
         stop();
         if (manager == null) return;
         NsdServiceInfo info = new NsdServiceInfo();
@@ -21,7 +22,8 @@ final class ReceiverAdvertisement {
         info.setServiceType("_mirrormesh._tcp.");
         info.setPort(8765);
         info.setAttribute("v", "1"); info.setAttribute("id", id);
-        info.setAttribute("roles", "recv"); info.setAttribute("pair", "qr");
+        info.setAttribute("roles", "recv"); info.setAttribute("pair", "qr,request");
+        info.setAttribute("fp", fingerprint);
         info.setAttribute("tls", "1"); info.setAttribute("video", "h264");
         info.setAttribute("audio", "none"); info.setAttribute("max", "1920x1080@60");
         NsdManager.RegistrationListener listener = new NsdManager.RegistrationListener() {

@@ -25,8 +25,8 @@ android {
         applicationId = "com.mirrormesh.tv"
         minSdk = 21
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.2.0"
+        versionCode = 5
+        versionName = "0.2.1"
         ndk { abiFilters += androidAbi }
     }
 

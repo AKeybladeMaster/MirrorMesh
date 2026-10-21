@@ -113,8 +113,10 @@ pub(crate) fn start_pairing(address: &str) -> Result<String, String> {
     #[cfg(windows)]
     {
         // Discovery is optional and never changes the pinned invitation or consent flow.
-        if let Ok(id) = local_device_id() {
-            let _ = crate::network_devices::publish_receiver(id, address);
+        if let Ok(id) = local_device_id()
+            && let Ok(fingerprint) = service.local_fingerprint()
+        {
+            let _ = crate::network_devices::publish_receiver(id, address, fingerprint);
         }
     }
     *slot = Some(service);
@@ -219,6 +221,7 @@ pub(crate) fn accept_one_request() -> Result<Value, String> {
         "display_name": request.display_name,
         "fingerprint": request.fingerprint.to_hex(),
         "source_ip": request.source_ip.to_string(),
+        "verification_code": request.verification_code,
         "requested_grants": {
             "view": request.requested_grants.allows(mm_domain::PeerGrant::View),
             "send": request.requested_grants.allows(mm_domain::PeerGrant::Send),
@@ -405,7 +408,7 @@ pub(crate) fn poll_control_message(connection_id: i64) -> Result<Value, String> 
     let Some(message) = connection
         .channel
         .try_receive_control_message()
-        .map_err(|_| "approved control message failed protocol or transport checks".to_owned())?
+        .map_err(|error| error.user_diagnostic())?
     else {
         return Ok(json!({ "ok": true, "pending": true }));
     };
