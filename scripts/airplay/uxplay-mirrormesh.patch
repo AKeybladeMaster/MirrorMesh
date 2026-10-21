@@ -1,0 +1,268 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index eafd266..307b47d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -85,7 +85,7 @@ if  ( GST_MACOS )
+      message ( STATUS "define GST_MACOS" )
+ endif()
+ 
+-add_executable( uxplay uxplay.cpp )
++add_executable( uxplay uxplay.cpp mirrormesh_bridge.cpp )
+ target_link_libraries( uxplay renderers airplay )
+ if (DBUS_FOUND)
+       target_link_libraries( uxplay ${DBUS_LIBRARY})
+diff --git a/lib/pairing.c b/lib/pairing.c
+index c38f191..eb1e5c0 100644
+--- a/lib/pairing.c
++++ b/lib/pairing.c
+@@ -242,6 +242,7 @@ char *get_token(char **cursor, char *token_name, char start_char, char end_char)
+ //#define test_digest
+ bool
+ pairing_digest_verify(const char *method, const char * authorization, const char *password) {
++    if (!method || !authorization || !password || strlen(authorization) > 8192) return false;
+   /* RFC 2617 HTTP md5 Digest password authentication */
+     size_t authlen = strlen(authorization);
+     char *sentence = (char *) malloc(authlen + 1);
+@@ -295,6 +296,10 @@ pairing_digest_verify(const char *method, const char * authorization, const char
+         cnonce = get_token(&cursor, "cnonce", '\"', '\"');
+     }
+     response = get_token(&cursor, "response", '\"', '\"');
++    if (!username || !realm || !nonce || !uri || !response || (qop && (!nc || !cnonce))) {
++        free(sentence);
++        return false;
++    }
+ 
+ #ifdef test_digest
+     printf("username: [%s]  realm: [%s]\n", username, realm);
+diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
+index c413c0a..7e85b2c 100644
+--- a/lib/raop_handlers.h
++++ b/lib/raop_handlers.h
+@@ -644,6 +644,13 @@ raop_handler_setup(raop_conn_t *conn,
+         char *deviceID = NULL;
+         plist_t req_deviceid_node = plist_dict_get_item(req_root_node, "deviceID");
+         plist_get_string_val(req_deviceid_node, &deviceID);  
++        if (!deviceID || !*deviceID || strlen(deviceID) > 80) {
++            free(deviceID);
++            plist_free(res_root_node);
++            plist_free(req_root_node);
++            http_response_init(response, "RTSP/1.0", 400, "Bad Request");
++            return;
++        }
+ 
+ 
+         /* RFC2617 Digest authentication (md5 hash) of uxplay client-access password, if set */
+@@ -672,7 +679,11 @@ raop_handler_setup(raop_conn_t *conn,
+                 int pin_4  = random_pin();
+                 if (pin_4 < 0) {
+                     logger_log(raop->logger, LOGGER_ERR, "Failed to generate random pin");
+-                    pin_4 = 1234;
++                    free(deviceID);
++                    plist_free(res_root_node);
++                    plist_free(req_root_node);
++                    http_response_init(response, "RTSP/1.0", 503, "Service Unavailable");
++                    return;
+                 }
+                 if ((raop->random_pw =  (char *) calloc(pin_len + 1 + 18, sizeof(char)))) {
+                     char *pin = raop->random_pw;
+@@ -681,6 +692,11 @@ raop_handler_setup(raop_conn_t *conn,
+                     snprintf(pin + pin_len + 1, 18, "%s", deviceID);
+                 } else {
+                     logger_log(raop->logger, LOGGER_ERR, "Failed to allocate raop->random_pw");
++                    free(deviceID);
++                    plist_free(res_root_node);
++                    plist_free(req_root_node);
++                    http_response_init(response, "RTSP/1.0", 503, "Service Unavailable");
++                    return;
+                 }
+                 raop->auth_fail_count = 0;
+             }
+@@ -698,10 +714,14 @@ raop_handler_setup(raop_conn_t *conn,
+                 char nonce_string[33] = { '\0' };
+                 //bool stale = false;  //not implemented
+                 if (len && authorization) {
+-                    const char *ptr = strstr(authorization, "nonce=\"") +  strlen("nonce=\"");
+-                    strncpy(nonce_string, ptr, 32);
++                    const char *field = strstr(authorization, "nonce=\"");
++                    const char *ptr = field ? field + strlen("nonce=\"") : NULL;
+                     const char *method = http_request_get_method(request);
+-                    conn->authenticated = pairing_digest_verify(method, authorization, password);
++                    conn->authenticated = false;
++                    if (ptr && strlen(ptr) >= 33 && ptr[32] == '\"' && raop->nonce && password) {
++                        memcpy(nonce_string, ptr, 32);
++                        conn->authenticated = pairing_digest_verify(method, authorization, password);
++                    }
+ 		    if (!conn->authenticated) {
+                         // if random_pw is used, the auth_fail_count will be the number of times it is displayed after creation
+                         if (len != -1) {
+diff --git a/renderers/video_renderer.c b/renderers/video_renderer.c
+index a2b470e..c1cb227 100644
+--- a/renderers/video_renderer.c
++++ b/renderers/video_renderer.c
+@@ -24,6 +24,10 @@
+ #include <gst/app/gstappsrc.h>
+ #include "video_renderer.h"
+ #include <gst/video/videooverlay.h>
++#ifdef _WIN32
++extern void mm_bridge_video(void);
++extern void mm_bridge_error(void);
++#endif
+ 
+ static uintptr_t external_window_handle = 0;
+ 
+@@ -100,6 +104,7 @@ typedef enum {
+ #define NCODECS  3   /* renderers for h264,h265, and jpeg images */
+ 
+ struct video_renderer_s {
++    gulong decoded_probe;
+     GstElement *appsrc, *pipeline, *textsrc;
+     GstBus *bus;
+     const char *codec;
+@@ -532,6 +537,15 @@ void video_renderer_resume() {
+     }
+ }
+ 
++#ifdef _WIN32
++static GstPadProbeReturn decoded_frame_probe(GstPad *pad, GstPadProbeInfo *info, gpointer data) {
++    video_renderer_t *video = (video_renderer_t *) data;
++    video->decoded_probe = 0;
++    mm_bridge_video();
++    return GST_PAD_PROBE_REMOVE;
++}
++#endif
++
+ void video_renderer_start() {
+     GstState state;
+     const gchar *state_name = NULL;
+@@ -545,6 +559,18 @@ void video_renderer_start() {
+     } 
+     /* when not hls, start both h264 and h265 pipelines; will shut down the "wrong" one when we know the codec */
+     for (int i = 0; i < n_renderers; i++) {
++#ifdef _WIN32
++        GstElement *sink = gst_bin_get_by_interface(GST_BIN(renderer_type[i]->pipeline), GST_TYPE_VIDEO_OVERLAY);
++        if (sink) {
++            GstPad *pad = gst_element_get_static_pad(sink, "sink");
++            if (pad) {
++                if (renderer_type[i]->decoded_probe) gst_pad_remove_probe(pad, renderer_type[i]->decoded_probe);
++                renderer_type[i]->decoded_probe = gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER, decoded_frame_probe, renderer_type[i], NULL);
++                gst_object_unref(pad);
++            }
++            gst_object_unref(sink);
++        }
++#endif
+         gst_element_set_state (renderer_type[i]->pipeline, GST_STATE_PAUSED);
+         gst_element_get_state(renderer_type[i]->pipeline, &state, NULL, 1000 * GST_MSECOND);
+         state_name = gst_element_state_get_name(state);
+@@ -940,6 +966,9 @@ static gboolean gstreamer_video_pipeline_bus_callback(GstBus *bus, GstMessage *m
+         }
+ 	break;      
+     case GST_MESSAGE_ERROR: {
++#ifdef _WIN32
++        mm_bridge_error();
++#endif
+         GError *err = NULL;
+         gchar *debug = NULL;
+         gboolean flushing = FALSE;
+diff --git a/uxplay.cpp b/uxplay.cpp
+index be41031..13065e1 100644
+--- a/uxplay.cpp
++++ b/uxplay.cpp
+@@ -145,6 +145,7 @@ static bool fullscreen = false;
+ static bool render_coverart = false;
+ static std::string coverart_filename = "";
+ static std::string metadata_filename = "";
++#include "mirrormesh_bridge.h"
+ static bool do_append_hostname = true;
+ static bool use_random_hw_addr = false;
+ static unsigned short display[5] = {0}, tcp[3] = {0}, udp[3] = {0};
+@@ -2343,6 +2344,7 @@ static int register_dnssd() {
+ 
+     LOGD("register_dnssd: advertised AirPlay service with \"Features\" code = 0x%llX",
+          dnssd_get_airplay_features(dnssd));
++    mm_bridge_ready();
+     return 0;
+ }
+ 
+@@ -2515,6 +2517,7 @@ static bool check_blocked_client(char *deviceid) {
+ //to be simplified
+ 
+ extern "C" void video_reset(void *cls, reset_type_t type) {
++    mm_bridge_video_idle();
+     switch (type) {
+     case RESET_TYPE_NOHOLD:
+         LOGD("video_reset: type = NoHold");
+@@ -2586,6 +2589,7 @@ extern "C" int video_set_codec(void *cls, video_codec_t codec) {
+ }
+ 
+ extern "C" void display_pin(void *cls, char *pin) {
++    mm_bridge_pin(pin);
+     int margin = 10;
+     int spacing = 3;
+     char *image = create_pin_display(pin, margin, spacing);
+@@ -2632,6 +2636,7 @@ extern "C" void conn_destroy (void *cls) {
+     open_connections--;
+     LOGD("Open connections: %i", open_connections);
+     if (open_connections == 0) {
++        mm_bridge_idle();
+         remote_clock_offset = 0;
+         if (use_audio) {
+             audio_renderer_stop();
+@@ -2651,6 +2656,7 @@ extern "C" void conn_feedback (void *cls) {
+ }
+ 
+ extern "C" void conn_reset (void *cls, int reason) {
++    mm_bridge_video_idle();
+     switch (reason) {
+     case 1:
+         LOGI("*** ERROR lost connection with client (network problem?)");
+@@ -2685,6 +2691,7 @@ extern "C" void report_client_request(void *cls, char *deviceid, char * model, c
+         *admit = false;
+         LOGI("*** attempt to connect by blocked client (clientID %s): DENIED\n", deviceid);
+     }
++    if (*admit && !mm_bridge_approve()) *admit = false;
+     // Pass device model to renderer for device frame display
+     if (*admit && use_video) {
+         video_renderer_set_device_model(model, name);
+@@ -2752,14 +2759,15 @@ extern "C" void video_process (void *cls, raop_ntp_t *ntp, video_decode_struct *
+     }
+ }
+ 
+-#ifdef DBUS
+ extern "C" void mirror_video_running  (void *cls, bool is_running) {
++    if (!is_running) mm_bridge_video_idle();
++#ifdef DBUS
+     if (scrsv != 1) {
+         return;
+     }
+     dbus_screensaver_inhibiter(is_running);
+-}
+ #endif
++}
+ 
+ extern "C" void video_pause (void *cls) {
+     if (use_video) {
+@@ -3114,9 +3122,7 @@ static int start_raop_server (unsigned short display[5], unsigned short tcp[3],
+     raop_cbs.export_dacp = export_dacp;
+     raop_cbs.video_reset = video_reset;
+     raop_cbs.video_set_codec = video_set_codec;
+-#ifdef DBUS
+     raop_cbs.mirror_video_running = mirror_video_running;
+-#endif
+     raop_cbs.on_video_play = on_video_play;
+     raop_cbs.on_video_scrub = on_video_scrub;
+     raop_cbs.on_video_rate = on_video_rate;
+@@ -3336,12 +3342,13 @@ int main (int argc, char *argv[]) {
+     if (rcfile) {
+         config_file = rcfile;
+     } else {	
+-        config_file = find_uxplay_config_file();
++        if (!mm_bridge_enabled()) config_file = find_uxplay_config_file();
+     }
+     if (config_file.length()) {
+         read_config_file(config_file.c_str(), argv[0]);
+     }
+     parse_arguments (argc, argv);
++    mm_bridge_init();
+ 
+ #if !defined(__APPLE__) || !defined(UXPLAY_HAVE_APPLE_P2P)
+     if (peer_to_peer) {

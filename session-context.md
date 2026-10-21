@@ -1,5 +1,62 @@
 # MirrorMesh session context
 
+## LATEST CHECKPOINT - 2026-10-21 / test_3 / Windows 0.3.0
+
+### Resume from this update
+
+- Supersedes the old interrupted-patch note below: receiver_host.{cpp,h} now exists and
+  is integrated into the Windows runner. AirPlayReceiverPage, native process/status/consent
+  channel, fitted WebRTC view, fullscreen, build/setup scripts, package lock and ADR0059 exist.
+- Reviewed and fixed: malformed Digest/null field crash; predictable random-PIN fallback;
+  media-idle independent of unrelated sockets; decoded sink-buffer readiness; pipeline errors
+  stop helper; private status pipe excludes untrusted upstream logs; stale poll generation
+  guards; PowerShell expected-stderr handling; portable CPU flags (NO_MARCH_NATIVE=ON).
+  Final read-only reviewer: no unresolved Critical/Important findings. No tests/receiver run.
+- Pinned 230 official MSYS2 package archives (version/SHA256), setup verifies trusted
+  signatures and build rejects installed drift. Setup check exit0. Helper compile/package
+  exit0, 141 runtime binaries from a selected plugin/import closure, plus licenses and modified
+  source. Final Windows 0.3.0+6 bundle and Flutter analysis exit0 (no issues). Logs:
+  .toolchains/windows-0.3.0-package.log and .toolchains/airplay-package-final.log.
+  Earlier packaging failed on missing System.IO.Compression assembly; explicit load added.
+- Current version Windows 0.3.0+6; Android stays compatible at 0.2.1, no Android edits/build
+  needed. Source/helper are NOT hardware verified. Public GPL/dependency source redistribution
+  review remains pending; output is an owner-local preview. Native iOS path needs no IPA.
+- Windows ZIP includes complete airplay folder; helper hash equals build output. The source
+  payload excludes upstream .github workflows. No suite/receiver/device execution occurred.
+  This checkpoint accompanies the finished test_3 source commit; inspect HEAD/origin/test_3
+  for its hash/push state. Preserve untracked USER releases/MirrorMesh-win-x64.
+- User instructions: launch Receive iPhone/iPad with AirPlay → Start; on iOS Control Center
+  Screen Mirroring choose MirrorMesh PC, enter displayed PIN and Allow on PC. F11/Esc adjust
+  window. Use complete releases/MirrorMesh-windows-x64.zip. Android can remain on 0.2.1.
+- Next work: final device feedback for fitted viewer/AirPlay, record actual iOS versions and
+  diagnostics; do not claim new hardware verification. No credit gauge exposed.
+
+- HEAD 17f722c is pushed. User now confirms BOTH PC→Android and Android→PC work.
+- New request: fit received Android screen into PC window without scrolling; add native
+  iOS Control Center Screen Mirroring → PC. Devices: iPhone 15 Pro Max and base iPad 2020;
+  exact iOS/iPadOS versions not supplied. Native AirPlay is a new protocol adapter.
+- Uncommitted receive_screen_page.dart now uses a bounded Expanded native RTCVideoView
+  with contain fit, visible Stop and planned F11/Esc fullscreen. receiver_window.dart added.
+- AirPlay plan: isolated pinned GPLv3 UxPlay helper, native GStreamer D3D11 rendering into
+  its own native child of the app container, private pipe status/consent, per-connection
+  PIN and explicit PC Allow/Reject; kill-on-close Windows Job ownership, no raw frames in Dart.
+  Existing Rust pairing/TLS paths stay intact. No Apple app needed for this separate path.
+- UxPlay pinned 15a6b87172eca38b0df4e615fbf1bba108734dde in .toolchains/uxplay (ignored).
+  Added tracked scripts/airplay/mirrormesh_bridge.{h,cpp} and uxplay-mirrormesh.patch.
+  Copy bridge files into cache source before building. Patches add metadata hooks, consent
+  callback, skip external config in bridge mode, and attach native video window.
+- MSYS2 portable base 20260927 in .toolchains/msys64; SHA256
+  ea2f31a0b6ade63914ce441ffb022f0f6aa96982bfefa2326460a26d5fb01322.
+  Official signed packages installed after HTTP429 download retry (parallel downloads1).
+  Logs .toolchains/airplay-{toolchain,dependencies,dependencies-retry}.log.
+- A large native receiver_host C++ patch was NOT executed: automatic approval review could
+  not run due an account usage limit. User has now said Continue; tools work again.
+  No receiver_host.cpp exists yet. Continue implementing native controller, Flutter AirPlay
+  page, reproducible build/runtime packaging, ADR/docs, builds/static analysis, review, commit
+  and push only test_3. Never stage/delete user releases/MirrorMesh-win-x64/.
+- No tests added/run. AirPlay/native layout not yet build/device verified. Re-read current
+  worktree after any interruption; this checkpoint takes precedence over older entries below.
+
 ## LATEST CHECKPOINT - 2026-10-21 / test_3 / 0.2.1 fixes
 
 - Continue exclusively on test_3. Base ee08e3f; other branches must remain untouched.

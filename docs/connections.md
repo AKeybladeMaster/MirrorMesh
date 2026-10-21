@@ -1,4 +1,4 @@
-# Connect MirrorMesh devices - 0.2.1
+# Connect MirrorMesh devices - Windows 0.3.0 / Android 0.2.1
 
 Upgrade both ends to 0.2.0 to use compact invitations. An IPv4 invitation now has 121
 characters (IPv6: 137), with the same full fingerprint, 128-bit nonce and two-minute expiry.
@@ -39,6 +39,11 @@ reports streaming just because the service started. If a failure remains, note t
 and the PC's MM-CONTROL diagnostic. Do not share the invitation, SDP or full network logs.
 
 ## iOS directions (source integrated; Apple build pending)
+
+For **native iOS Control Center Screen Mirroring → PC**, use Windows 0.3.0's
+Receive iPhone / iPad with AirPlay page. No MirrorMesh iOS app is needed for that path.
+See the [AirPlay guide](airplay.md) for PIN, PC consent, builds and current limitations.
+The following describes the separate MirrorMesh iOS app route.
 
 The iOS home offers Share this device and Receive another screen / show QR. Use a receiver
 invitation to send, or display the iOS receiver invitation on another sender. Camera app

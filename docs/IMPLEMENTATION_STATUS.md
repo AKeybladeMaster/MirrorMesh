@@ -8,11 +8,32 @@ This document supersedes historical increment counts for this release candidate.
 - **Source implemented:** integrated code exists; this alone does not prove runtime behavior.
 - **Build verified:** an actual compiler/package build succeeded for the stated target.
 - **Automated integration verified:** not claimed for this branch; user requested no test suites.
-- **Hardware verified:** the user reports successful Windows-to-Android-phone screen sharing
-  on the 0.1.1 baseline. Device/OS/GPU details, TV behavior and new UI behavior remain unverified.
+- **Hardware verified:** user-reported PC→Android and Android→PC success on 0.2.1
+  (2026-10-21). Android is Redmi Note 5 / Android 13; PC GPU details were not supplied.
+  This is user evidence, not independent verification. TV and new 0.3.0 behavior are pending.
 - **CODE_COMPLETE:** the complete agreed product requirements are implemented; not yet achieved project-wide.
 
 ## Current reference pipeline
+
+### Windows 0.3.0 fitted viewer and native AirPlay preview (2026-10-21)
+
+- **Source implemented:** received WebRTC video fits the available PC window using contain
+  sizing and a bounded video area; Stop stays visible. Windows full screen uses F11/Escape.
+- **Source implemented:** native iOS Control Center Screen Mirroring receiver through a
+  pinned UxPlay companion, mDNS, per-connection PIN, explicit PC Allow/Reject, native
+  D3D11/FFmpeg video + WASAPI audio, bounded window placement and owned-process cleanup.
+  This is separate from the unchanged MirrorMesh QR/TLS WebRTC engine and iOS ReplayKit app.
+- **BUILD_VERIFIED:** Windows 0.3.0+6 native compilation, locked-toolchain setup check,
+  helper compilation and portable bundle packaging all exited 0. The runtime includes 141
+  required binaries plus modified UxPlay source/notices. Flutter analysis exited 0 with
+  no issues. No receiver has been started here.
+- **Automated integration verified:** not claimed; no test suites are authorized.
+- **Hardware verification pending:** viewer layout and AirPlay on iPhone 15 Pro Max / 2020
+  base iPad. Their exact iOS/iPadOS versions are unknown. No AirPlay screenshots, certified
+  compatibility, DRM streaming, AWDL or multi-room claim. Public dependency redistribution
+  review is pending; this is a local preview, not a production-complete release.
+
+See [AirPlay guide](airplay.md) and [ADR0059](adr/0059-native-airplay-and-bounded-receiver-view.md).
 
 ### 0.2.1 sender startup and direct LAN requests (2026-10-21)
 

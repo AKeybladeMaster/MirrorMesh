@@ -6,6 +6,33 @@ Historical test evidence on `dev` does not establish correctness of these new ch
 
 ## Current evidence
 
+### Windows 0.3.0 fitted viewer + native AirPlay preview (2026-10-21)
+
+- `scripts/setup-airplay-toolchain.ps1`: exit 0 against the installed exact package lock.
+  Initial dependency download encountered HTTP429; serial retries of official signed
+  packages succeeded. No signature policy, Defender or firewall settings were weakened.
+- `scripts/build-airplay.ps1`: exit 0; pinned UxPlay and readable integration/hardening patch
+  compile with portable x64 CPU flags. Selected plugins/import closure: 141 native binaries.
+- `flutter build windows --release`: exit 0; native MSVC `/W4 /WX` compilation passed.
+- `scripts/build-windows.ps1`: exit 0; product version 0.3.0+6; EXE, native AirPlay runtime,
+  licenses and corresponding helper source included. Packaged helper hash matches compiler
+  output. The bundle is unsigned and is an owner-local preview.
+- Dart formatting and `flutter analyze`: exit 0, no issues. Initial brace-style findings
+  were corrected before the successful analysis.
+- Initial AirPlay packaging exited 1 because Windows PowerShell needed an explicit
+  System.IO.Compression assembly load; added it and the subsequent package build exited 0.
+- Read-only follow-up review confirmed auth-field checks/fail-closed PIN, decoded-buffer
+  readiness, transport-independent media-idle, generation guards and PowerShell exit handling.
+  No unresolved Critical/Important findings. Both diff and reverse-patch checks exited 0.
+- No receiver was started. No unit/instrumentation/workflow test suite or physical AirPlay
+  verification was performed. iPhone 15 Pro Max / 2020 base iPad compatibility, OS versions,
+  audio/video, layout, DPI and reconnection remain device-verification activities.
+- The owner separately confirms PC↔Android works on 0.2.1. Android code was unchanged and
+  APKs were not rebuilt for this Windows-only increment. The retained iOS app still needs
+  Apple compilation/signing; the native AirPlay adapter does not require that iOS app.
+- Modified helper source/licenses are included locally. Complete dependency redistribution
+  review remains required before publishing the preview as a public binary release.
+
 ### 0.2.1 on test_3 (2026-10-21)
 
 - `cargo check --workspace --lib --locked`: exit 0.

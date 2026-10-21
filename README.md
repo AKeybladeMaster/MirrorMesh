@@ -4,6 +4,10 @@ Local screen sharing from a **Windows x64 PC to a native Android phone, tablet o
 This `test_3` branch adds compact invitations, device search and native send/receive
 integrations, based on `test_2` at `ef05d95`. Work is isolated to this branch.
 
+Windows 0.3.0 fits incoming screens inside the window and adds a native iOS Screen
+Mirroring [AirPlay preview](docs/airplay.md), with PIN and explicit PC consent. The owner
+reports PC↔Android working on 0.2.1. The new viewer and AirPlay path need device verification.
+
 ## Get started
 
 1. [Install and use the apps](docs/USER_GUIDE.md).

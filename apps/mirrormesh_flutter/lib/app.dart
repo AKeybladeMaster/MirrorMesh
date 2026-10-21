@@ -12,6 +12,7 @@ import 'network_devices.dart';
 import 'receive_screen_page.dart';
 import 'mobile_connection_home.dart';
 import 'native_connection.dart';
+import 'airplay_receiver_page.dart';
 
 class MirrorMeshApp extends StatelessWidget {
   const MirrorMeshApp({super.key, this.rustSessionStatus});
@@ -100,7 +101,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('MirrorMesh 0.2.1')),
+    appBar: AppBar(title: const Text('MirrorMesh 0.3.0')),
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -144,6 +145,20 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                       : 'Find devices on this network',
                 ),
               ),
+              if (Platform.isWindows)
+                OutlinedButton.icon(
+                  onPressed: !_busy && _requestId == null
+                      ? () => Navigator.of(context).push<void>(
+                          MaterialPageRoute(
+                            builder: (_) => const AirPlayReceiverPage(),
+                          ),
+                        )
+                      : null,
+                  icon: const Icon(Icons.airplay),
+                  label: const Text(
+                    'Receive iPhone / iPad with AirPlay (preview)',
+                  ),
+                ),
               if (_nearby.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 TextField(
@@ -704,7 +719,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Future<void> _copyDiagnostics() => Clipboard.setData(
     ClipboardData(
       text:
-          'MirrorMesh Windows 0.2.1\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
+          'MirrorMesh Windows 0.3.0\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
     ),
   );
 

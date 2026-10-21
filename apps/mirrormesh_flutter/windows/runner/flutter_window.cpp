@@ -336,6 +336,10 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  receiver_host_ = std::make_unique<ReceiverHost>(GetHandle());
+  receiver_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "com.mirrormesh/receiver_window", &flutter::StandardMethodCodec::GetInstance());
+  receiver_channel_->SetMethodCallHandler([this](const auto& call, auto result) { receiver_host_->Handle(call, std::move(result)); });
   windows_pairing_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(), kWindowsPairingChannel,
@@ -548,6 +552,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (receiver_channel_) { receiver_channel_->SetMethodCallHandler(nullptr); receiver_channel_.reset(); }
+  receiver_host_.reset();
   ShutdownSenderPairing();
   if (windows_pairing_channel_) {
     windows_pairing_channel_->SetMethodCallHandler(nullptr);
@@ -575,6 +581,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_APP + 91:
+      if (receiver_host_) receiver_host_->Key(wparam);
+      return 0;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'ios_pairing_bootstrap.dart';
 import 'native_connection.dart';
 import 'webrtc_engine.dart';
+import 'receiver_window.dart';
 
 /// The same Rust listener and approval flow used by the native Android receiver.
 class ReceiveScreenPage extends StatefulWidget {
@@ -31,6 +32,7 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
   bool _remoteDescriptionSet = false;
   bool _started = false;
   bool _ownsReceiver = false, _disposing = false;
+  bool _fullscreen = false;
   Future<void>? _stopping;
   Future<Map<String, dynamic>>? _starting;
 
@@ -323,6 +325,14 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
     _remoteDescriptionSet = false;
     _started = false;
     _pendingIce.clear();
+    if (_fullscreen) {
+      _fullscreen = false;
+      try {
+        await ReceiverWindow.setFullscreen(false);
+      } catch (_) {
+        /* media cleanup still proceeds */
+      }
+    }
     try {
       final starting = _starting;
       if (starting != null) {
@@ -353,76 +363,146 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Receive another device’s screen')),
-    body: ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Text(_status, style: Theme.of(context).textTheme.titleLarge),
-        if (_error != null)
-          SelectableText(
-            _error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        if (!_active) ...[
-          DropdownButtonFormField<String>(
-            initialValue: _address,
-            decoration: const InputDecoration(
-              labelText: 'This device’s network address',
-            ),
-            items: _addresses
-                .map(
-                  (address) =>
-                      DropdownMenuItem(value: address, child: Text(address)),
-                )
-                .toList(),
-            onChanged: _busy
-                ? null
-                : (value) => setState(() => _address = value),
-          ),
-          FilledButton(
-            onPressed: _busy || !_renderReady || _address == null
-                ? null
-                : _start,
-            child: const Text('Start receiving / show QR'),
-          ),
-        ],
-        if (_invitation case final invitation?) ...[
-          Center(
-            child: Semantics(
-              label: 'Receiver QR invitation. Expires after two minutes.',
-              child: QrImageView(
-                data: invitation,
-                size: 280,
-                backgroundColor: Colors.white,
-              ),
-            ),
-          ),
-          SelectableText(invitation),
-          OutlinedButton.icon(
-            onPressed: () => Clipboard.setData(ClipboardData(text: invitation)),
-            icon: const Icon(Icons.copy),
-            label: const Text('Copy invitation'),
-          ),
-          const Text(
-            'Use MirrorMesh on the sending device. QR pairing does not grant screen-capture permission.',
-          ),
-        ],
-        if (_renderReady && _connection != null)
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: RTCVideoView(
-              _renderer,
-              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-            ),
-          ),
-        if (_active)
-          FilledButton.tonal(
-            onPressed: _stop,
-            child: const Text('Stop receiving'),
+    appBar: AppBar(
+      title: const Text('Receive another device’s screen'),
+      actions: [
+        if (Platform.isWindows && _connection != null)
+          IconButton(
+            tooltip: _fullscreen
+                ? 'Exit full screen (Esc)'
+                : 'Full screen (F11)',
+            onPressed: _toggleFullscreen,
+            icon: Icon(_fullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
           ),
       ],
     ),
+    body: _connection != null
+        ? CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.f11): _toggleFullscreen,
+              const SingleActivator(LogicalKeyboardKey.escape): () {
+                if (_fullscreen) _toggleFullscreen();
+              },
+            },
+            child: Focus(
+              autofocus: true,
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _error ?? _status,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          FilledButton.tonalIcon(
+                            onPressed: _stop,
+                            icon: const Icon(Icons.stop),
+                            label: const Text('Stop receiving'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: ColoredBox(
+                        color: Colors.black,
+                        child: SizedBox.expand(
+                          child: RTCVideoView(
+                            _renderer,
+                            objectFit: RTCVideoViewObjectFit
+                                .RTCVideoViewObjectFitContain,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        : ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              Text(_status, style: Theme.of(context).textTheme.titleLarge),
+              if (_error != null)
+                SelectableText(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              if (!_active) ...[
+                DropdownButtonFormField<String>(
+                  initialValue: _address,
+                  decoration: const InputDecoration(
+                    labelText: 'This device’s network address',
+                  ),
+                  items: _addresses
+                      .map(
+                        (address) => DropdownMenuItem(
+                          value: address,
+                          child: Text(address),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _address = value),
+                ),
+                FilledButton(
+                  onPressed: _busy || !_renderReady || _address == null
+                      ? null
+                      : _start,
+                  child: const Text('Start receiving / show QR'),
+                ),
+              ],
+              if (_invitation case final invitation?) ...[
+                Center(
+                  child: Semantics(
+                    label: 'Receiver QR invitation. Expires after two minutes.',
+                    child: QrImageView(
+                      data: invitation,
+                      size: 280,
+                      backgroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+                SelectableText(invitation),
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      Clipboard.setData(ClipboardData(text: invitation)),
+                  icon: const Icon(Icons.copy),
+                  label: const Text('Copy invitation'),
+                ),
+                const Text(
+                  'Use MirrorMesh on the sending device. QR pairing does not grant screen-capture permission.',
+                ),
+              ],
+              if (_active)
+                FilledButton.tonal(
+                  onPressed: _stop,
+                  child: const Text('Stop receiving'),
+                ),
+            ],
+          ),
   );
+
+  Future<void> _toggleFullscreen() async {
+    try {
+      final next = !_fullscreen;
+      await ReceiverWindow.setFullscreen(next);
+      if (mounted) setState(() => _fullscreen = next);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
 
   @override
   void dispose() {

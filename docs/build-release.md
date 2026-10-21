@@ -45,7 +45,10 @@ documents the supported Gradle/JDK/NDK versions.
 ```
 
 The script enforces the Flutter lockfile, builds Rust plus the native Flutter runner,
-copies the EXE, DLLs, Flutter assets and available Visual C++ runtime DLLs, and writes:
+and builds/packages the local AirPlay companion by default. First run
+`scripts/setup-airplay-toolchain.ps1`; see [AirPlay prerequisites and lock](airplay.md).
+`-WithoutAirPlay` omits that companion for a developer-only native MirrorMesh build.
+The bundle includes the EXE, DLLs, Flutter assets and available Visual C++ runtime DLLs:
 
 - `releases/windows-x64/MirrorMesh.exe`
 - `releases/windows-x64/SHA256SUMS.txt`
