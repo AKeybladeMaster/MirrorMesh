@@ -15,6 +15,7 @@ class AirPlayReceiverPage extends StatefulWidget {
 
 class _AirPlayReceiverPageState extends State<AirPlayReceiverPage> {
   final _stage = GlobalKey();
+  final _pinPanel = GlobalKey(), _approvalPanel = GlobalKey();
   Timer? _timer;
   bool _running = false, _ready = false, _video = false, _busy = false;
   bool _polling = false, _fullscreen = false, _closing = false;
@@ -60,6 +61,7 @@ class _AirPlayReceiverPageState extends State<AirPlayReceiverPage> {
       if (!mounted || _closing || generation != _generation || state == null) {
         return;
       }
+      final previousPin = _pin, previousRequest = _request;
       setState(() {
         _running = state['running'] == true;
         _ready = state['ready'] == true;
@@ -69,6 +71,20 @@ class _AirPlayReceiverPageState extends State<AirPlayReceiverPage> {
         _request = state['request'] as int? ?? 0;
         _error = state['error'] as String? ?? '';
       });
+      final reveal = _pin.isNotEmpty && _pin != previousPin
+          ? _pinPanel
+          : _request > 0 && _request != previousRequest
+          ? _approvalPanel
+          : null;
+      if (reveal != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _closing || generation != _generation) return;
+          final panelContext = reveal.currentContext;
+          if (panelContext != null) {
+            unawaited(Scrollable.ensureVisible(panelContext, alignment: 0.2));
+          }
+        });
+      }
       if (!_running) _timer?.cancel();
     } catch (error) {
       _timer?.cancel();
@@ -192,98 +208,139 @@ class _AirPlayReceiverPageState extends State<AirPlayReceiverPage> {
           body: SafeArea(
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        spacing: 20,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                Flexible(
+                  flex: _video ? 1 : 3,
+                  child: SingleChildScrollView(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            _video
-                                ? 'Receiving your screen'
-                                : _ready
-                                ? 'Ready as “MirrorMesh PC”'
-                                : _running
-                                ? 'Starting AirPlay…'
-                                : 'Connect with iOS Screen Mirroring',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          if (_running)
-                            FilledButton.tonalIcon(
-                              onPressed: _stop,
-                              icon: const Icon(Icons.stop),
-                              label: const Text('Stop receiving'),
-                            )
-                          else
-                            FilledButton.icon(
-                              onPressed: _busy ? null : _start,
-                              icon: const Icon(Icons.airplay),
-                              label: const Text('Start iPhone / iPad receiver'),
-                            ),
-                        ],
-                      ),
-                      if (!_video)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 12),
-                          child: Text(
-                            'Connect both devices to the same network. On iPhone or iPad, open Control Center → Screen Mirroring → MirrorMesh PC. Enter the code shown here, then allow the connection on this PC.',
-                          ),
-                        ),
-                      if (_pin.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Row(
-                            children: [
-                              const Text('Enter this code on your device:  '),
-                              SelectableText(
-                                _pin,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineMedium,
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (_request > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Wrap(
-                            spacing: 12,
+                          Wrap(
+                            spacing: 20,
                             runSpacing: 8,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              const Text(
-                                'Allow the device you just selected to share its screen?',
+                              Text(
+                                _video
+                                    ? 'Receiving your screen'
+                                    : _pin.isNotEmpty
+                                    ? 'Enter the AirPlay code on your device'
+                                    : _ready
+                                    ? 'Ready as “MirrorMesh PC”'
+                                    : _running
+                                    ? 'Starting AirPlay…'
+                                    : 'Connect with iOS Screen Mirroring',
+                                style: Theme.of(context).textTheme.titleLarge,
                               ),
-                              FilledButton(
-                                onPressed: _busy ? null : () => _decide(true),
-                                child: const Text('Allow'),
-                              ),
-                              OutlinedButton(
-                                onPressed: _busy ? null : () => _decide(false),
-                                child: const Text('Reject'),
-                              ),
+                              if (_running)
+                                FilledButton.tonalIcon(
+                                  onPressed: _stop,
+                                  icon: const Icon(Icons.stop),
+                                  label: const Text('Stop receiving'),
+                                )
+                              else
+                                FilledButton.icon(
+                                  onPressed: _busy ? null : _start,
+                                  icon: const Icon(Icons.airplay),
+                                  label: const Text(
+                                    'Start iPhone / iPad receiver',
+                                  ),
+                                ),
                             ],
                           ),
-                        ),
-                      if (_error.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: SelectableText(
-                            _error,
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
+                          if (!_video)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 12),
+                              child: Text(
+                                'Connect both devices to the same network. On iPhone or iPad, open Control Center → Screen Mirroring → MirrorMesh PC. Enter the code shown here, then allow the connection on this PC.',
+                              ),
                             ),
-                          ),
-                        ),
-                    ],
+                          if (_pin.isNotEmpty)
+                            Padding(
+                              key: _pinPanel,
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Wrap(
+                                spacing: 16,
+                                runSpacing: 8,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  const Text('AirPlay code'),
+                                  Semantics(
+                                    liveRegion: true,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primaryContainer,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: SelectableText(
+                                        _pin,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .headlineLarge
+                                            ?.copyWith(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onPrimaryContainer,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: 8,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (_request > 0)
+                            Padding(
+                              key: _approvalPanel,
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Wrap(
+                                spacing: 12,
+                                runSpacing: 8,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  const Text(
+                                    'Allow the device you just selected to share its screen?',
+                                  ),
+                                  FilledButton(
+                                    onPressed: _busy
+                                        ? null
+                                        : () => _decide(true),
+                                    child: const Text('Allow'),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: _busy
+                                        ? null
+                                        : () => _decide(false),
+                                    child: const Text('Reject'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (_error.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: SelectableText(
+                                _error,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 Expanded(
+                  flex: _video ? 4 : 1,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       _layoutStage();

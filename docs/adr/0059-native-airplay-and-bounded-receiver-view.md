@@ -42,6 +42,25 @@ and the button control the same window. Existing capture/identity/media flows ar
 
 ## Builds and compatibility
 
+### 0.3.2 authentication display lifetime
+
+Transport socket lifetime is not authentication prompt lifetime. iOS may close its PIN
+challenge connection while waiting for code entry. Keep the private PIN metadata across
+MM_AIRPLAY_IDLE; clear it when authenticated SETUP requests PC approval, video starts, or
+the receiver stops. A code expires after120s; repeated delivery of the same code cannot
+extend that deadline. Expiry closes the owned helper so an undisplayed expired code is
+not left usable. A new code event can replace the previous code. Explicit PC approval
+and upstream authentication are unchanged.
+Ignore new PIN metadata during an active picture or pending approval so an unrelated
+device's request cannot arm an expiry timer on an approved stream. Authentication
+controls scroll within bounded available height; newly received code/approval panels
+are revealed without moving raw media through Flutter.
+
+The opt-in --diagnose-airplay-pin / support-script -CheckPin observes code availability,
+not the digits, through the same native host. It requires two seconds of retained code
+within15s and approves no client. This supports local diagnosis and does not establish
+physical iOS authentication/media compatibility.
+
 ### 0.3.1 startup repair
 
 Packaging must classify plugins by their source directory; matching filenames misplaced

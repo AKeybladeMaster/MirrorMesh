@@ -6,6 +6,29 @@ Historical test evidence on `dev` does not establish correctness of these new ch
 
 ## Current evidence
 
+### Windows 0.3.2 missing AirPlay code (2026-10-21, test_4)
+
+- Owner confirms iOS asks for an AirPlay code but PC shows none. Reproduced with one
+  loopback POST /pair-pin-start RTSP/1.0 to127.0.0.1:7101: response200, immediate close,
+  --diagnose-airplay-pin exit1(no retained code). Same request with socket held3s exits0.
+  This isolates MM_AIRPLAY_IDLE clearing pin_ when the challenge socket closes.
+  Initial probe used media port7100; it was corrected to the control port7101.
+- Original immediate-close request now retains code for the diagnostic observation
+  period. Final packaged diagnose-airplay.ps1 -CheckPin exits0 for both PIN-start(200)
+  and binary-plist password SETUP(401) followed by immediate close. Reports only
+  CODE_AVAILABLE, never digits; no client approved/media received/helper left running.
+- scripts/build-windows.ps1 final exit0, Windows0.3.2+8; log
+  .toolchains/windows-0.3.2-package-final.log. Flutter analyze exit0/no issues; Dart format
+  check0/zero changes. PowerShell AST and diff checks exit0. Archive payload inspected;
+  all283 release-manifest digests match. Unsigned owner-local ZIP and checksum provided.
+- Read-only review: no remaining Critical/Important/Minor findings. Resolved introduced
+  active-stream expiry risk by ignoring unrelated PIN events during active video/approval;
+  bounded the scrollable header and reveal code/approval panels to avoid clipping.
+- No unit/instrumentation/workflow tests or test files added/run. Only local runtime
+  diagnosis, builds, formatting and static analysis. Actual rendered layout/DPI,120s
+  expiry timing, physical iOS code entry and media remain unverified; no production or
+  hardware-complete claim. Rust, upstream helper patch and dependency locks unchanged.
+
 ### Windows 0.3.1 immediate AirPlay shutdown repair (2026-10-21)
 
 - Reproduced packaged `uxplay.exe -h`: exit `-1073741515` / `0xC0000135`, no output.

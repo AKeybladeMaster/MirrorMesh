@@ -16,6 +16,25 @@ This document supersedes historical increment counts for this release candidate.
 
 ## Current reference pipeline
 
+### Windows 0.3.2 AirPlay code retention (2026-10-21, test_4)
+
+- **Source implemented:** retain the PIN when iOS closes its short authentication
+  connection; clear it when authentication advances to PC approval, video starts or Stop.
+  A pending code expires after120s by stopping its helper. Challenges during active video
+  or pending approval cannot arm an unrelated expiry timer. Controls scroll in bounded
+  height, with a prominent wrapping code panel revealed when a code arrives.
+- **BUILD_VERIFIED:** final Windows 0.3.2+8 package build and Flutter analysis exit0;
+  formatting, PowerShell syntax and whitespace checks exit0. Archive inspected and283
+  packaged file digests verified. Android remains compatible0.2.1 without new changes.
+- **Local control-path diagnosis verified:** original immediate-close request failed
+  before the fix; holding the socket open succeeded. Final bundled -CheckPin returns
+  CODE_AVAILABLE/exit0 after immediate close for both PIN-start(200) and password SETUP(401).
+  Digits are never logged; no client approved, no media streamed, no helper left running.
+- **Hardware verification pending:** owner confirms iOS finds MirrorMesh PC and asks for
+  a code on0.3.1, while PC shows none. New code display/entry, approval and actual media on
+  iPhone/iPad still need confirmation. Expiry and active-stream behavior are source reviewed,
+  not physical-device verified. No project-wide CODE_COMPLETE or media integration claim.
+
 ### Windows 0.3.1 AirPlay startup repair (2026-10-21)
 
 - **Source implemented:** package GStreamer core DLLs in `airplay/bin`, classify plugins

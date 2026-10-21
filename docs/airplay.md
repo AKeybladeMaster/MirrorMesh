@@ -1,7 +1,7 @@
 # iPhone and iPad → Windows with native Screen Mirroring
 
-Windows 0.3.1 repairs the startup packaging of the locally built AirPlay receiver preview.
-It is separate from the
+Windows 0.3.2 keeps the AirPlay code visible while iOS waits for entry and includes the
+0.3.1 startup packaging repairs. The locally built receiver preview is separate from the
 MirrorMesh iOS app and does not require an IPA, ReplayKit extension or Xcode signing.
 The owner has confirmed PC ↔ Android on 0.2.1; this new AirPlay path has not been tried
 on physical devices. Intended devices: iPhone 15 Pro Max and base iPad from 2020;
@@ -13,9 +13,13 @@ their iOS/iPadOS versions have not been recorded.
 2. Choose **Receive iPhone / iPad with AirPlay**, then **Start iPhone / iPad receiver**.
 3. Put the PC and Apple device on the same local network. Open Control Center on the
    iPhone/iPad and choose **Screen Mirroring → MirrorMesh PC**.
-4. Enter the four-digit code displayed on the PC. On the PC, choose **Allow** for the
+4. When iOS asks for a code, enter the four digits displayed in the PC's **AirPlay code**
+   panel. The code appears after a device requests authentication, not merely at Start.
+   On the PC, choose **Allow** for the
    device you just selected. Unexpected requests should be rejected; consent expires
    after 30 seconds. A fresh authentication code is required for another connection.
+   A pending code remains visible across brief connection gaps for up to two minutes.
+   If it expires, the PC stops that receiver; start it again and reselect MirrorMesh PC.
 5. The received picture fits the available window without cropping. Resize/maximize the
    window or use **F11** for full screen; **Escape** exits full screen. Stop receiving
    closes the receiver and its media processes. Closing the page or app also stops it.
@@ -26,6 +30,11 @@ AirPlay trust/key file is enabled. Standard MirrorMesh QR connections retain the
 identity, approval and TLS fingerprint checks.
 
 ## If the PC is absent or video fails
+
+If iOS asks for a code but the 0.3.1 PC app shows none, use the complete 0.3.2 bundle.
+The old host cleared the code when iOS closed its short authentication connection.
+0.3.2 retains it until authentication advances or the code expires, without granting
+approval automatically. Stop the old receiver before starting the updated app.
 
 If 0.3.0 stops immediately, replace it with the complete 0.3.1 ZIP, extracted into a
 new folder. The previous packager put the core GStreamer DLL in the plugin directory;
@@ -47,6 +56,8 @@ For local diagnostics, run from the extracted Windows folder:
 .\diagnose-airplay.ps1
 # Opt in to a brief real receiver startup, then automatic shutdown.
 .\diagnose-airplay.ps1 -CheckStartup
+# Diagnose code delivery with your iOS device; it never prints the code or approves it.
+.\diagnose-airplay.ps1 -CheckPin
 ```
 
 From the source checkout the command is `scripts/diagnose-airplay.ps1`. The second mode
@@ -55,6 +66,9 @@ app, requires Ready to persist for two seconds within a 15-second window, then c
 all receiver processes. This also observes initial asynchronous media errors. No client is
 approved and no PIN, client identity or media is logged. It checks native initialization
 and service registration, not iPad discovery or media compatibility.
+`-CheckPin` additionally waits for you to select MirrorMesh PC within 15 seconds and
+requires code availability to persist for two seconds. It reports only CODE_AVAILABLE
+or failure, then stops the receiver. Use the normal app to enter a code and connect.
 
 Protected video may be blank. This preview does not bypass protected-content restrictions,
 and does not provide certified AirPlay, AWDL peer-to-peer discovery, AirPlay multi-room

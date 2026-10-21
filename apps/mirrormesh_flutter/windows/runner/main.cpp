@@ -20,7 +20,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   std::vector<std::string> command_line_arguments = GetCommandLineArguments();
 
   if (command_line_arguments.size() == 1 &&
-      command_line_arguments[0] == "--diagnose-airplay") {
+      (command_line_arguments[0] == "--diagnose-airplay" ||
+       command_line_arguments[0] == "--diagnose-airplay-pin")) {
+    const bool await_pin =
+        command_line_arguments[0] == "--diagnose-airplay-pin";
     // Explicit local startup diagnostics: briefly advertise the receiver,
     // reject every unapproved request, then close its owned process tree. No
     // Flutter UI, screen capture, client identity, PIN or media is logged.
@@ -31,14 +34,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     if (owner) {
       {
         ReceiverHost receiver(owner);
-        error = receiver.DiagnoseStartup();
+        error = receiver.DiagnoseStartup(await_pin);
       }
       DestroyWindow(owner);
     }
+    const std::string label =
+        await_pin ? "AirPlay authentication: " : "AirPlay startup: ";
     const std::string output =
-        error.empty() ? "AirPlay startup: READY. Receiver stopped; no client "
-                        "approved.\r\n"
-                      : "AirPlay startup: FAILED. " + error + "\r\n";
+        error.empty() ? label + (await_pin ? "CODE_AVAILABLE" : "READY") +
+                            ". Receiver stopped; no client approved.\r\n"
+                      : label + "FAILED. " + error + "\r\n";
     DWORD written = 0;
     WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), output.data(),
               static_cast<DWORD>(output.size()), &written, nullptr);

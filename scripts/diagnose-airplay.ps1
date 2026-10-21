@@ -1,4 +1,4 @@
-param([string]$BundleDirectory = '', [switch]$CheckStartup)
+param([string]$BundleDirectory = '', [switch]$CheckStartup, [switch]$CheckPin)
 $ErrorActionPreference = 'Stop'
 if (-not $BundleDirectory) {
     $BundleDirectory = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'MirrorMesh.exe')) {
@@ -42,13 +42,16 @@ Write-Output ('Packaged helper loader: exit {0} (0x{1:X8}).' -f $helper.code, ($
 if ($helper.code -ne 0 -or $helper.text -notmatch 'UxPlay .*AirPlay mirroring server') {
     throw 'AirPlay helper could not load. Re-extract the complete Windows x64 bundle; do not mix DLLs from another release.'
 }
-if ($CheckStartup) {
+if ($CheckStartup -or $CheckPin) {
     Write-Output 'Starting the receiver briefly on this LAN. No client will be approved; reception stops after the readiness check.'
-    $startup = Invoke-AirPlayDiagnostic (Join-Path $BundleDirectory 'MirrorMesh.exe') '--diagnose-airplay' 25000
+    if ($CheckPin) { Write-Output 'Select MirrorMesh PC on your iPhone/iPad within 15 seconds. Only code availability is reported; the code is never logged.' }
+    $argument = if ($CheckPin) { '--diagnose-airplay-pin' } else { '--diagnose-airplay' }
+    $expected = if ($CheckPin) { 'AirPlay authentication: CODE_AVAILABLE' } else { 'AirPlay startup: READY' }
+    $startup = Invoke-AirPlayDiagnostic (Join-Path $BundleDirectory 'MirrorMesh.exe') $argument 25000
     # Only app-generated metadata is printed, never arbitrary native logs or PINs.
-    $startup.text -split "`n" | Where-Object { $_ -match '^AirPlay startup: ' } | ForEach-Object { Write-Output $_.Trim() }
+    $startup.text -split "`n" | Where-Object { $_ -match '^AirPlay (startup|authentication): ' } | ForEach-Object { Write-Output $_.Trim() }
     Write-Output "Native receiver startup: exit $($startup.code)."
-    if ($startup.code -ne 0 -or $startup.text -notmatch 'AirPlay startup: READY') { throw 'Native AirPlay receiver startup failed.' }
+    if ($startup.code -ne 0 -or $startup.text -notmatch $expected) { throw 'Native AirPlay receiver diagnostic failed.' }
 } else {
     Write-Output 'No receiver started. Use -CheckStartup to diagnose native initialization and discovery registration.'
 }

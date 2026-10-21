@@ -222,6 +222,7 @@ void ReceiverHost::Stop() {
   Close(input_);
   buffered_.clear();
   pin_.clear();
+  pin_deadline_ = 0;
   request_ = 0;
   ready_ = video_ = false;
   Fullscreen(false);
@@ -258,23 +259,35 @@ void ReceiverHost::Poll() {
       else if (line == "MM_AIRPLAY_VIDEO") {
         video_ = true;
         pin_.clear();
+        pin_deadline_ = 0;
       } else if (line == "MM_AIRPLAY_IDLE") {
         video_ = false;
-        pin_.clear();
+        // An iOS device can close its challenge socket while its PIN prompt is
+        // open. A transport gap must not erase the active authentication code.
         request_ = 0;
       } else if (line.rfind("MM_AIRPLAY_PIN=", 0) == 0) {
+        // A second device's unauthenticated challenge must not attach a new
+        // PIN-expiry timer to an already approved stream or approval request.
+        if (video_ || request_ > 0)
+          continue;
         std::string code = line.substr(15);
         if (code.size() == 4 &&
-            code.find_first_not_of("0123456789") == std::string::npos)
+            code.find_first_not_of("0123456789") == std::string::npos) {
+          if (pin_ != code || !pin_deadline_)
+            pin_deadline_ = GetTickCount64() + 120000;
           pin_ = code;
+        }
       } else if (line.rfind("MM_AIRPLAY_REQUEST=", 0) == 0) {
         const std::string id = line.substr(19);
         int64_t parsed = 0;
         const auto conversion =
             std::from_chars(id.data(), id.data() + id.size(), parsed);
         if (conversion.ec == std::errc{} &&
-            conversion.ptr == id.data() + id.size() && parsed > 0)
+            conversion.ptr == id.data() + id.size() && parsed > 0) {
           request_ = parsed;
+          pin_.clear();
+          pin_deadline_ = 0;
+        }
       } else if (line.rfind("MM_AIRPLAY_DECIDED=", 0) == 0)
         request_ = 0;
     }
@@ -283,6 +296,13 @@ void ReceiverHost::Poll() {
   }
   if (stage_)
     ShowWindow(stage_, video_ ? SW_SHOWNA : SW_HIDE);
+  if (pin_deadline_ && GetTickCount64() >= pin_deadline_) {
+    // End the helper too, so hiding an expired code cannot leave it usable.
+    Stop();
+    error_ = "The AirPlay code expired. Start the receiver again and select "
+             "MirrorMesh PC on your device.";
+    return;
+  }
   const bool exited = WaitForSingleObject(process_, 0) == WAIT_OBJECT_0;
   const bool timed_out = !ready_ && GetTickCount64() - start_time_ > 45000;
   if (media_error || exited || timed_out) {
@@ -300,7 +320,7 @@ void ReceiverHost::Poll() {
   }
 }
 
-std::string ReceiverHost::DiagnoseStartup() {
+std::string ReceiverHost::DiagnoseStartup(bool await_pin) {
   // Explicit CLI diagnostics use the same process, private pipes, PIN and
   // consent boundary as the UI. Never approve a client or start capture in this
   // mode.
@@ -316,7 +336,7 @@ std::string ReceiverHost::DiagnoseStartup() {
       DispatchMessageW(&message);
     }
     Poll();
-    if (process_ && ready_) {
+    if (process_ && ready_ && (!await_pin || !pin_.empty())) {
       if (!ready_since)
         ready_since = GetTickCount64();
       // READY announces discovery registration. Keep polling afterward so an
@@ -326,14 +346,20 @@ std::string ReceiverHost::DiagnoseStartup() {
         break;
       }
     }
+    if (!ready_ || (await_pin && pin_.empty()))
+      ready_since = 0;
     if (process_)
       Sleep(25);
   }
   const std::string result =
-      stable           ? ""
-      : error_.empty() ? "AirPlay startup did not remain Ready for two seconds "
-                         "within the 15-second diagnostic window."
-                       : error_;
+      stable ? ""
+      : error_.empty()
+          ? await_pin
+                ? "AirPlay authentication code did not remain available for "
+                  "two seconds within the 15-second diagnostic window."
+                : "AirPlay startup did not remain Ready for two seconds within "
+                  "the 15-second diagnostic window."
+          : error_;
   Stop();
   return result;
 }

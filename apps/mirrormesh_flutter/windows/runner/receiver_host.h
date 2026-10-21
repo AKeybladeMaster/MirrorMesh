@@ -15,7 +15,7 @@ public:
       const flutter::MethodCall<flutter::EncodableValue> &call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void Key(WPARAM key);
-  std::string DiagnoseStartup();
+  std::string DiagnoseStartup(bool await_pin = false);
 
 private:
   bool Start();
@@ -29,6 +29,7 @@ private:
   int64_t request_ = 0;
   bool ready_ = false, video_ = false, fullscreen_ = false;
   ULONGLONG start_time_ = 0;
+  ULONGLONG pin_deadline_ = 0;
   WINDOWPLACEMENT placement_{};
   LONG_PTR style_ = 0;
 };

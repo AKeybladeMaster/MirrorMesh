@@ -101,7 +101,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('MirrorMesh 0.3.1')),
+    appBar: AppBar(title: const Text('MirrorMesh 0.3.2')),
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -719,7 +719,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Future<void> _copyDiagnostics() => Clipboard.setData(
     ClipboardData(
       text:
-          'MirrorMesh Windows 0.3.1\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
+          'MirrorMesh Windows 0.3.2\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
     ),
   );
 

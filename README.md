@@ -5,7 +5,8 @@ Release integration adds compact invitations, device search and native send/rece
 integrations, based on `test_2` at `ef05d95`. The AirPlay repair checkpoint is on `test_3`;
 the owner's requested next development branch is `test_4`.
 
-Windows 0.3.1 repairs AirPlay startup packaging, fits incoming screens inside the window
+Windows 0.3.2 retains the AirPlay code while iOS waits for entry, repairs startup
+packaging, fits incoming screens inside the window
 and includes a native iOS Screen
 Mirroring [AirPlay preview](docs/airplay.md), with PIN and explicit PC consent. The owner
 reports PC↔Android working on 0.2.1. The new viewer and AirPlay path need device verification.

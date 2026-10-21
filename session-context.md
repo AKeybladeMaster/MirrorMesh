@@ -1,5 +1,42 @@
 # MirrorMesh session context
 
+## LATEST CHECKPOINT - 2026-10-21 / test_4 / Windows0.3.2 PIN repair
+
+- Owner confirms iOS asks for an AirPlay code but PC shows none. Current branch test_4,
+  base HEAD/origin test_4 2a61c1c; test_3 must remain at that release checkpoint. Initial
+  tracked tree clean; preserve user untracked releases/MirrorMesh-win-x64/. User's running
+  EXE in that directory is0.3.1+7; do not overwrite/stop it.
+- Diagnosing-bugs loop: new native --diagnose-airplay-pin (same ReceiverHost, no approvals,
+  no code logging) observes PIN availability for2s within15s. One loopback POST
+  /pair-pin-start RTSP/1.0 on actualcontrolport127.0.0.1:7101 gets200. Closing immediately
+  yields diagnostic exit1/no retained code. Holding same socket3s yields exit0/CODE_AVAILABLE.
+  Root cause: last-socket-close MM_AIRPLAY_IDLE erased pin_ while iOS's code prompt is open.
+  Original initial probe used media port7100 and couldnotconnect; corrected to7101.
+- Uncommitted fix retains PIN across IDLE, clears on approval request/video/Stop; expires
+  after120s by stopping helper too, avoiding acceptance of a hidden expired code. UI makes
+  code prominent in a wrapping high-contrast panel. Support script adds opt-in -CheckPin.
+- Windows version0.3.2+8; Android remains0.2.1 unchanged. Final scripts/build-windows.ps1
+  exit0, log .toolchains/windows-0.3.2-package-final.log. Format0/zerochanges, Flutter analyze0
+  noissues, PowerShellAST0, diffcheck0. No tests/testfiles/suites added/run.
+- Final packaged support -CheckPin exits0/CODE_AVAILABLE for both original immediate-close
+  PIN-start(200) and binaryplist password-SETUP(401) close. No PINlogged/clientapproved/media
+  received/helperremaining. Reproducedfailure is repaired locally; iOS physical still pending.
+- Review complete: no unresolved Critical/Important/Minor. Fixed new active-stream deadline
+  risk by ignoring PINevents during video/pendingapproval; fixed smallwindow overflow via
+  bounded scrollheader/Wrap and revealnewPIN/approval panels. ADR0059 documents lifetime.
+- Final owner-local release releases/MirrorMesh-0.3.2-windows-x64.zip,94068270bytes, SHA256
+  2b055ab3e800fa231d0c566a00fb207c0fe5293286955a22b924663af9300791.
+  Sidecar .zip.sha256, defaultZIP and extractedbundle refreshed;283 filedigests verified.
+  This checkpoint accompanies commit/push ONLYtest_4; inspectHEAD/origin/test_4 for hash.
+  test_3 remains2a61c1c and all other refs preserved. Do not update those branches.
+- Next owner action: close the old 0.3.1 app, extract the complete 0.3.2 ZIP into a NEW
+  folder, launch the new EXE, start AirPlay, select MirrorMesh PC on iOS, enter the PC code
+  and then choose Allow. Do not overwrite
+  user's untracked releases/MirrorMesh-win-x64/. Need realiOSdisplay/entry/media feedback;
+  expiry120s andactivevideo guard source-reviewed, nothardwareverified.
+- No physical iOS media verification or credit gauge. Keep code/PIN and arbitrary native
+  logs out of tool outputs. Latest source changes do not modify upstream patches or Rust.
+
 ## LATEST CHECKPOINT - 2026-10-21 / Windows 0.3.1 AirPlay repair / test_4 handoff
 
 - Latest owner request: diagnose/fix immediate AirPlay shutdown on PC and absent iPad
