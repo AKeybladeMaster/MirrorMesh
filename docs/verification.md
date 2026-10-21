@@ -6,6 +6,34 @@ Historical test evidence on `dev` does not establish correctness of these new ch
 
 ## Current evidence
 
+### Windows 0.3.1 immediate AirPlay shutdown repair (2026-10-21)
+
+- Reproduced packaged `uxplay.exe -h`: exit `-1073741515` / `0xC0000135`, no output.
+  Imported `libgstreamer-1.0-0.dll` was incorrectly in the plugin directory. Copying that
+  same DLL to `bin` made the same help invocation exit 0. Source fix classifies directories.
+- The actual native startup then exited 1: the plugin whitelist omitted `autodetect`,
+  required by pinned `audio_renderer.c::check_plugins`. Adding only that plugin made
+  the same startup path reach Ready/exit 0. The final packager includes it by default.
+- `scripts/build-windows.ps1`: final exit 0; Windows 0.3.1+7, native MSVC compilation,
+  locked helper/runtime packaging and portable ZIP. Log `.toolchains/windows-0.3.1-package-final.log`.
+- `powershell.exe -NoProfile -File scripts/diagnose-airplay.ps1 -CheckStartup`: final
+  exit 0. Packaged loader exits 0; native receiver remains Ready for two seconds, then
+  stops. Process inspection confirms no `uxplay` remains. No client was approved or media
+  streamed. The earlier shell wrapper checked an unset LASTEXITCODE after .NET process
+  invocation; the final explicit PowerShell process invocation provides an actual exit code.
+- Dart format: exit 0, zero changes. `flutter analyze`: exit 0, no issues. PowerShell
+  syntax checks for all five affected scripts and diff whitespace check: exit 0.
+- Final archive inspection verifies the core DLL in bin, required autodetect plugin,
+  native helper and support script. 283 file digests match the release manifest. ZIP
+  entry separators from Windows Compress-Archive were normalized during inspection;
+  an initial forward-slash-only lookup was corrected, with no missing archive payload.
+- Read-only source review: no remaining Critical/Important/Minor findings. The reviewer
+  caught and resolved premature diagnostic success by requiring post-Ready observation.
+- No unit/instrumentation/workflow suites or test files were added or run. This is local
+  startup evidence only. iPad/iPhone LAN discovery and media remain HARDWARE_VERIFIED pending;
+  no project-wide CODE_COMPLETE or automated media-integration claim is made. Binaries are
+  unsigned owner-local previews; public dependency redistribution review remains pending.
+
 ### Windows 0.3.0 fitted viewer + native AirPlay preview (2026-10-21)
 
 - `scripts/setup-airplay-toolchain.ps1`: exit 0 against the installed exact package lock.

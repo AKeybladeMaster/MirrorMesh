@@ -15,6 +15,7 @@ public:
       const flutter::MethodCall<flutter::EncodableValue> &call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void Key(WPARAM key);
+  std::string DiagnoseStartup();
 
 private:
   bool Start();

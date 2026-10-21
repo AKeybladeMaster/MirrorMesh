@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -ne 'test_3') { throw 'Build this release from the test_3 branch.' }
+if ((git -C $root branch --show-current) -notin @('test_3','test_4')) { throw 'Build this release from test_3 or test_4.' }
 if (-not $FlutterRoot) {
     $installedFlutter = Join-Path $env:LOCALAPPDATA 'Programs/MirrorMeshFlutter/flutter'
     if (Test-Path -LiteralPath $installedFlutter) { $FlutterRoot = $installedFlutter }
@@ -61,6 +61,7 @@ if ($VcRuntimeDirectory -and (Test-Path -LiteralPath $VcRuntimeDirectory)) {
 foreach ($document in @('docs/USER_GUIDE.md', 'docs/connections.md', 'docs/build-release.md', 'docs/airplay.md', 'docs/THIRD-PARTY-NOTICES-rust.txt', 'docs/THIRD-PARTY-NOTICES-flutter.txt')) {
     Copy-Item -LiteralPath (Join-Path $root $document) -Destination $output
 }
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'diagnose-airplay.ps1') -Destination $output
 $files = Get-ChildItem -LiteralPath $output -File -Recurse | Where-Object Name -ne 'SHA256SUMS.txt'
 $checksums = $files | Sort-Object FullName | ForEach-Object {
     '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.FullName.Substring($output.Length + 1).Replace('\', '/')

@@ -1,7 +1,8 @@
 # Build Windows and Android
 
 All commands below are local; no GitHub Actions or unit tests are invoked. Run from the
-repository root on branch `test_3`. Do not merge or push another branch for this work.
+repository root on the authorized release branch: finish the AirPlay startup repair on
+`test_3`, then use `test_4` after the requested handoff. Preserve every other branch.
 
 ## Toolchain
 

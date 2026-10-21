@@ -3,6 +3,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cwchar>
 #include <map>
 #include <optional>
@@ -25,6 +26,23 @@ std::wstring ModuleDirectory() {
     return L"";
   std::wstring value(path.data(), count);
   return value.substr(0, value.find_last_of(L"\\/"));
+}
+std::string ExitError(DWORD code) {
+  std::array<char, 11> hex{};
+  std::snprintf(hex.data(), hex.size(), "0x%08lX",
+                static_cast<unsigned long>(code));
+  const std::string prefix =
+      "AirPlay helper exited (" + std::string(hex.data()) + "). ";
+  if (code == 0xC0000135 || code == ERROR_MOD_NOT_FOUND)
+    return prefix + "A required DLL is missing. Extract the complete Windows "
+                    "bundle into a new folder.";
+  if (code == 0xC000007B)
+    return prefix + "A runtime DLL has the wrong format. Use the complete "
+                    "Windows x64 bundle.";
+  if (code == 0xC000001D)
+    return prefix + "The runtime used an unsupported CPU instruction.";
+  return prefix + "Run the bundled diagnose-airplay.ps1 -CheckStartup for "
+                  "local diagnostics.";
 }
 struct KeyLess {
   bool operator()(const std::wstring &a, const std::wstring &b) const {
@@ -265,12 +283,59 @@ void ReceiverHost::Poll() {
   }
   if (stage_)
     ShowWindow(stage_, video_ ? SW_SHOWNA : SW_HIDE);
-  if (media_error || WaitForSingleObject(process_, 0) == WAIT_OBJECT_0 ||
-      (!ready_ && GetTickCount64() - start_time_ > 45000)) {
+  const bool exited = WaitForSingleObject(process_, 0) == WAIT_OBJECT_0;
+  const bool timed_out = !ready_ && GetTickCount64() - start_time_ > 45000;
+  if (media_error || exited || timed_out) {
+    DWORD code = 0;
+    if (exited)
+      GetExitCodeProcess(process_, &code);
+    std::string message =
+        media_error ? "AirPlay media initialization failed. Check the bundled "
+                      "decoder and rendering runtime."
+        : exited    ? ExitError(code)
+                    : "AirPlay did not become ready within 45 seconds. Check "
+                      "local-network permissions and port availability.";
     Stop();
-    error_ =
-        "AirPlay stopped. Check local-network access and the runtime build.";
+    error_ = std::move(message);
   }
+}
+
+std::string ReceiverHost::DiagnoseStartup() {
+  // Explicit CLI diagnostics use the same process, private pipes, PIN and
+  // consent boundary as the UI. Never approve a client or start capture in this
+  // mode.
+  if (!Start())
+    return error_;
+  const ULONGLONG deadline = GetTickCount64() + 15000;
+  ULONGLONG ready_since = 0;
+  bool stable = false;
+  while (process_ && GetTickCount64() < deadline) {
+    MSG message;
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+    Poll();
+    if (process_ && ready_) {
+      if (!ready_since)
+        ready_since = GetTickCount64();
+      // READY announces discovery registration. Keep polling afterward so an
+      // initial asynchronous GStreamer bus error cannot pass this diagnostic.
+      if (GetTickCount64() - ready_since >= 2000) {
+        stable = true;
+        break;
+      }
+    }
+    if (process_)
+      Sleep(25);
+  }
+  const std::string result =
+      stable           ? ""
+      : error_.empty() ? "AirPlay startup did not remain Ready for two seconds "
+                         "within the 15-second diagnostic window."
+                       : error_;
+  Stop();
+  return result;
 }
 
 void ReceiverHost::Fullscreen(bool enabled) {

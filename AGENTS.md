@@ -1,8 +1,10 @@
-# MirrorMesh test_3 branch operating contract
+# MirrorMesh release branch operating contract
 
-This branch was explicitly requested for release integration. Work, commit and push only
-on `test_3`, created from committed `test_2` at the user's request for connection features;
-never update, merge into, or push `test_2`, `test`, `dev`, `main` or any `task_*` branch.
+The owner authorized the AirPlay startup repair and release checkpoint on `test_3`,
+then creation of and transition to a new `test_4` branch. Finish and push that repair on
+`test_3` first. After creating `test_4`, work, commit and push only on `test_4`; preserve
+`test_3` as the release checkpoint. Never update, merge into, or push `test_2`, `test`,
+`dev`, `main` or any `task_*` branch. Build scripts accept both authorized release branches.
 
 Read `README.md`, `docs/IMPLEMENTATION_STATUS.md`, `docs/build-release.md`,
 `docs/protocol.md`, `docs/security-legal.md` and `session-context.md` before changes.

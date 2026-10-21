@@ -42,6 +42,20 @@ and the button control the same window. Existing capture/identity/media flows ar
 
 ## Builds and compatibility
 
+### 0.3.1 startup repair
+
+Packaging must classify plugins by their source directory; matching filenames misplaced
+the imported core `libgstreamer-1.0-0.dll`. Include the pinned helper's required `autodetect`
+plugin even though the app specifies fixed sinks. Verify imports in the final runtime
+layout and run help with a restricted PATH to detect loader failures before packaging.
+
+Explicit `--diagnose-airplay` uses the same native host and private status/approval pipes.
+It briefly advertises on the user's LAN, requires two seconds of stable Ready within 15
+seconds, approves no clients and stops its Job. The packaged support script requires
+`-CheckStartup` to opt into network initialization; its default checks files/loader only.
+No arbitrary helper log, PIN, client identity or media is printed. No firewall rule or
+privilege change is introduced. This diagnostic establishes local startup only.
+
 Toolchain bootstrap and packages are pinned by SHA-256; pacman signature verification
 remains required. The build rejects installed version drift. Disable host-specific CPU
 instructions. Package selected plugins/import closure, licenses, modified helper source,

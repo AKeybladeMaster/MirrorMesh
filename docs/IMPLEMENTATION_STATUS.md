@@ -1,6 +1,7 @@
 # Implementation status — test release integration
 
-Branch baseline: `test_2` at `ef05d95`. Current work belongs exclusively to `test_3`.
+Branch baseline: `test_2` at `ef05d95`. The AirPlay repair checkpoint is on `test_3`;
+after the requested handoff, new development belongs exclusively to `test_4`.
 This document supersedes historical increment counts for this release candidate.
 
 ## Readiness labels
@@ -14,6 +15,26 @@ This document supersedes historical increment counts for this release candidate.
 - **CODE_COMPLETE:** the complete agreed product requirements are implemented; not yet achieved project-wide.
 
 ## Current reference pipeline
+
+### Windows 0.3.1 AirPlay startup repair (2026-10-21)
+
+- **Source implemented:** package GStreamer core DLLs in `airplay/bin`, classify plugins
+  by their actual source directory and include UxPlay's required `autodetect` plugin.
+  Inspect final packaged imports and run a restricted-PATH loader check during packaging.
+  Native errors now distinguish missing DLLs, wrong architecture, media errors and timeout.
+- **BUILD_VERIFIED:** final Windows 0.3.1+7 build/package and Flutter analysis exited 0;
+  Dart format, PowerShell parsing and diff checks exited 0. Versioned owner-local ZIP and
+  SHA-256 sidecar are in `releases/`; 283 packaged file digests were verified.
+- **Local runtime diagnosis:** packaged helper help exits 0. The real native startup
+  diagnostic retains Ready for two seconds within a 15-second window, then exits 0
+  with no helper process left. It approves no client and captures/receives no media.
+  These are startup checks, not an automated media integration suite.
+- **Hardware verification pending:** the owner reported 0.3.0 stopping immediately and
+  absent iPad discovery. Both reproduced startup defects are repaired locally; iPad/iPhone
+  discovery, PIN/consent, decoding, audio and streaming still need physical confirmation.
+  Android remains on compatible 0.2.1 with no source changes or new APK required.
+- **Branch handoff:** repair/release checkpoint is committed and pushed on `test_3`, then
+  `test_4` is created from it as requested. Inspect Git for the resulting hashes/active branch.
 
 ### Windows 0.3.0 fitted viewer and native AirPlay preview (2026-10-21)
 

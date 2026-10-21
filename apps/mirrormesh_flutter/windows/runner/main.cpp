@@ -17,11 +17,36 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  std::vector<std::string> command_line_arguments = GetCommandLineArguments();
+
+  if (command_line_arguments.size() == 1 &&
+      command_line_arguments[0] == "--diagnose-airplay") {
+    // Explicit local startup diagnostics: briefly advertise the receiver,
+    // reject every unapproved request, then close its owned process tree. No
+    // Flutter UI, screen capture, client identity, PIN or media is logged.
+    HWND owner = CreateWindowExW(
+        0, L"STATIC", L"MirrorMesh startup diagnostics", WS_OVERLAPPEDWINDOW, 0,
+        0, 1280, 720, nullptr, nullptr, instance, nullptr);
+    std::string error = "Could not create the native diagnostic window.";
+    if (owner) {
+      {
+        ReceiverHost receiver(owner);
+        error = receiver.DiagnoseStartup();
+      }
+      DestroyWindow(owner);
+    }
+    const std::string output =
+        error.empty() ? "AirPlay startup: READY. Receiver stopped; no client "
+                        "approved.\r\n"
+                      : "AirPlay startup: FAILED. " + error + "\r\n";
+    DWORD written = 0;
+    WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), output.data(),
+              static_cast<DWORD>(output.size()), &written, nullptr);
+    ::CoUninitialize();
+    return error.empty() ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
+
   flutter::DartProject project(L"data");
-
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
-
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);

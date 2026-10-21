@@ -1,7 +1,7 @@
 param([string]$MsysRoot = '', [switch]$SkipCompile)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -ne 'test_3') { throw 'Build only from test_3.' }
+if ((git -C $root branch --show-current) -notin @('test_3','test_4')) { throw 'Build only from test_3 or test_4.' }
 if (-not $MsysRoot) { $MsysRoot = Join-Path $root '.toolchains/msys64' }
 $MsysRoot = (Resolve-Path -LiteralPath $MsysRoot).Path
 $bash = Join-Path $MsysRoot 'usr/bin/bash.exe'
@@ -65,7 +65,8 @@ $queue.Enqueue((Join-Path $source 'build/uxplay.exe'))
 $queue.Enqueue((Join-Path $prefix 'libexec/gstreamer-1.0/gst-plugin-scanner.exe'))
 # Mirror-mode H.264 with hardware decoding and software fallback; AAC/ALAC + WASAPI.
 # Exclude unrelated device capture, network services, AI models and other plugin families.
-$plugins = @('app','coreelements','playback','typefindfunctions','videoparsersbad',
+# The pinned helper checks for autodetect during gstreamer_init even with fixed sinks.
+$plugins = @('app','coreelements','playback','autodetect','typefindfunctions','videoparsersbad',
     'videoconvertscale','videofilter','d3d11','libav','audioparsers','audioconvert',
     'audioresample','volume','level','wasapi')
 foreach ($plugin in $plugins) { $queue.Enqueue((Join-Path $prefix "lib/gstreamer-1.0/libgst$plugin.dll")) }
@@ -75,12 +76,15 @@ $packageFiles = [Collections.Generic.List[string]]::new()
 $objdump = Join-Path $prefix 'bin/objdump.exe'
 $pacman = Join-Path $MsysRoot 'usr/bin/pacman.exe'
 while ($queue.Count -gt 0) {
-    $file = $queue.Dequeue()
+    $file = [IO.Path]::GetFullPath($queue.Dequeue())
     if (-not (Test-Path -LiteralPath $file)) { throw "Missing runtime input: $file" }
     $name = Split-Path -Leaf $file
     if (-not $copied.Add($name)) { continue }
     if ($copied.Count % 25 -eq 0) { Write-Output "Collected $($copied.Count) native runtime files..." }
-    $relative = if ($file -like '*gstreamer-1.0*' -and $name -like '*.dll') { "lib/gstreamer-1.0/$name" }
+    # Match the source DIRECTORY, never the DLL name: libgstreamer-1.0-0.dll is
+    # a loader dependency in bin, not a GStreamer plugin.
+    $pluginDirectory = [IO.Path]::GetFullPath((Join-Path $prefix 'lib/gstreamer-1.0'))
+    $relative = if ([IO.Path]::GetDirectoryName($file).Equals($pluginDirectory, [StringComparison]::OrdinalIgnoreCase) -and $name -like '*.dll') { "lib/gstreamer-1.0/$name" }
         elseif ($name -eq 'gst-plugin-scanner.exe') { "libexec/gstreamer-1.0/$name" } else { "bin/$name" }
     Copy-Item -LiteralPath $file -Destination (Join-Path $output $relative)
     if ($file.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -100,6 +104,50 @@ while ($queue.Count -gt 0) {
         }
     }
 }
+# Inspect the packaged layout, not just the toolchain's available dependencies.
+# Every ordinary imported DLL must be beside the helper/on its bin search path,
+# or supplied by Windows. A copy in a plugin folder cannot satisfy that import.
+foreach ($binary in (Get-ChildItem -LiteralPath $output -Recurse -File | Where-Object Extension -In '.exe','.dll')) {
+    $imports = & $objdump -p $binary.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Cannot inspect packaged imports for $($binary.Name)" }
+    foreach ($line in $imports) {
+        if ($line -match 'DLL Name:\s*(\S+)') {
+            $dependency = $Matches[1]
+            if ($dependency -match '^(api|ext)-ms-') { continue }
+            if (Test-Path -LiteralPath (Join-Path $output "bin/$dependency")) { continue }
+            if (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$dependency")) { continue }
+            throw "Packaged dependency is missing from bin: $dependency (from $($binary.Name))"
+        }
+    }
+}
+# A help invocation exercises the actual Windows loader without opening a receiver.
+# Restrict PATH to the bundle and Windows so an SDK cannot hide a packaging defect.
+$launch = New-Object System.Diagnostics.ProcessStartInfo
+$launch.FileName = Join-Path $output 'bin/uxplay.exe'
+$launch.Arguments = '-h'
+$launch.WorkingDirectory = $output
+$launch.UseShellExecute = $false
+$launch.CreateNoWindow = $true
+$launch.RedirectStandardOutput = $true
+$launch.RedirectStandardError = $true
+$launch.EnvironmentVariables['PATH'] = (Join-Path $output 'bin') + ";$env:SystemRoot/System32;$env:SystemRoot"
+$loader = New-Object System.Diagnostics.Process
+$loader.StartInfo = $launch
+try {
+    if (-not $loader.Start()) { throw 'Could not start the packaged AirPlay helper.' }
+    $stdout = $loader.StandardOutput.ReadToEndAsync()
+    $stderr = $loader.StandardError.ReadToEndAsync()
+    if (-not $loader.WaitForExit(10000)) {
+        $loader.Kill()
+        $loader.WaitForExit()
+        throw 'Packaged AirPlay helper did not finish its help invocation.'
+    }
+    if ($loader.ExitCode -ne 0 -or $stdout.Result -notmatch 'UxPlay .*AirPlay mirroring server') {
+        throw ('Packaged AirPlay loader failed (exit {0}); run scripts/diagnose-airplay.ps1.' -f $loader.ExitCode)
+    }
+    [void]$stderr.Result
+    Write-Output 'Packaged AirPlay loader: exit 0 (no receiver started).'
+} finally { $loader.Dispose() }
 & $pacman -Qqo @packageFiles | ForEach-Object { [void]$owners.Add($_.Trim()) }
 if ($LASTEXITCODE -ne 0) { throw 'Package provenance lookup failed.' }
 $versions = @{}

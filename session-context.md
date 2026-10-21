@@ -1,5 +1,44 @@
 # MirrorMesh session context
 
+## LATEST CHECKPOINT - 2026-10-21 / Windows 0.3.1 AirPlay repair / test_4 handoff
+
+- Latest owner request: diagnose/fix immediate AirPlay shutdown on PC and absent iPad
+  discovery; push fixes to test_3, produce release binaries, then create/switch test_4.
+  This explicitly authorizes that new branch after the test_3 checkpoint; preserve all
+  other branch refs and user untracked releases/MirrorMesh-win-x64/.
+- Started from clean tracked e84bbb1 on test_3. Reproduced bundled uxplay.exe -h with
+  hidden redirected ProcessStartInfo: exit -1073741515 / 0xC0000135, no output.
+  Root cause: build-airplay matched '*gstreamer-1.0*' against the entire DLL path, moving
+  core libgstreamer-1.0-0.dll to plugins instead of bin. Copying the same DLL into bin
+  changed the exact help invocation to exit 0. No firewall/security changes were made.
+- Uncommitted fix uses exact source-directory matching and checks final packaged PE
+  imports plus restricted-PATH help invocation. App reports loader/media/timeout errors
+  separately. Added opt-in --diagnose-airplay command using actual ReceiverHost startup,
+  private IPC/consent and Job cleanup; it never approves a client. Production support
+  script diagnose-airplay.ps1 is included in the Windows bundle.
+- Version now Windows 0.3.1+7; Android remains compatible 0.2.1, unchanged.
+  Final scripts/build-windows.ps1 exited0, log
+  .toolchains/windows-0.3.1-package-final.log. The second startup defect was missing
+  autodetect, mandatory in pinned audio_renderer.c check_plugins. Added it to whitelist.
+- Final powershell -NoProfile -File scripts/diagnose-airplay.ps1 -CheckStartup exits0:
+  loader0, actual native host Ready stable for two seconds within15s, cleanup leaves no
+  uxplay process. No client approved or media received. Flutter analyze exit0/no issues,
+  Dart format0/zero changes, five PowerShell AST checks0, whitespacecheck0. No tests added/run.
+- Read-only review complete: no remaining Critical/Important/Minor findings. Fixed review's
+  premature-Ready issue via post-Ready polling, plus corrected bundled support-script path.
+- Owner-local unsigned release: releases/MirrorMesh-0.3.1-windows-x64.zip (94066326 bytes),
+  SHA256 53ab0e6b3407c38cdd96c8652b000741ab07bce69b7f5e4bf373be775a77088e.
+  Sidecar .zip.sha256 and standard MirrorMesh-windows-x64.zip also exist; final archive has
+  core DLL in bin and autodetect plugin, with 283 release file digests verified. Public
+  dependency redistribution review still pending; these binaries are local previews.
+- This checkpoint accompanies the repair commit/push on test_3, followed by creation and
+  checkout of test_4 at the same commit. Inspect HEAD/origin/test_3/origin/test_4 for hash
+  and completion state. AGENTS and build guards authorize this handoff; future coding only
+  on test_4. Preserve all other refs and user untracked releases/MirrorMesh-win-x64/.
+- Next: owner replaces0.3.0 by extracting entire0.3.1 ZIP into a NEW folder, starts AirPlay,
+  confirms Ready, then checks iPad/iPhone Screen Mirroring discovery, PIN/Allow and media.
+  Exact iOS versions remain unknown. Do not claim iOS HARDWARE_VERIFIED. No credit gauge exposed.
+
 ## LATEST CHECKPOINT - 2026-10-21 / test_3 / Windows 0.3.0
 
 ### Resume from this update

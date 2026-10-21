@@ -1,10 +1,12 @@
 # MirrorMesh
 
 Local screen sharing from a **Windows x64 PC to a native Android phone, tablet or TV receiver**.
-This `test_3` branch adds compact invitations, device search and native send/receive
-integrations, based on `test_2` at `ef05d95`. Work is isolated to this branch.
+Release integration adds compact invitations, device search and native send/receive
+integrations, based on `test_2` at `ef05d95`. The AirPlay repair checkpoint is on `test_3`;
+the owner's requested next development branch is `test_4`.
 
-Windows 0.3.0 fits incoming screens inside the window and adds a native iOS Screen
+Windows 0.3.1 repairs AirPlay startup packaging, fits incoming screens inside the window
+and includes a native iOS Screen
 Mirroring [AirPlay preview](docs/airplay.md), with PIN and explicit PC consent. The owner
 reports PC↔Android working on 0.2.1. The new viewer and AirPlay path need device verification.
 
