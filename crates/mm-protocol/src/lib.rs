@@ -195,9 +195,21 @@ pub struct PairBegin {
     pub nonce: String,
     pub peer_id: String,
     pub display_name: String,
+    #[serde(default)]
+    pub device_details: Option<DeviceDetails>,
     pub public_key: String,
     pub requested_grants: Vec<String>,
     pub signature: String,
+}
+
+/// Public sender-reported facts. The application binds these to proof v2.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceDetails {
+    pub platform: String,
+    pub manufacturer: String,
+    pub model: String,
+    pub os_version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -362,6 +374,8 @@ struct PairBeginPayloadRef<'a> {
     nonce: &'a str,
     peer_id: &'a str,
     display_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_details: Option<&'a DeviceDetails>,
     public_key: &'a str,
     requested_grants: &'a [String],
     signature: &'a str,
@@ -444,6 +458,7 @@ pub fn encode_pair_begin(
             nonce: &payload.nonce,
             peer_id: &payload.peer_id,
             display_name: &payload.display_name,
+            device_details: payload.device_details.as_ref(),
             public_key: &payload.public_key,
             requested_grants: &payload.requested_grants,
             signature: &payload.signature,
@@ -887,6 +902,22 @@ fn validate_canonical_identifier(value: &str) -> Result<(), ProtocolError> {
 }
 
 fn validate_pair_begin(value: &PairBegin) -> Result<(), ProtocolError> {
+    if let Some(details) = &value.device_details {
+        for field in [
+            &details.platform,
+            &details.manufacturer,
+            &details.model,
+            &details.os_version,
+        ] {
+            if field.len() > 320 || field.chars().count() > 80 || contains_control(field)
+                || field.chars().any(|ch| matches!(ch, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) {
+                return Err(ProtocolError::InvalidPayload);
+            }
+        }
+        if details.platform.trim().is_empty() {
+            return Err(ProtocolError::InvalidPayload);
+        }
+    }
     validate_canonical_identifier(&value.receiver_id)?;
     validate_lower_hex(&value.nonce, 16)?;
     validate_canonical_identifier(&value.peer_id)?;

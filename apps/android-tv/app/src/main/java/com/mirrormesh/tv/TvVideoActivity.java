@@ -35,10 +35,12 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Runnable screenshotTimeout;
     private volatile boolean ended;
+    private ConnectionDialogs dialogs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        dialogs = new ConnectionDialogs(this);
         getWindow().setFlags(
                 WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -78,12 +80,12 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
         Button revokeButton = findViewById(R.id.video_revoke_button);
         revokeButton.setOnClickListener(view -> {
             if (ended || pendingOffer == null) return;
-            new AlertDialog.Builder(this)
+            dialogs.show(new AlertDialog.Builder(this)
                     .setTitle(R.string.revoke_title)
                     .setMessage(R.string.revoke_help)
                     .setNegativeButton(R.string.keep_access, null)
                     .setPositiveButton(R.string.revoke_access, (dialog, which) -> revokeAccess(revokeButton))
-                    .show();
+                    .create());
         });
 
         pendingOffer = TvApprovedSessionLauncher.takePending();
@@ -155,8 +157,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
             runOnUiThread(() -> {
                 if (diagnosticsText != null && screenshotButton != null && !ended) {
                     screenshotButton.setEnabled(true);
-                    diagnosticsText.setText(getString(
-                            R.string.video_screenshot_saved, width, height, location));
+                    dialogs.notice("Screenshot saved", getString(R.string.video_screenshot_saved, width, height, location));
                 }
             });
         } catch (IOException | RuntimeException error) {
@@ -171,7 +172,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
             if (diagnosticsText != null && screenshotButton != null && !ended) {
                 screenshotButton.setEnabled(
                         receiver != null && receiver.diagnostics().receivedFrameCount > 0);
-                diagnosticsText.setText(R.string.video_screenshot_failed);
+                dialogs.notice("Screenshot failed", getString(R.string.video_screenshot_failed));
             }
         });
     }
@@ -186,7 +187,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
                 int status = "reconnect_timeout".equals(code)
                         ? R.string.video_reconnect_failed
                         : R.string.video_session_failed;
-                diagnosticsText.setText(getString(status));
+                dialogs.notice("Screen connection ended", getString(status));
                 setControlsVisible(true);
             }
         });
@@ -213,6 +214,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
 
     @Override
     protected void onDestroy() {
+        dialogs.close();
         closeReceiver();
         super.onDestroy();
     }
@@ -254,13 +256,14 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
     private void revokeAccess(Button revokeButton) {
         if (ended || pendingOffer == null) return;
         revokeButton.setEnabled(false);
+        dialogs.progress("Revoking access", "Saving the revocation and closing this session.");
         pendingOffer.signaling.revoke(message -> runOnUiThread(() -> {
             if (isDestroyed()) return;
             if (message.isEmpty()) {
                 pendingOffer.state.revoke();
                 finish();
             } else {
-                diagnosticsText.setText(message);
+                dialogs.notice("Revocation failed", "The connection ended, but trust could not be updated. Reconnect only when you intend to grant access.");
                 setControlsVisible(true);
             }
         }));
@@ -294,7 +297,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
             return;
         }
         screenshotButton.setEnabled(false);
-        diagnosticsText.setText(R.string.video_screenshot_waiting);
+        dialogs.progress("Saving screenshot", "Capturing the next received frame.");
         screenshotTimeout = () -> {
             screenshotTimeout = null;
             if (receiver != null) {
@@ -303,7 +306,7 @@ public final class TvVideoActivity extends Activity implements TvWebRtcReceiver.
             if (!ended && screenshotButton != null && diagnosticsText != null) {
                 screenshotButton.setEnabled(
                         receiver != null && receiver.diagnostics().receivedFrameCount > 0);
-                diagnosticsText.setText(R.string.video_screenshot_timeout);
+                dialogs.notice("Screenshot unavailable", getString(R.string.video_screenshot_timeout));
             }
         };
         mainHandler.postDelayed(screenshotTimeout, 5000);

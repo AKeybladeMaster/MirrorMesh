@@ -26,8 +26,10 @@ private:
   HANDLE job_ = nullptr, process_ = nullptr, output_ = nullptr,
          input_ = nullptr;
   std::string buffered_, pin_, error_;
+  std::string request_name_, request_model_, request_address_;
   int64_t request_ = 0;
   bool ready_ = false, video_ = false, fullscreen_ = false;
+  bool overlay_ = false;
   ULONGLONG start_time_ = 0;
   ULONGLONG pin_deadline_ = 0;
   WINDOWPLACEMENT placement_{};

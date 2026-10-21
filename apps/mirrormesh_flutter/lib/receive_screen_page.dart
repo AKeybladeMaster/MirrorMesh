@@ -8,6 +8,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'ios_pairing_bootstrap.dart';
 import 'native_connection.dart';
+import 'device_context.dart';
+import 'connection_popups.dart';
 import 'webrtc_engine.dart';
 import 'receiver_window.dart';
 
@@ -20,8 +22,8 @@ class ReceiveScreenPage extends StatefulWidget {
 
 class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
   final _renderer = RTCVideoRenderer();
-  List<String> _addresses = [];
-  String? _address, _invitation, _error;
+  String? _invitation, _error;
+  ConnectionPopup<bool>? _approval;
   String _status = 'Start receiving to create a QR invitation.';
   RTCPeerConnection? _peer;
   MediaStream? _remote;
@@ -45,32 +47,21 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
   Future<void> _initialize() async {
     try {
       await _renderer.initialize();
-      final interfaces = await NetworkInterface.list(
-        type: InternetAddressType.IPv4,
-      );
-      final addresses = interfaces
-          .expand((item) => item.addresses)
-          .where((ip) => !ip.isLoopback && !ip.isLinkLocal)
-          .map((ip) => ip.address)
-          .toList();
-      if (mounted) {
-        setState(() {
-          _addresses = addresses;
-          _address = addresses.firstOrNull;
-          _renderReady = true;
-        });
-      }
+      if (mounted) setState(() => _renderReady = true);
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        setState(() => _error = 'Receiver operation failed.');
+        await connectionNotice(
+          context,
+          'Receiver unavailable',
+          'Check the network connection and restart the receiver.',
+        );
+      }
     }
   }
 
   Future<void> _start() async {
-    if (_busy ||
-        _active ||
-        _address == null ||
-        _stopping != null ||
-        _disposing) {
+    if (_busy || _active || _stopping != null || _disposing) {
       return;
     }
     setState(() {
@@ -79,13 +70,22 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
     });
     final generation = ++_generation;
     try {
-      if (Platform.isIOS) await const IosPairingBootstrap().prepare();
-      if (!mounted || generation != _generation || _disposing) return;
-      _starting = nativeConnection({
-        'op': 'receive_start',
-        'address': '$_address:8765',
-      });
-      final result = await _starting!;
+      final result = await withConnectionProgress(
+        context,
+        'Starting receiver',
+        () async {
+          if (Platform.isIOS) await const IosPairingBootstrap().prepare();
+          final address = await preferredLanAddress();
+          if (!mounted || generation != _generation || _disposing) {
+            throw StateError('Receiver start cancelled.');
+          }
+          _starting = nativeConnection({
+            'op': 'receive_start',
+            'address': '$address:8765',
+          });
+          return await _starting!;
+        },
+      );
       _ownsReceiver = true;
       if (!mounted || generation != _generation) {
         return;
@@ -95,9 +95,17 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
         _invitation = result['invitation'] as String;
         _status = 'Scan or copy this invitation on the device whose screen you want to view.';
       });
+      // Start the accept loop immediately; a notice must never delay signaling.
       unawaited(_waitForRequest(generation));
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        setState(() => _error = 'Receiver operation failed.');
+        await connectionNotice(
+          context,
+          'Receiver unavailable',
+          'Check the network connection and restart the receiver.',
+        );
+      }
     } finally {
       _starting = null;
       if (mounted) setState(() => _busy = false);
@@ -108,68 +116,22 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
     try {
       final request = await nativeConnection({'op': 'receive_wait'});
       if (!mounted || generation != _generation) return;
-      var permission = false;
-      final approved = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => StatefulBuilder(
-          builder: (context, update) => AlertDialog(
-            title: Text('Receive from ${request['display_name']}?'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SelectableText(
-                    'Address: ${request['source_ip']}\nFingerprint: ${request['fingerprint']}',
-                  ),
-                  if (request['verification_code'] case final String code) ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Connection code — compare every group on the sender:',
-                    ),
-                    SelectableText(
-                      code,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const Text(
-                      'Reject unexpected requests or different codes.',
-                    ),
-                  ],
-                  CheckboxListTile(
-                    value: permission,
-                    onChanged: (value) =>
-                        update(() => permission = value ?? false),
-                    title: Text(
-                      request['verification_code'] is String
-                          ? 'The codes match. Allow this device to send its screen'
-                          : 'Allow this device to send its screen',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Reject'),
-              ),
-              FilledButton(
-                onPressed:
-                    permission && request['requested_grants']['view'] == true
-                    ? () => Navigator.pop(context, true)
-                    : null,
-                child: const Text('Approve'),
-              ),
-            ],
-          ),
-        ),
+      final approved = await confirmIncomingDevice(
+        context,
+        request,
+        onOpened: (popup) => _approval = popup,
       );
+      _approval = null;
       if (!mounted || generation != _generation) return;
-      final decision = await nativeConnection({
-        'op': 'receive_decide',
-        'id': request['request_id'],
-        'approve': approved == true,
-      });
+      final decision = await withConnectionProgress(
+        context,
+        approved ? 'Approving connection' : 'Rejecting connection',
+        () => nativeConnection({
+          'op': 'receive_decide',
+          'id': request['request_id'],
+          'approve': approved,
+        }),
+      );
       if (!mounted || generation != _generation || _disposing) {
         return;
       }
@@ -184,11 +146,25 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
           _status = 'Approved. Waiting for the sender to choose a screen.';
         });
       }
+      unawaited(
+        connectionNotice(
+          context,
+          'Connection approved',
+          'Waiting for the sender to choose a screen.',
+          brief: true,
+        ),
+      );
       await _poll(generation);
     } catch (error) {
       if (mounted && generation == _generation) {
-        setState(() => _error = error.toString());
         await _stop();
+        if (mounted) {
+          await connectionNotice(
+            context,
+            'Connection ended',
+            'The request expired or the connection was interrupted. Start again for a fresh invitation.',
+          );
+        }
       }
     }
   }
@@ -314,6 +290,8 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
 
   Future<void> _performStop() async {
     ++_generation;
+    _approval?.close(false);
+    _approval = null;
     if (mounted && !_disposing) setState(() => _busy = true);
     _active = false;
     _connection = null;
@@ -439,27 +417,14 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               if (!_active) ...[
-                DropdownButtonFormField<String>(
-                  initialValue: _address,
-                  decoration: const InputDecoration(
-                    labelText: 'This device’s network address',
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Text(
+                    'Your Wi-Fi or Ethernet connection is selected automatically.',
                   ),
-                  items: _addresses
-                      .map(
-                        (address) => DropdownMenuItem(
-                          value: address,
-                          child: Text(address),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _busy
-                      ? null
-                      : (value) => setState(() => _address = value),
                 ),
                 FilledButton(
-                  onPressed: _busy || !_renderReady || _address == null
-                      ? null
-                      : _start,
+                  onPressed: _busy || !_renderReady ? null : _start,
                   child: const Text('Start receiving / show QR'),
                 ),
               ],
@@ -474,10 +439,18 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
                     ),
                   ),
                 ),
-                SelectableText(invitation),
                 OutlinedButton.icon(
-                  onPressed: () =>
-                      Clipboard.setData(ClipboardData(text: invitation)),
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: invitation));
+                    if (context.mounted) {
+                      await connectionNotice(
+                        context,
+                        'Invitation copied',
+                        'Share it only with the device you want to connect.',
+                        brief: true,
+                      );
+                    }
+                  },
                   icon: const Icon(Icons.copy),
                   label: const Text('Copy invitation'),
                 ),

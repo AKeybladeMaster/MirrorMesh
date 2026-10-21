@@ -12,6 +12,9 @@ import 'network_devices.dart';
 import 'receive_screen_page.dart';
 import 'mobile_connection_home.dart';
 import 'native_connection.dart';
+import 'device_context.dart';
+import 'connection_popups.dart';
+import 'receiver_window.dart';
 import 'airplay_receiver_page.dart';
 
 class MirrorMeshApp extends StatelessWidget {
@@ -53,11 +56,12 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   String? _deviceId, _error, _sourceName;
   int? _requestId;
   bool _busy = false, _polling = false;
+  bool _cancelPairingRequested = false;
   bool _searching = false;
   List<Map<String, dynamic>> _nearby = [];
   String _deviceFilter = '';
   String? _directCode;
-  bool _directRequest = false, _directConfirmed = false;
+  bool _directRequest = false;
   Timer? _pairingTimer;
   WindowsSenderPairingStatus? _pairingStatus;
   WindowsSenderSessionController? _session;
@@ -95,13 +99,13 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
         'Pairing failed · refresh the receiver code and retry',
       WindowsSenderPairingState.cancelling => 'Disconnecting…',
       WindowsSenderPairingState.cancelled => 'Disconnected',
-      null => 'Connect your PC to an Android receiver',
+      null => 'Choose a receiver for your PC screen',
     };
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('MirrorMesh 0.3.2')),
+    appBar: AppBar(title: const Text('MirrorMesh')),
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -115,7 +119,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Windows sender → Android phone, tablet or TV receiver',
+                'Send a screen. Receive from a device. Stay in control.',
               ),
               const SizedBox(height: 24),
               OutlinedButton.icon(
@@ -159,6 +163,14 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                     'Receive iPhone / iPad with AirPlay (preview)',
                   ),
                 ),
+              if (Platform.isWindows)
+                OutlinedButton.icon(
+                  onPressed: !_busy && _requestId == null
+                      ? _nativeAndroidReceiver
+                      : null,
+                  icon: const Icon(Icons.connected_tv),
+                  label: const Text('Android wireless display / Cast options'),
+                ),
               if (_nearby.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 TextField(
@@ -183,7 +195,9 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                     ),
                     title: Text(device['name'] as String),
                     subtitle: Text(
-                      '${device['receive'] == true ? 'Can receive screens' : 'Sender'} · ${(device['endpoints'] as List).join(', ')}',
+                      device['receive'] == true
+                          ? 'Ready to receive screens'
+                          : 'Sender',
                     ),
                     trailing: device['receive'] == true
                         ? const Icon(Icons.arrow_forward)
@@ -218,31 +232,6 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                       if (_busy) ...[
                         const SizedBox(height: 16),
                         const LinearProgressIndicator(),
-                      ],
-                      if (_directCode case final code?) ...[
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Compare all four groups with the receiver. Reject if they differ.',
-                        ),
-                        SelectableText(
-                          code,
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                        FilledButton.icon(
-                          onPressed: _directConfirmed || _busy
-                              ? null
-                              : _confirmDirectCode,
-                          icon: Icon(
-                            _directConfirmed
-                                ? Icons.check
-                                : Icons.verified_user_outlined,
-                          ),
-                          label: Text(
-                            _directConfirmed
-                                ? 'Code confirmed · awaiting receiver approval'
-                                : 'The codes match',
-                          ),
-                        ),
                       ],
                       const SizedBox(height: 24),
                       TextField(
@@ -369,7 +358,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                 childrenPadding: EdgeInsets.all(16),
                 children: [
                   Text(
-                    '1. Connect both devices to the same trusted LAN.\n\n2. Start the Android receiver on its Wi-Fi or Ethernet address. Copy or share its invitation, or scan the TV QR with your phone.\n\n3. Paste the full invitation here. On the receiver, review this PC, select Allow view and approve.\n\n4. Choose a source to begin sharing. Stop sharing on the PC or Disconnect on the receiver ends capture.\n\nInvitations expire and are single use. Refresh the receiver code before pairing again. Guest Wi-Fi or client isolation may prevent connections. Audio and Internet relays are not configured in this release candidate.',
+                    '1. Connect both devices to the same trusted LAN.\n\n2. Start receiving in the MirrorMesh app on Android, TV or iOS. Copy or share its invitation, or scan the TV QR with your phone.\n\n3. Paste the full invitation here. On the receiver, review this PC, select Allow view and approve.\n\n4. Choose a source to begin sharing. Stop sharing on the PC or Disconnect on the receiver ends capture.\n\nInvitations expire and are single use. Refresh the receiver code before pairing again. Guest Wi-Fi or client isolation may prevent connections. Audio and Internet relays are not configured in this release candidate.',
                   ),
                 ],
               ),
@@ -397,7 +386,11 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       _error = null;
     });
     try {
-      final devices = await discoverNetworkDevices();
+      final devices = await withConnectionProgress(
+        context,
+        'Finding nearby devices',
+        discoverNetworkDevices,
+      );
       if (!mounted) return;
       setState(
         () => _nearby = devices
@@ -405,18 +398,86 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
             .toList(),
       );
       if (_nearby.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No MirrorMesh receivers found. Start the Android/TV receiver, check the same LAN, then search again. Other TVs need the MirrorMesh receiver app.',
-            ),
-          ),
+        await connectionNotice(
+          context,
+          'No receivers found',
+          'Start MirrorMesh on the receiving device, connect both devices to the same network, then search again.',
         );
       }
     } catch (error) {
       if (mounted) setState(() => _error = _describe(error));
     } finally {
       if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _nativeAndroidReceiver() async {
+    final mode = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Receive an Android screen'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'miracast'),
+            child: const ListTile(
+              leading: Icon(Icons.connected_tv),
+              title: Text('Wireless display / Miracast'),
+              subtitle: Text('Open the Windows receiver in its own window'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'cast'),
+            child: const ListTile(
+              leading: Icon(Icons.cast),
+              title: Text('Google Cast'),
+              subtitle: Text('A Windows receiver provider is required'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'app'),
+            child: const ListTile(
+              leading: Icon(Icons.qr_code_2),
+              title: Text('MirrorMesh app'),
+              subtitle: Text('Show a QR invitation for the Android app'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || mode == null) return;
+    if (mode == 'app') {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(builder: (_) => const ReceiveScreenPage()),
+      );
+    } else if (mode == 'cast') {
+      await connectionNotice(
+        context,
+        'Google Cast is unavailable',
+        'No compatible Windows Google Cast receiver provider is installed. You can share from the MirrorMesh Android app using the PC QR invitation.',
+      );
+    } else {
+      try {
+        await withConnectionProgress(
+          context,
+          'Opening Windows Wireless Display',
+          () => ReceiverWindow.channel.invokeMethod<void>(
+            'open_wireless_display',
+          ),
+        );
+        if (!mounted) return;
+        await connectionNotice(
+          context,
+          'Use the Windows receiver window',
+          'Choose this PC from Wireless display on your Android device. Windows handles connection approval, rendering and disconnect in its own window. Check that window for hardware support.',
+        );
+      } on PlatformException catch (error) {
+        if (!mounted) return;
+        await connectionNotice(
+          context,
+          'Wireless Display unavailable',
+          error.message ?? 'Install the Windows Wireless Display optional feature, then retry.',
+        );
+      }
     }
   }
 
@@ -430,38 +491,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
               : (a.startsWith('[') ? 1 : -1),
         );
       if (endpoints.isEmpty) return;
-      String? endpoint = endpoints.first;
-      if (endpoints.length > 1) {
-        endpoint = await showDialog<String>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text('Connect to ${device['name']}'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Choose the receiver address on your local network:',
-                ),
-                for (final address in endpoints)
-                  ListTile(
-                    title: Text(address),
-                    trailing: const Icon(Icons.send),
-                    onTap: () => Navigator.pop(context, address),
-                  ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-            ],
-          ),
-        );
-      }
-      if (endpoint != null && mounted) {
-        await _connect(device: device, endpoint: endpoint);
-      }
+      await _connect(device: device, endpoint: endpoints.first);
       return;
     }
     if (!mounted) return;
@@ -492,30 +522,38 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       _error = null;
       _sessionState = null;
       _stats = null;
+      _cancelPairingRequested = false;
       _directRequest = device != null;
       _directCode = null;
-      _directConfirmed = false;
     });
     try {
       final text = _invitation.text.trim();
       if (device == null && (text.isEmpty || text.length > 4096)) {
         throw StateError('Paste a complete receiver invitation first.');
       }
-      _deviceId ??= await _pairing.prepare();
-      final id = device == null
-          ? await _pairing.beginSenderPairing(text)
-          : (await nativeConnection({
-                  'op': 'send_direct',
-                  'endpoint': endpoint,
-                  'receiver_id': device['id'],
-                  'fingerprint': device['request_fingerprint'],
-                }))['id']
-                as int;
+      final id = await withConnectionProgress(
+        context,
+        'Connecting to receiver',
+        () async {
+          _deviceId ??= await _pairing.prepare();
+          await configureDeviceProfile();
+          return device == null
+              ? await _pairing.beginSenderPairing(text)
+              : (await nativeConnection({
+                      'op': 'send_direct',
+                      'endpoint': endpoint,
+                      'receiver_id': device['id'],
+                      'fingerprint': device['request_fingerprint'],
+                    }))['id']
+                    as int;
+        },
+      );
       if (!mounted) {
         await _pairing.cancelSenderPairing(id);
         return;
       }
       _requestId = id;
+      _showWaitingForApproval();
       _pairingStatus = const WindowsSenderPairingStatus(
         state: WindowsSenderPairingState.connecting,
         errorCode: 0,
@@ -527,9 +565,19 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       );
       await _pollPairing(id);
     } catch (error) {
-      if (mounted) setState(() => _error = _describe(error));
+      _waitingPopup?.close();
+      _waitingPopup = null;
+      if (mounted) {
+        await connectionNotice(context, 'Connection failed', _describe(error));
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        if (_cancelPairingRequested) {
+          _cancelPairingRequested = false;
+          await _disconnect();
+        }
+      }
     }
   }
 
@@ -546,6 +594,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
         });
         if (!mounted || id != _requestId) return;
         _directCode = verification['code'] as String?;
+        if (_directCode != null) unawaited(_showDirectCode(id, _directCode!));
       }
       setState(() {
         _pairingStatus = status;
@@ -555,33 +604,152 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       });
       if (!status.state.isActive) {
         _pairingTimer?.cancel();
+        _waitingPopup?.close();
+        _waitingPopup = null;
+        _verificationPopup?.close(false);
+        _verificationPopup = null;
+        if (mounted) {
+          unawaited(
+            connectionNotice(
+              context,
+              'Connection ended',
+              status.failureDescription ??
+                  'The receiver declined or ended the request.',
+            ),
+          );
+        }
         _directCode = null;
         if (_session == null) setState(() => _requestId = null);
       } else if (status.state == WindowsSenderPairingState.approved) {
         _pairingTimer?.cancel();
-        if (mounted) setState(() => _directCode = null);
+        _waitingPopup?.close();
+        _waitingPopup = null;
+        _verificationPopup?.close(false);
+        _verificationPopup = null;
+        if (mounted) {
+          setState(() => _directCode = null);
+          unawaited(
+            connectionNotice(
+              context,
+              'Connection approved',
+              'Choose the screen or window you want to share.',
+              brief: true,
+            ),
+          );
+        }
       }
     } catch (error) {
       _pairingTimer?.cancel();
+      _waitingPopup?.close();
+      _waitingPopup = null;
+      _verificationPopup?.close(false);
+      _verificationPopup = null;
       if (mounted && id == _requestId) {
-        setState(() => _error = _describe(error));
+        final failedId = _requestId;
+        setState(() {
+          _requestId = null;
+          _directCode = null;
+          _error = _describe(error);
+        });
+        if (failedId != null) await _pairing.cancelSenderPairing(failedId);
+        if (mounted) {
+          await connectionNotice(
+            context,
+            'Connection interrupted',
+            'Refresh the receiver invitation and try again.',
+          );
+        }
       }
     } finally {
       _polling = false;
     }
   }
 
+  ConnectionPopup<bool>? _verificationPopup;
+  ConnectionPopup<void>? _waitingPopup;
+  void _showWaitingForApproval() {
+    _waitingPopup?.close();
+    _waitingPopup = ConnectionPopup<void>(
+      context,
+      (context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('Approve this PC on the receiver'),
+          content: const Text(
+            'Check the device details on the receiving screen. Sharing starts only after you choose a capture source.',
+          ),
+          actions: [
+            TextButton(onPressed: _disconnect, child: const Text('Cancel')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDirectCode(int id, String code) async {
+    _waitingPopup?.close();
+    _waitingPopup = null;
+    late ConnectionPopup<bool> popup;
+    popup = ConnectionPopup<bool>(
+      context,
+      (context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('Compare connection codes'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SelectableText(
+                code,
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Compare every group on the receiver. Continue only if the codes match.',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => popup.close(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => popup.close(true),
+              child: const Text('The codes match'),
+            ),
+          ],
+        ),
+      ),
+    );
+    _verificationPopup = popup;
+    final matches = await popup.result == true;
+    if (identical(_verificationPopup, popup)) _verificationPopup = null;
+    if (!mounted || id != _requestId) return;
+    if (matches) {
+      await _confirmDirectCode();
+      if (mounted && id == _requestId && !_approved) _showWaitingForApproval();
+    } else {
+      await _disconnect();
+    }
+  }
+
   Future<void> _confirmDirectCode() async {
     final id = _requestId, code = _directCode;
-    if (id == null || code == null || _busy) return;
+    if (id == null || code == null) return;
     setState(() => _busy = true);
     try {
       await nativeConnection({'op': 'send_confirm', 'id': id, 'code': code});
-      if (mounted && id == _requestId) setState(() => _directConfirmed = true);
     } catch (error) {
       if (mounted) setState(() => _error = _describe(error));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        if (_cancelPairingRequested) {
+          _cancelPairingRequested = false;
+          await _disconnect();
+        }
+      }
     }
   }
 
@@ -659,7 +827,11 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
           setState(() => _stats = stats);
         }
       });
-      await session.start(requestId: id, sourceId: source.id);
+      await withConnectionProgress(
+        context,
+        'Starting screen sharing',
+        () => session.start(requestId: id, sourceId: source.id),
+      );
     } catch (error) {
       if (mounted) setState(() => _error = _describe(error));
     } finally {
@@ -688,10 +860,20 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   }
 
   Future<void> _disconnect() async {
-    if (_busy) return;
+    if (_busy) {
+      if (_requestId != null && _session == null) {
+        _cancelPairingRequested = true;
+      }
+      return;
+    }
+    final id = _requestId;
+    _requestId = null; // Invalidate pending poll/dialog callbacks before dismissing them.
+    _verificationPopup?.close(false);
+    _verificationPopup = null;
+    _waitingPopup?.close();
+    _waitingPopup = null;
     setState(() => _busy = true);
     _pairingTimer?.cancel();
-    final id = _requestId;
     final session = _session;
     try {
       if (session != null) await _releaseSession(session);
@@ -706,7 +888,6 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
           _pairingStatus = null;
           _sessionState = WindowsSenderSessionState.stopped;
           _directCode = null;
-          _directConfirmed = false;
         });
       }
     }
@@ -719,12 +900,14 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Future<void> _copyDiagnostics() => Clipboard.setData(
     ClipboardData(
       text:
-          'MirrorMesh Windows 0.3.2\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
+          'MirrorMesh Windows 0.4.0\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
     ),
   );
 
   @override
   void dispose() {
+    _verificationPopup?.close(false);
+    _waitingPopup?.close();
     _pairingTimer?.cancel();
     _invitation.dispose();
     unawaited(_stateSubscription?.cancel());

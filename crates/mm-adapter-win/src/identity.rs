@@ -2,14 +2,13 @@ use std::ptr::{NonNull, null, null_mut};
 
 use ed25519_dalek::{Signer, SigningKey};
 use mm_adapter_identity::Ed25519PairingIdentity;
-use mm_domain::{MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, PeerFingerprint, PeerPublicKey};
+use mm_domain::{PeerFingerprint, PeerPublicKey};
 use mm_ports::{LocalPairingIdentityPort, LocalTlsIdentityPort, PairingIdentityPort, PortError};
 use zeroize::{Zeroize, Zeroizing};
 
 const ED25519_SEED_BYTES: usize = 32;
 const CREDENTIAL_TARGET: &str = "MirrorMesh/Identity/Ed25519/v1";
 const IDENTITY_MUTEX_NAME: &str = "Local\\MirrorMesh.Identity.Ed25519.v1";
-const PAIRING_PROOF_DOMAIN: &[u8] = b"MirrorMesh.PairingProof.v1\0";
 const TLS13_SERVER_CERT_VERIFY_CONTEXT: &[u8; 34] = b"TLS 1.3, server CertificateVerify\0";
 
 pub(super) trait CredentialStore: Send + Sync {
@@ -317,49 +316,7 @@ impl Drop for IdentityMutex {
 }
 
 fn is_canonical_pairing_message(message: &[u8]) -> bool {
-    const IDENTIFIER_BYTES: usize = 16 * 3;
-    const NAME_LENGTH_BYTES: usize = 4;
-    const NAME_START: usize = IDENTIFIER_BYTES + NAME_LENGTH_BYTES;
-
-    let Some(body) = message.strip_prefix(PAIRING_PROOF_DOMAIN) else {
-        return false;
-    };
-    let Some(name_length_bytes) = body.get(IDENTIFIER_BYTES..NAME_START) else {
-        return false;
-    };
-    let Ok(name_length_bytes) = <[u8; NAME_LENGTH_BYTES]>::try_from(name_length_bytes) else {
-        return false;
-    };
-    let name_length = u32::from_be_bytes(name_length_bytes) as usize;
-    if name_length == 0 || name_length > MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS * 4 {
-        return false;
-    }
-    let Some(expected_length) = NAME_START
-        .checked_add(name_length)
-        .and_then(|length| length.checked_add(1))
-    else {
-        return false;
-    };
-    if body.len() != expected_length {
-        return false;
-    }
-
-    let Some(name_bytes) = body.get(NAME_START..NAME_START + name_length) else {
-        return false;
-    };
-    let Ok(name) = std::str::from_utf8(name_bytes) else {
-        return false;
-    };
-    let character_count = name.chars().count();
-    if character_count == 0
-        || character_count > MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS
-        || name.chars().any(char::is_control)
-    {
-        return false;
-    }
-
-    let grants = body[expected_length - 1];
-    grants != 0 && grants & !0b111 == 0
+    mm_domain::is_canonical_pairing_message(message)
 }
 
 fn is_tls13_server_certificate_verify_input(message: &[u8]) -> bool {

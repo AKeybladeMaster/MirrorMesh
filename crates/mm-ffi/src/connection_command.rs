@@ -19,6 +19,17 @@ pub(crate) fn dispatch(input: &str) -> Result<Value, String> {
     };
     let failed = |_| "Native session operation failed".to_owned();
     match text("op")? {
+        "configure_device" => {
+            let details = mm_domain::ReportedDeviceDetails::new(
+                text("platform")?.to_owned(),
+                text("manufacturer")?.to_owned(),
+                text("model")?.to_owned(),
+                text("os_version")?.to_owned(),
+            )
+            .map_err(|_| "Invalid device details".to_owned())?;
+            sender::configure_device_profile(text("name")?.to_owned(), details).map_err(failed)?;
+            Ok(json!({"ok": true}))
+        }
         "receive_start" => Ok(
             json!({"ok":true,"invitation":receiver::start_pairing(text("address")?)?,
             "device_id":native_platform::local_device_id().map_err(|_| "Device identity unavailable")?.to_string(),

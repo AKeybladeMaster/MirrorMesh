@@ -1,5 +1,91 @@
 # MirrorMesh session context
 
+## ACTIVE CHECKPOINT - 2026-10-21 / test_5 product integration
+
+- Owner now confirms PC/Android apps work and iPhone/iPad connect to PC via AirPlay code.
+  Created test_5 immediately from clean tracked test_4 / 56a8a28. Only untracked user folder
+  releases/MirrorMesh-win-x64/ exists; never delete, stage, overwrite or stop that user's app.
+  New work/commits/pushes ONLY test_5; preserve all older refs. AGENTS updated accordingly.
+- Requested: names/models/system in incoming approval for MirrorMesh + AirPlay; one automatic
+  LAN interface instead of exposed address selectors; no raw local IP in normal GUI; popups
+  for start/approval/progress/results; minimal PC/Android/iOS UI; full directional products.
+  Android TV must send as well as receive. iOS app must receive PC; native iOS uses AirPlay.
+- Owner clarified native Android: BOTH Google Cast and Miracast, freely selectable. Public
+  Google Cast SDK provides receivers on Cast devices/Android TV, not a Windows receiver.
+  Need a legitimate compatible receiver provider/SDK for full native Google Cast on PC;
+  do not fake support or disable sender device-authentication. Microsoft Miracast receiver
+  needs Wi-Fi Direct and CoreApplicationView; investigate Windows Wireless Display/native
+  companion integration. Continue all feasible code rather than stopping on hardware.
+- Skills read/announced: frontend-design, ios-design. Preserve existing navy/teal identity,
+  platform fonts, clear Send/Receive actions, bounded native video, modal operation feedback.
+  Generated visual reference (already shown):
+  C:/Users/Beasty/.codex/generated_images/01a14e5c-8cc4-7ff2-afe9-a91697a646d8/exec-e2b8b414-b542-4734-8b82-6c9d4418a3a8.png
+  Actual implementation must keep Approve disabled until unchecked permission is granted;
+  no decorative gradients/image UI. Native iOS render/build unavailable on Windows.
+- Next: implement bounded optional signed device details using existing Rust proof/session
+  architecture (legacy v1 proofs remain accepted; metadata uses domain-separated v2 proof),
+  profile providers on Windows/Android/iOS; primary LAN address providers; shared popup
+  control flows; AirPlay private request metadata; native Android mode availability; builds,
+  review, updated local Windows/Android artifacts and test_5 push. No tests/workflows allowed.
+- Relevant source: crates/mm-application/src/pairing.rs; mm-protocol PairBegin;
+  mm-adapter-signaling sender_driver/lib/native_service; mm-runtime/src/pairing.rs;
+  mm-ffi connection_command/native_receiver; four platform identity canonical validators;
+  Flutter receive_screen_page/airplay_receiver_page/app/mobile_connection_home;
+  Android MainActivity/SenderActivity/ScreenSenderService; UxPlay bridge/patch.
+- Implemented optional signed ReportedDeviceDetails across domain, proof, wire, receiver,
+  FFI and sender profile snapshots. Legacy v1 remains accepted; metadata uses v2 and requires
+  upgraded receivers. Four platform identities share the canonical-message validator.
+  cargo fmt --all exit0; cargo check --workspace --lib --locked exit0, log
+  .toolchains/test5-rust-check.log. Read-only core review found no outstanding findings.
+- Windows device_context queries bounded public OS facts and physical LAN interfaces;
+  ranks default routes by metrics with a connected physical LAN fallback. iOS source uses
+  NWPathMonitor/getifaddrs/UIDevice. Android DeviceContext selects active Wi-Fi/Ethernet,
+  API21-compatible code-point sanitation and guarded API23 getActiveNetwork.
+- Flutter and Android receivers now have device-fact approval popups with unchecked grants,
+  operation/result dialogs and hidden local addresses/invitation text. QR/copy/share remain.
+  Windows/Android/iOS senders configure signed profiles; direct PC requests use code popups.
+  Android phone/TV share the MediaProjection sender; capture remains explicit OS consent.
+- AirPlay private status pipe now frames bounded reported name/model/actual socket source IP;
+  upstream patch includes raop.h callback change and source archive includes that header.
+  AirPlay PIN and approval are dialogs; native overlay gate hides HWND while dialogs show.
+  Existing 120s PIN retention/expiry and native media pipeline are preserved.
+- Miracast option hands off to Microsoft's installed Wireless Display app using package
+  queries/activation, with honest missing-feature feedback. NOT an embedded receiver.
+  This host has no PPIProjection package. No app launch/hardware claim made.
+- Version Windows/Android0.4.0; scripts guard test_5 only. Initial Android debug phone+TV
+  build exit0 (.toolchains/test5-android-build.log). Flutter analyze0 before latest additions.
+  Build found/fixed C++11 mutable string buffers and Windows network header include order.
+  Final Windows compile exit0 after correct ws2ipdef/ws2tcpip before iphlpapi/netioapi include
+  order (.toolchains/test5-windows-compile2.log). Final Windows full portable packaging
+  EXIT0 in .toolchains/test5-windows-package.log, actual EXE version0.4.0+9.
+  Final Android phone+TV ARM64 debug and unsigned release exit0:
+  .toolchains/test5-android-package-{debug,release}.log. Final lint exit0 with0errors/68warnings
+  each flavor (.toolchains/test5-android-lint-final.log). Cargo Clippy locked/lib workspace0,
+  Dartformat/Flutteranalyze0/noissues; C++format0, PowerShellAST0, diffcheck0. No tests run.
+  Final UI review no remaining findings. Restored AirPlay F11/Escape shortcuts; Android
+  pending-pair Cancel is an explicit finish with existing onDestroy task cancellation.
+  API33+ NSD advertisement uses active physical network; older OS NSD scope is OS-managed.
+  Removed obsolete address selector layout after exact-path/no-reference verification.
+  Read-only review fixes API21 support, terminal popup cleanup, raw endpoint subtitle,
+  AirPlay HWND overlay and physical LAN selection. ADR0060 records protocol/permission scope.
+  README/tutorial/build/protocol docs and ADR updated for0.4.0. iOS Broadcast configurator
+  aligns with existing Runner iOS15minimum; Mac compile/sign remains pending, no IPA.
+  Packaged owner-local releases/MirrorMesh-0.4.0-windows-x64.zip,94059728bytes,
+  SHA256 de870a1798ee90249fd823e701f9b6a73e9f3a9ab44ee74f447fd57ee35c69d5.
+  Sidecar .zip.sha256; all283 archive file digests verified. Default ZIP/windows-x64 bundle
+  refreshed. APKs under releases/android-{phone,tv}/ use0.4.0/code9; all4 sidecars verified.
+  Debug APKs installable/local-signed; optimized APKs unsigned, Windows unsigned.
+  No iOS IPA, Google Cast receiver or embedded Miracast receiver claimed.
+  Next: commit/push ONLY test_5 with explicit paths/refspec; this checkpoint accompanies
+  that commit. Inspect HEAD/origin/test_5 for resulting hash/status. No other refs may move.
+  User untracked releases/MirrorMesh-win-x64/ is intact and must never be staged/overwritten.
+  Future work: physical checks for new dialogs/network/TV; Mac iOS build/sign/install;
+  embedded Miracast companion if desired; compatible Google Cast Windows provider remains
+  an external blocker. Do not restart completed foundations or duplicate the session engine.
+- Owner explicitly has NO Google Cast Windows receiver SDK/provider. Full native Google
+  Cast PC reception remains an external capability blocker; do not advertise it as working.
+  No credit gauge exposed; save progress periodically. Prior checkpoints remain below.
+
 ## LATEST CHECKPOINT - 2026-10-21 / test_4 / Windows0.3.2 PIN repair
 
 - Owner confirms iOS asks for an AirPlay code but PC shows none. Current branch test_4,

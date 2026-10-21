@@ -3,21 +3,36 @@ package com.mirrormesh.tv;
 import android.content.Context;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.os.Build;
 
 /** Public discovery hints only. The public key fingerprint is not a verified identity.
  * Never publish invitations, nonces or approval; direct requests require matching codes. */
 final class ReceiverAdvertisement {
     private final NsdManager manager;
+    private final ConnectivityManager connectivity;
     private NsdManager.RegistrationListener active;
 
     ReceiverAdvertisement(Context context) {
         manager = (NsdManager) context.getSystemService(Context.NSD_SERVICE);
+        connectivity = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
     }
 
     void start(String id, String name, String fingerprint) {
         stop();
         if (manager == null) return;
         NsdServiceInfo info = new NsdServiceInfo();
+        if (Build.VERSION.SDK_INT >= 33 && connectivity != null) {
+            Network network = connectivity.getActiveNetwork();
+            if (network == null) return;
+            NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(network);
+            if (capabilities == null || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                    || (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                        && !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) return;
+            info.setNetwork(network);
+        }
         info.setServiceName(name);
         info.setServiceType("_mirrormesh._tcp.");
         info.setPort(8765);

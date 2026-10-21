@@ -1,10 +1,11 @@
 # iPhone and iPad → Windows with native Screen Mirroring
 
-Windows 0.3.2 keeps the AirPlay code visible while iOS waits for entry and includes the
-0.3.1 startup packaging repairs. The locally built receiver preview is separate from the
+Windows 0.4.0 shows the retained AirPlay code and reported device name/model in popups,
+with unchecked permission before approval. It includes the 0.3.1 startup packaging repairs.
+The locally built receiver preview is separate from the
 MirrorMesh iOS app and does not require an IPA, ReplayKit extension or Xcode signing.
-The owner has confirmed PC ↔ Android on 0.2.1; this new AirPlay path has not been tried
-on physical devices. Intended devices: iPhone 15 Pro Max and base iPad from 2020;
+The owner confirmed PC/Android sharing and native iPhone/iPad AirPlay connections before
+0.4.0. The new dialogs need physical verification. Devices: iPhone 15 Pro Max and base iPad from 2020;
 their iOS/iPadOS versions have not been recorded.
 
 ## Connect
@@ -14,9 +15,10 @@ their iOS/iPadOS versions have not been recorded.
 3. Put the PC and Apple device on the same local network. Open Control Center on the
    iPhone/iPad and choose **Screen Mirroring → MirrorMesh PC**.
 4. When iOS asks for a code, enter the four digits displayed in the PC's **AirPlay code**
-   panel. The code appears after a device requests authentication, not merely at Start.
-   On the PC, choose **Allow** for the
-   device you just selected. Unexpected requests should be rejected; consent expires
+   popup. The code appears after a device requests authentication, not merely at Start.
+   On the PC, review the reported device name/model and observed source address, check
+   permission and choose **Approve**. Missing OS/manufacturer facts are not invented.
+   Unexpected requests should be rejected; consent expires
    after 30 seconds. A fresh authentication code is required for another connection.
    A pending code remains visible across brief connection gaps for up to two minutes.
    If it expires, the PC stops that receiver; start it again and reselect MirrorMesh PC.

@@ -14,17 +14,8 @@
         <TextView android:id="@+id/service_state" style="@style/MeshText.Secondary"
             android:layout_marginTop="8dp" android:accessibilityLiveRegion="polite"
             android:text="@string/pairing_idle_help" />
-        <LinearLayout android:id="@+id/network_setup" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="24dp" android:orientation="vertical">
-            <TextView style="@style/MeshText" android:labelFor="@id/endpoint_spinner"
-                android:text="@string/network_label" android:textStyle="bold" />
-            <TextView style="@style/MeshText.Secondary" android:layout_marginTop="4dp"
-                android:text="@string/network_help" />
-            <Spinner android:id="@+id/endpoint_spinner" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:minHeight="56dp"
-                android:layout_marginTop="8dp" android:spinnerMode="dialog"
-                android:prompt="@string/network_label" android:focusable="true" />
-        </LinearLayout>
+        <TextView style="@style/MeshText.Secondary" android:layout_marginTop="12dp"
+            android:text="Wi-Fi or Ethernet is selected automatically. You approve each incoming device." />
         <Button android:id="@+id/start_receiver_button" style="@style/MeshButton.Primary"
             android:text="@string/start_receiver" />
         <LinearLayout android:id="@+id/pairing_columns" android:layout_width="match_parent"

@@ -292,6 +292,18 @@ where
         )
         .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
         let signature = decode_lower_hex(&payload.signature, 64)?;
+        let details = payload
+            .device_details
+            .map(|details| {
+                mm_domain::ReportedDeviceDetails::new(
+                    details.platform,
+                    details.manufacturer,
+                    details.model,
+                    details.os_version,
+                )
+            })
+            .transpose()
+            .map_err(|_| PairingRuntimeError::InvalidPairBegin)?;
         let proof = PairingProof::new(
             receiver_id,
             nonce,
@@ -300,7 +312,8 @@ where
             public_key,
             requested_grants,
             signature,
-        )?;
+        )?
+        .with_device_details(details);
 
         self.verify_admitted_proof(source_ip, proof, now_monotonic_ms)
     }

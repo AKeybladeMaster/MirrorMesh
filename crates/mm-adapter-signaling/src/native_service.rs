@@ -147,6 +147,7 @@ where
             source_ip: pending.admitted().source_ip(),
             peer_id: approval.peer_id(),
             display_name: approval.display_name().to_owned(),
+            device_details: approval.device_details().cloned(),
             fingerprint: approval.fingerprint(),
             requested_grants: approval.requested_grants(),
             verification_code: pending.verification_code().map(str::to_owned),
@@ -203,6 +204,7 @@ pub struct NativePairingRequest {
     pub source_ip: std::net::IpAddr,
     pub peer_id: DeviceId,
     pub display_name: String,
+    pub device_details: Option<mm_domain::ReportedDeviceDetails>,
     pub fingerprint: PeerFingerprint,
     pub requested_grants: TrustedPeerGrants,
 }

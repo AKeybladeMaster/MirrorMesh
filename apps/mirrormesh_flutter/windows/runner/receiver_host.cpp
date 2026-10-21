@@ -1,4 +1,6 @@
 #include "receiver_host.h"
+#include "device_context.h"
+#include "native_casting.h"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -12,6 +14,26 @@
 namespace {
 using flutter::EncodableMap;
 using flutter::EncodableValue;
+std::optional<std::string> PublicField(const std::string &encoded) {
+  if (encoded.size() > 640 || encoded.size() % 2)
+    return std::nullopt;
+  std::string decoded;
+  for (size_t index = 0; index < encoded.size(); index += 2) {
+    unsigned int byte = 0;
+    const auto conversion = std::from_chars(
+        encoded.data() + index, encoded.data() + index + 2, byte, 16);
+    if (conversion.ec != std::errc{} ||
+        conversion.ptr != encoded.data() + index + 2 || byte < 32 ||
+        byte == 127)
+      return std::nullopt;
+    decoded.push_back(static_cast<char>(byte));
+  }
+  if (!decoded.empty() &&
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, decoded.data(),
+                          static_cast<int>(decoded.size()), nullptr, 0) <= 0)
+    return std::nullopt;
+  return decoded;
+}
 void Close(HANDLE &handle) {
   if (handle) {
     CloseHandle(handle);
@@ -224,7 +246,10 @@ void ReceiverHost::Stop() {
   pin_.clear();
   pin_deadline_ = 0;
   request_ = 0;
-  ready_ = video_ = false;
+  request_name_.clear();
+  request_model_.clear();
+  request_address_.clear();
+  ready_ = video_ = overlay_ = false;
   Fullscreen(false);
 }
 
@@ -234,8 +259,8 @@ void ReceiverHost::Poll() {
   DWORD available = 0, count = 0;
   std::array<char, 4096> buffer{};
   bool media_error = false;
-  // Dedicated status pipe never carries upstream logs or client-controlled
-  // labels.
+  // Dedicated pipe excludes upstream logs. Request labels use bounded hex
+  // fields.
   for (int batch = 0;
        batch < 16 &&
        PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr) &&
@@ -278,13 +303,36 @@ void ReceiverHost::Poll() {
           pin_ = code;
         }
       } else if (line.rfind("MM_AIRPLAY_REQUEST=", 0) == 0) {
-        const std::string id = line.substr(19);
+        std::array<std::string, 4> fields;
+        size_t start = 19;
+        bool valid = true;
+        for (size_t index = 0; index < fields.size(); ++index) {
+          const size_t split = line.find('\t', start);
+          if ((index < 3 && split == std::string::npos) ||
+              (index == 3 && split != std::string::npos)) {
+            valid = false;
+            break;
+          }
+          fields[index] = line.substr(
+              start, split == std::string::npos ? split : split - start);
+          start = split == std::string::npos ? line.size() : split + 1;
+        }
+        if (!valid)
+          continue;
+        const std::string &id = fields[0];
+        const auto name = PublicField(fields[1]),
+                   model = PublicField(fields[2]),
+                   address = PublicField(fields[3]);
         int64_t parsed = 0;
         const auto conversion =
             std::from_chars(id.data(), id.data() + id.size(), parsed);
         if (conversion.ec == std::errc{} &&
-            conversion.ptr == id.data() + id.size() && parsed > 0) {
+            conversion.ptr == id.data() + id.size() && parsed > 0 && name &&
+            model && address) {
           request_ = parsed;
+          request_name_ = *name;
+          request_model_ = *model;
+          request_address_ = *address;
           pin_.clear();
           pin_deadline_ = 0;
         }
@@ -295,7 +343,7 @@ void ReceiverHost::Poll() {
       buffered_.clear();
   }
   if (stage_)
-    ShowWindow(stage_, video_ ? SW_SHOWNA : SW_HIDE);
+    ShowWindow(stage_, video_ && !overlay_ ? SW_SHOWNA : SW_HIDE);
   if (pin_deadline_ && GetTickCount64() >= pin_deadline_) {
     // End the helper too, so hiding an expired code cannot leave it usable.
     Stop();
@@ -402,6 +450,18 @@ void ReceiverHost::Key(WPARAM key) {
 void ReceiverHost::Handle(
     const flutter::MethodCall<EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+  if (call.method_name() == "device_context") {
+    result->Success(QueryDeviceContext());
+    return;
+  }
+  if (call.method_name() == "open_wireless_display") {
+    const std::string error = OpenWirelessDisplay();
+    if (error.empty())
+      result->Success();
+    else
+      result->Error("wireless_display_unavailable", error);
+    return;
+  }
   if (call.method_name() == "fullscreen") {
     const auto *enabled =
         call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
@@ -433,8 +493,34 @@ void ReceiverHost::Handle(
         {EncodableValue("video"), EncodableValue(video_)},
         {EncodableValue("pin"), EncodableValue(pin_)},
         {EncodableValue("request"), EncodableValue(request_)},
+        {EncodableValue("device"),
+         EncodableValue(EncodableMap{
+             {EncodableValue("display_name"), EncodableValue(request_name_)},
+             {EncodableValue("source_ip"), EncodableValue(request_address_)},
+             {EncodableValue("requested_grants"),
+              EncodableValue(EncodableMap{
+                  {EncodableValue("view"), EncodableValue(true)}})},
+             {EncodableValue("device_details"),
+              EncodableValue(EncodableMap{
+                  {EncodableValue("model"), EncodableValue(request_model_)},
+                  {EncodableValue("manufacturer"), EncodableValue("")},
+                  {EncodableValue("platform"),
+                   EncodableValue("AirPlay sender")}})}})},
         {EncodableValue("fullscreen"), EncodableValue(fullscreen_)},
         {EncodableValue("error"), EncodableValue(error_)}}));
+    return;
+  }
+  if (call.method_name() == "airplay_overlay") {
+    const auto *enabled =
+        call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
+    if (!enabled) {
+      result->Error("invalid_argument", "Expected an overlay setting.");
+      return;
+    }
+    overlay_ = *enabled;
+    if (stage_)
+      ShowWindow(stage_, video_ && !overlay_ ? SW_SHOWNA : SW_HIDE);
+    result->Success();
     return;
   }
   if (call.method_name() == "airplay_decide") {

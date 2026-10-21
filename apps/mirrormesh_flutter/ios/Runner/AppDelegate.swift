@@ -1,10 +1,82 @@
 import Flutter
 import Security
 import UIKit
+import Darwin
+import Network
 
 private let pairingKeychainService = "org.mirrormesh.pairing-identity.v1"
 private let pairingKeychainAccount = "ed25519-seed"
 private let iosPairingChannelName = "com.mirrormesh/ios_pairing"
+
+/// Public device facts and the OS-selected Wi-Fi/Ethernet path. No serial identifiers.
+private final class DeviceContextQuery {
+  private let result: FlutterResult
+  private let monitor = NWPathMonitor()
+  private var completed = false
+  init(_ result: @escaping FlutterResult) { self.result = result }
+
+  func start() {
+    monitor.pathUpdateHandler = { [self] path in
+      DispatchQueue.main.async { self.finish(path) }
+    }
+    monitor.start(queue: DispatchQueue(label: "com.mirrormesh.device-context"))
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.finish(nil) }
+  }
+
+  private func finish(_ path: NWPath?) {
+    guard !completed else { return }
+    completed = true
+    monitor.pathUpdateHandler = nil
+    monitor.cancel()
+    var system = utsname()
+    uname(&system)
+    let capacity = MemoryLayout.size(ofValue: system.machine)
+    let model = withUnsafePointer(to: &system.machine) {
+      $0.withMemoryRebound(to: CChar.self, capacity: capacity) { String(cString: $0) }
+    }
+    var address = ""
+    if let path, path.status == .satisfied {
+      let names = path.availableInterfaces.filter {
+        ($0.type == .wifi || $0.type == .wiredEthernet) && path.usesInterfaceType($0.type)
+      }.map { $0.name }
+      address = Self.lanAddress(names)
+    }
+    let device = UIDevice.current
+    result(["name": Self.clean(device.name), "platform": device.userInterfaceIdiom == .pad ? "iPadOS" : "iOS",
+      "manufacturer": "Apple", "model": Self.clean(model),
+      "os_version": "\(device.systemName) \(device.systemVersion)", "lan_address": address])
+  }
+
+  private static func clean(_ value: String) -> String {
+    let scalars = value.unicodeScalars.filter {
+      !CharacterSet.controlCharacters.contains($0) && $0.value != 0x061c &&
+      $0.value != 0x200e && $0.value != 0x200f && !(0x202a...0x202e).contains($0.value) &&
+      !(0x2066...0x2069).contains($0.value)
+    }
+    return String(String.UnicodeScalarView(scalars.prefix(80)))
+  }
+
+  private static func lanAddress(_ preferred: [String]) -> String {
+    var first: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&first) == 0, let first else { return "" }
+    defer { freeifaddrs(first) }
+    for name in preferred {
+      var current: UnsafeMutablePointer<ifaddrs>? = first
+      while let pointer = current {
+        let entry = pointer.pointee
+        current = entry.ifa_next
+        guard String(cString: entry.ifa_name) == name, let socket = entry.ifa_addr,
+          Int(socket.pointee.sa_family) == AF_INET, entry.ifa_flags & UInt32(IFF_UP) != 0 else { continue }
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        if getnameinfo(socket, socklen_t(socket.pointee.sa_len), &host, socklen_t(NI_MAXHOST), nil, 0, NI_NUMERICHOST) == 0 {
+          let address = String(cString: host)
+          if !address.hasPrefix("127.") && !address.hasPrefix("169.254.") { return address }
+        }
+      }
+    }
+    return ""
+  }
+}
 
 private enum PairingRuntimeBootstrapError: Error {
   case unavailable(String)
@@ -111,6 +183,12 @@ func mirrormeshIOSKeychainDeleteSeed() -> Int32 {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let deviceChannel = FlutterMethodChannel(name: "com.mirrormesh/receiver_window",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger())
+    deviceChannel.setMethodCallHandler { call, result in
+      guard call.method == "device_context" else { result(FlutterMethodNotImplemented); return }
+      DeviceContextQuery(result).start()
+    }
     let pairingChannel = FlutterMethodChannel(
       name: iosPairingChannelName,
       binaryMessenger: engineBridge.applicationRegistrar.messenger()

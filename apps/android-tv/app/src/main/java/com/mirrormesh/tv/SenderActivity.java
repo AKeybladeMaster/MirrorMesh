@@ -22,6 +22,8 @@ public final class SenderActivity extends Activity {
     private long requestId;
     private volatile boolean destroyed;
     private boolean transferred;
+    private ConnectionDialogs dialogs;
+    private String announcedSharingPhase = "";
 
     static JSONObject command(JSONObject input) throws Exception {
         JSONObject result = new JSONObject(NativePairingBridge.connectionCommand(input.toString()));
@@ -31,6 +33,7 @@ public final class SenderActivity extends Activity {
 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        dialogs = new ConnectionDialogs(this);
         NativePairingBridge.initializeRustAndroidContext(getApplicationContext());
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
@@ -57,10 +60,12 @@ public final class SenderActivity extends Activity {
             requestPermissions(new String[]{"android.permission.ACCESS_LOCAL_NETWORK"}, 37); return;
         }
         String text = invitation.getText().toString().trim();
-        if (text.isEmpty() || text.length() > 1024) { status.setText("Paste a complete MirrorMesh receiver invitation."); return; }
-        pair.setEnabled(false); status.setText("Verifying receiver identity…");
+        if (text.isEmpty() || text.length() > 1024) { dialogs.notice("Invitation needed", "Paste a complete MirrorMesh receiver invitation."); return; }
+        pair.setEnabled(false);
+        dialogs.progress("Connecting to receiver", "Approve this device on the receiver. Capture still requires Android permission.", this::finish);
         worker.execute(() -> {
             try {
+                DeviceContext.configure(getApplicationContext());
                 requestId = command(new JSONObject().put("op", "send_pair").put("invitation", text)).getLong("id");
                 if (destroyed) { command(new JSONObject().put("op", "send_cancel").put("id", requestId)); return; }
                 pollPairing();
@@ -75,8 +80,8 @@ public final class SenderActivity extends Activity {
             int state = result.getInt("state");
             runOnUiThread(() -> {
                 if (destroyed) return;
-                if (state == 3) { share.setEnabled(true); status.setText("Receiver approved. Choose a screen using Android’s capture dialog. Everything visible in that screen may be shared."); }
-                else if (state >= 4) { pair.setEnabled(true); status.setText("Pairing ended (MM-PAIR-" + result.optInt("error") + "). Refresh the receiver invitation before retrying."); }
+                if (state == 3) { dialogs.notice("Connection approved", "Choose a screen using the Android capture dialog when you are ready."); share.setEnabled(true); status.setText("Receiver approved. Choose a screen using Android’s capture dialog. Everything visible in that screen may be shared."); }
+                else if (state >= 4) { dialogs.notice("Connection ended", "The request was rejected or expired. Refresh the receiver invitation and try again."); pair.setEnabled(true); status.setText("Pairing ended (MM-PAIR-" + result.optInt("error") + "). Refresh the receiver invitation before retrying."); }
                 else status.setText("Waiting for explicit approval on the receiver…");
             });
             if (state < 3) handler.postDelayed(() -> { if (!destroyed) worker.execute(this::pollPairing); }, 300);
@@ -84,7 +89,7 @@ public final class SenderActivity extends Activity {
     }
 
     private void showFailure(Exception failure) {
-        runOnUiThread(() -> { if (!destroyed) { pair.setEnabled(true); status.setText(failure.getMessage()); } });
+        runOnUiThread(() -> { if (!destroyed) { pair.setEnabled(true); dialogs.notice("Connection failed", "Check the receiver and use a fresh invitation."); status.setText("Disconnected"); } });
     }
 
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
@@ -94,21 +99,36 @@ public final class SenderActivity extends Activity {
 
     @Override protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
-        if (code != 88 || result != RESULT_OK || data == null) return;
+        if (code != 88) return;
+        if (result != RESULT_OK || data == null) { dialogs.notice("Capture cancelled", "No screen content was shared."); return; }
+        dialogs.progress("Starting screen sharing", "Preparing the approved screen capture.", () -> { stopService(new Intent(this, ScreenSenderService.class)); transferred = false; finish(); });
         Intent service = new Intent(this, ScreenSenderService.class).putExtra("projection", data).putExtra("request", requestId);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+        announcedSharingPhase = "starting";
         transferred = true; share.setEnabled(false); status.setText("Preparing screen sharing…");
         handler.postDelayed(this::refreshSharingStatus, 500);
     }
 
     private void refreshSharingStatus() {
         if (destroyed || !transferred) return;
-        status.setText(ScreenSenderService.sharingStatus());
+        String current = ScreenSenderService.sharingStatus();
+        status.setText(current);
+        String phase = current.startsWith("Sharing") ? "active"
+                : current.startsWith("Screen sharing failed") ? "failed"
+                : current.equals("Screen sharing is stopped.") ? "ended" : "starting";
+        if (!phase.equals(announcedSharingPhase) && !phase.equals("starting")) {
+            announcedSharingPhase = phase;
+            dialogs.notice(phase.equals("active") ? "Screen sharing started" : "Screen sharing ended", current);
+        }
+        if (phase.equals("failed") || phase.equals("ended")) {
+            transferred = false; requestId = 0; pair.setEnabled(true); share.setEnabled(false);
+            return;
+        }
         handler.postDelayed(this::refreshSharingStatus, 500);
     }
 
     @Override protected void onDestroy() {
-        destroyed = true; handler.removeCallbacksAndMessages(null);
+        destroyed = true; dialogs.close(); handler.removeCallbacksAndMessages(null);
         if (!transferred && requestId > 0) worker.execute(() -> {
             try { command(new JSONObject().put("op", "send_cancel").put("id", requestId)); } catch (Exception ignored) { }
         });

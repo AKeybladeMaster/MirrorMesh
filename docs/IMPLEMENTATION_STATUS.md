@@ -1,7 +1,6 @@
 # Implementation status — test release integration
 
-Branch baseline: `test_2` at `ef05d95`. The AirPlay repair checkpoint is on `test_3`;
-after the requested handoff, new development belongs exclusively to `test_4`.
+Current branch: `test_5`, from preserved `test_4` / `56a8a28`. Windows/Android version 0.4.0.
 This document supersedes historical increment counts for this release candidate.
 
 ## Readiness labels
@@ -9,12 +8,56 @@ This document supersedes historical increment counts for this release candidate.
 - **Source implemented:** integrated code exists; this alone does not prove runtime behavior.
 - **Build verified:** an actual compiler/package build succeeded for the stated target.
 - **Automated integration verified:** not claimed for this branch; user requested no test suites.
-- **Hardware verified:** user-reported PC→Android and Android→PC success on 0.2.1
-  (2026-10-21). Android is Redmi Note 5 / Android 13; PC GPU details were not supplied.
-  This is user evidence, not independent verification. TV and new 0.3.0 behavior are pending.
+- **Hardware verified:** user-reported PC/Android sharing and native iPhone/iPad AirPlay
+  connections before test_5 (2026-10-21). Android is Redmi Note 5 / Android 13; PC GPU and
+  exact iOS versions were not supplied. This is user evidence, not independent verification.
+  TV and new 0.4.0 dialogs/network selection remain hardware verification pending.
 - **CODE_COMPLETE:** the complete agreed product requirements are implemented; not yet achieved project-wide.
 
 ## Current reference pipeline
+
+### 0.4.0 device approval and private connection UI (test_5)
+
+- **Source implemented:** bounded signed device facts (name, platform, model, manufacturer,
+  OS version where available), verified before incoming approval. These are sender-reported
+  facts, not hardware attestation. Legacy v1 proofs remain accepted; v2 senders require
+  upgraded receivers. Install the new Windows and Android apps together.
+- **Source implemented:** one automatically selected MirrorMesh LAN listener; local IP
+  selectors, discovered-address lists and displayed invitation text removed. QR/copy/share
+  retain complete identity pinning and expiry. Observed source IP appears in approval only.
+- **Source implemented:** modal start, PIN, device approval, code comparison and operation
+  result feedback. Grants start unchecked; no automatic approval or capture. Native AirPlay
+  name/model/socket source IP use bounded private IPC; native video cannot cover approval.
+- **Source implemented:** phone/TV use the same explicit MediaProjection sender and native
+  WebRTC receiver. Flutter iOS receive mode uses the shared Rust listener and native WebRTC
+  rendering; its device profile and automatic network provider are integrated in Swift.
+- **BUILD_VERIFIED:** Windows 0.4.0+9 native/Flutter and complete portable package exit 0.
+  Phone/TV ARM64 debug and optimized unsigned APK builds exit 0. Rust workspace
+  check, Clippy (`--workspace --lib --locked -- -D warnings`), Dart format/Flutter analyzer,
+  C++ format check and PowerShell parsing exit 0. Android Lint exit 0 with zero errors and
+  68 warnings per flavor; warnings include hardcoded text and existing manifest/API hints.
+  No unit/instrumentation suite, workflow or physical-device verification ran.
+- **HARDWARE_VERIFIED:** owner-reported PC/Android sharing and native iPhone/iPad AirPlay
+  connections before test_5. New dialogs, large text, D-pad/VoiceOver/TalkBack, LAN selection
+  and TV sending remain hardware verification pending. No new physical result is claimed.
+- **Known incomplete:** full native Google Cast reception is blocked by missing compatible
+  Windows SDK/provider (owner confirmed none). Miracast is a system Wireless Display window
+  handoff; an embedded MirrorMesh Miracast session is not implemented. iOS app compilation,
+  signing and installation require macOS/Xcode and are unverified. No project-wide
+  CODE_COMPLETE, production-ready or automatic media integration claim.
+
+| Product / direction | Source status | Build / release boundary |
+| --- | --- | --- |
+| Windows PC to Android phone/TV app | Integrated capture, H.264, pairing, facts and dialogs | Windows portable bundle and phone/TV APK builds exit 0; unsigned Windows preview |
+| Android phone/TV to Windows app | Integrated OS capture permission and native media | Phone/TV ARM64 debug/release builds exit 0; releases unsigned; TV hardware pending |
+| Windows PC to iOS MirrorMesh app | Integrated listener, native WebRTC receive mode and Swift profile | iOS build/signing pending on macOS; no IPA |
+| Native iPhone/iPad AirPlay to PC | Integrated helper, PIN, explicit approval and device facts | Helper and full Windows bundle build exit 0; new UI hardware pending |
+| Native Android Miracast to PC | Installed Windows Wireless Display app handoff | Separate OS window/consent; feature and compatible Wi-Fi required; no embedded receiver |
+| Native Android Google Cast to PC | Not implemented | Blocked: no compatible Windows provider/SDK |
+
+See [ADR0060](adr/0060-device-facts-and-private-connection-ui.md) for the proof format,
+metadata privacy, routing and native protocol boundaries. Historical build evidence below
+describes its stated older versions.
 
 ### Windows 0.3.2 AirPlay code retention (2026-10-21, test_4)
 

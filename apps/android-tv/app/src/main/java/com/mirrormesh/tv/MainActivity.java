@@ -1,6 +1,8 @@
 package com.mirrormesh.tv;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.widget.ScrollView;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -12,12 +14,10 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Build;
 import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import com.google.zxing.BarcodeFormat;
@@ -29,13 +29,7 @@ import com.google.zxing.qrcode.QRCodeWriter;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -53,7 +47,6 @@ public final class MainActivity extends Activity {
     private final ExecutorService acceptWorker = Executors.newSingleThreadExecutor();
     private final List<LocalEndpoint> localEndpoints = new ArrayList<>();
 
-    private Spinner endpointSpinner;
     private Button startButton;
     private Button stopButton;
     private Button waitButton;
@@ -79,12 +72,15 @@ public final class MainActivity extends Activity {
     private int serviceGeneration;
     private int waitGeneration;
     private ReceiverAdvertisement advertisement;
+    private ConnectionDialogs dialogs;
+    private AlertDialog approvalDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         bindViews();
+        dialogs = new ConnectionDialogs(this);
         advertisement = new ReceiverAdvertisement(this);
         adaptLayout();
         View root = findViewById(android.R.id.content);
@@ -123,7 +119,6 @@ public final class MainActivity extends Activity {
     }
 
     private void bindViews() {
-        endpointSpinner = findViewById(R.id.endpoint_spinner);
         startButton = findViewById(R.id.start_receiver_button);
         stopButton = findViewById(R.id.stop_receiver_button);
         waitButton = findViewById(R.id.wait_button);
@@ -169,7 +164,7 @@ public final class MainActivity extends Activity {
 
     private void shareInvitation(boolean share) {
         String invitation = invitationText.getText().toString();
-        if (invitationText.getVisibility() != View.VISIBLE || invitation.isEmpty()) return;
+        if (invitation.isEmpty() || invitationQr.getVisibility() != View.VISIBLE) return;
         if (share) {
             Intent intent = new Intent(Intent.ACTION_SEND).setType("text/plain")
                     .putExtra(Intent.EXTRA_TEXT, invitation);
@@ -178,7 +173,7 @@ public final class MainActivity extends Activity {
         } else {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("MirrorMesh invitation", invitation));
-            serviceState.setText("Invitation copied. Paste it into MirrorMesh on the PC before it expires.");
+            dialogs.notice("Invitation copied", "Paste it into MirrorMesh on the sending device before it expires.");
         }
     }
 
@@ -208,38 +203,11 @@ public final class MainActivity extends Activity {
     private void configureEndpoints() {
         localEndpoints.clear();
         try {
-            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-            if (interfaces != null) {
-                while (interfaces.hasMoreElements()) {
-                    NetworkInterface networkInterface = interfaces.nextElement();
-                    if (!networkInterface.isUp() || networkInterface.isLoopback()) {
-                        continue;
-                    }
-                    Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
-                    while (addresses.hasMoreElements()) {
-                        InetAddress address = addresses.nextElement();
-                        if (!(address instanceof Inet4Address)
-                                || address.isAnyLocalAddress()
-                                || address.isLoopbackAddress()
-                                || address.isLinkLocalAddress()) {
-                            continue;
-                        }
-                        String numericAddress = address.getHostAddress();
-                        localEndpoints.add(new LocalEndpoint(
-                                networkInterface.getDisplayName(), numericAddress));
-                    }
-                }
-            }
-        } catch (SocketException | SecurityException error) {
-            serviceState.setText("The TV network addresses could not be listed: " + error.getMessage());
+            String address = DeviceContext.lanAddress(this);
+            if (address != null) localEndpoints.add(new LocalEndpoint("Active network", address));
+        } catch (SecurityException error) {
+            serviceState.setText("Allow local network access, then try again.");
         }
-        Collections.sort(localEndpoints, (left, right) ->
-                left.address.compareTo(right.address));
-
-        ArrayAdapter<LocalEndpoint> adapter = new ArrayAdapter<>(
-                this, R.layout.network_address_item, localEndpoints);
-        adapter.setDropDownViewResource(R.layout.network_address_item);
-        endpointSpinner.setAdapter(adapter);
         if (localEndpoints.isEmpty()) {
             serviceState.setText(R.string.pairing_no_address);
         }
@@ -253,17 +221,18 @@ public final class MainActivity extends Activity {
             requestPermissions(new String[] { LAN_PERMISSION }, LAN_PERMISSION_REQUEST);
             return;
         }
-        if (localEndpoints.isEmpty()) configureEndpoints();
-        LocalEndpoint endpoint = (LocalEndpoint) endpointSpinner.getSelectedItem();
+        configureEndpoints();
+        LocalEndpoint endpoint = localEndpoints.isEmpty() ? null : localEndpoints.get(0);
         if (endpoint == null) {
-            serviceState.setText(R.string.pairing_no_address);
+            dialogs.notice("Network unavailable", "Connect to Wi-Fi or Ethernet, then start receiving again.");
             return;
         }
         startButton.setEnabled(false);
-        serviceState.setText("Starting the authenticated receiver on " + endpoint.address + "...");
+        dialogs.progress("Starting receiver", "Preparing a private connection on your active network.");
         int startGeneration = serviceGeneration;
         controlWorker.execute(() -> {
             try {
+                DeviceContext.configure(getApplicationContext());
                 JSONObject response = requireSuccess(NativePairingBridge.startPairing(
                         endpoint.address + ":" + PAIRING_PORT));
                 String invitation = response.getString("invitation");
@@ -276,7 +245,8 @@ public final class MainActivity extends Activity {
                     invitationQr.setVisibility(View.VISIBLE);
                     invitationQr.setContentDescription(getString(R.string.pairing_accessibility_qr));
                     invitationText.setText(invitation);
-                    invitationText.setVisibility(View.VISIBLE);
+                    invitationText.setVisibility(View.GONE);
+                    dialogs.endProgress();
                     pairingState.receiverStarted();
                     advertisement.start(response.optString("device_id"),
                             "MirrorMesh " + (getPackageName().endsWith(".tv") ? "TV" : "Android")
@@ -294,8 +264,7 @@ public final class MainActivity extends Activity {
                 }
                 runOnUiThread(() -> {
                     if (!destroyed && startGeneration == serviceGeneration) {
-                        serviceState.setText("Receiver start failed: "
-                                + (error.getMessage() == null ? "Unknown error" : error.getMessage()));
+                        dialogs.notice("Receiver start failed", "Check the active Wi-Fi or Ethernet connection, then retry.");
                         renderState();
                     }
                 });
@@ -307,8 +276,7 @@ public final class MainActivity extends Activity {
         if (!pairingState.beginWait()) {
             return;
         }
-        requestDetails.setText("Waiting for a verified WSS pairing request on port "
-                + PAIRING_PORT + ".");
+        requestDetails.setText("Waiting for a device to request a connection.");
         serviceState.setText("Pairing is active. No screen video is connected.");
         renderState();
         int generation = ++waitGeneration;
@@ -331,7 +299,7 @@ public final class MainActivity extends Activity {
                         serviceState.setText(R.string.pairing_stopped);
                     } else {
                         pairingState.waitFailed();
-                        serviceState.setText(message);
+                        dialogs.notice("Connection request ended", "Refresh the invitation to accept a new request.");
                     }
                     renderState();
                 });
@@ -343,7 +311,6 @@ public final class MainActivity extends Activity {
         if (destroyed || !pairingState.requestReceived(request.optLong("request_id"))) {
             return;
         }
-        long requestId = pairingState.requestId();
         String name = request.optString("display_name", "Unknown sender");
         String sourceIp = request.optString("source_ip", "Unknown address");
         String fingerprint = request.optString("fingerprint", "Unavailable");
@@ -366,20 +333,55 @@ public final class MainActivity extends Activity {
         grantView.setEnabled(requestedView);
         grantSend.setEnabled(requestedSend);
         grantAnnotate.setEnabled(requestedAnnotate);
-        requestDetails.setText("Sender: " + name
-                + "\nSource address: " + sourceIp
-                + "\nKey fingerprint: " + fingerprint
-                + "\nRequest ID: " + requestId
-                + (directRequest ? "\n\nConnection code: " + verification + "\nCompare all four groups with the PC before approving." : ""));
+        requestDetails.setText("A device is requesting a connection.");
         serviceState.setText(R.string.pairing_request_pending);
-        helpText.setText(directRequest ? "Connection requested from the local network. Reject if you did not request it or the codes differ."
-                : "Permission boxes are unchecked. Approve only permissions you intend to grant.");
         renderState();
-        if (requestedView) {
-            grantView.requestFocus();
-        } else {
-            rejectButton.requestFocus();
+        JSONObject details = request.optJSONObject("device_details");
+        String facts = "Device: " + DeviceContext.clean(name)
+                + "\nModel: " + fact(details, "model")
+                + "\nManufacturer: " + fact(details, "manufacturer")
+                + "\nSystem: " + fact(details, "os_version")
+                + "\nAddress: " + DeviceContext.clean(sourceIp)
+                + "\nIdentity fingerprint: " + DeviceContext.clean(fingerprint)
+                + "\n\nDevice details are reported by the sender. Approve only the device you selected."
+                + (directRequest ? "\n\nConnection code: " + DeviceContext.clean(verification)
+                    + "\nCompare every group with the sending device." : "");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int) (24 * getResources().getDisplayMetrics().density);
+        body.setPadding(padding, 0, padding, 0);
+        TextView factsView = new TextView(this);
+        factsView.setText(facts); factsView.setTextSize(18); factsView.setTextIsSelectable(true);
+        body.addView(factsView);
+        CheckBox[] grantsUi = new CheckBox[3];
+        CheckBox[] grantsState = {grantView, grantSend, grantAnnotate};
+        boolean[] requested = {requestedView, requestedSend, requestedAnnotate};
+        String[] labels = {directRequest ? "The codes match. Allow screen viewing" : "Allow screen viewing",
+                "Allow sending", "Allow annotation"};
+        for (int i = 0; i < grantsUi.length; i++) {
+            final int index = i;
+            CheckBox box = new CheckBox(this); grantsUi[i] = box;
+            box.setText(labels[i]); box.setTextSize(18); box.setMinHeight((int) (56 * getResources().getDisplayMetrics().density));
+            box.setVisibility(requested[i] ? View.VISIBLE : View.GONE);
+            box.setOnCheckedChangeListener((button, checked) -> {
+                grantsState[index].setChecked(checked);
+                if (approvalDialog != null) approvalDialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                        .setEnabled(grantView.isChecked() || grantSend.isChecked() || grantAnnotate.isChecked());
+            });
+            body.addView(box);
         }
+        ScrollView scroll = new ScrollView(this); scroll.addView(body);
+        approvalDialog = new AlertDialog.Builder(this).setTitle("Receive this device's screen?")
+                .setView(scroll).setCancelable(false)
+                .setNegativeButton("Reject", (dialog, which) -> { approvalDialog = null; rejectRequest(); })
+                .setPositiveButton("Approve", (dialog, which) -> { approvalDialog = null; approveRequest(); }).create();
+        dialogs.show(approvalDialog);
+        approvalDialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+    }
+
+    private static String fact(JSONObject details, String key) {
+        String value = details == null ? "" : DeviceContext.clean(details.optString(key, ""));
+        return value.isEmpty() ? "Not supplied" : value;
     }
 
     private void approveRequest() {
@@ -394,6 +396,7 @@ public final class MainActivity extends Activity {
             return;
         }
         decisionInProgress = true;
+        dialogs.progress("Approving connection", "Applying the permissions you selected.");
         renderState();
         long requestId = pairingState.requestId();
         controlWorker.execute(() -> {
@@ -430,6 +433,7 @@ public final class MainActivity extends Activity {
                         }
                         return;
                     }
+                    dialogs.notice("Connection approved", "Waiting for the sender to choose a screen.");
                     activeSignaling = signaling;
                     tvReceiverState = approvedSessionState;
                     requestDetails.setText("Paired sender: " + peerId
@@ -464,8 +468,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     decisionInProgress = false;
                     if (pairingState.decisionFailed()) {
-                        serviceState.setText(error.getMessage() == null
-                                ? "Approval failed" : error.getMessage());
+                        dialogs.notice("Approval failed", "The request expired or was interrupted. Stop and restart the receiver.");
                         renderState();
                     }
                 });
@@ -478,6 +481,7 @@ public final class MainActivity extends Activity {
             return;
         }
         decisionInProgress = true;
+        dialogs.progress("Rejecting connection", "This device will not be allowed to share.");
         renderState();
         long requestId = pairingState.requestId();
         controlWorker.execute(() -> {
@@ -501,6 +505,7 @@ public final class MainActivity extends Activity {
                     if (!pairingState.requestRejected()) {
                         return;
                     }
+                    dialogs.notice("Connection rejected", "No screen access was granted.");
                     clearGrantSelection();
                     requestDetails.setText("Sender rejected. No trusted-peer record was added.");
                     if (refreshed != null) {
@@ -516,8 +521,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     decisionInProgress = false;
                     if (pairingState.decisionFailed()) {
-                        serviceState.setText(error.getMessage() == null
-                                ? "Rejection failed" : error.getMessage());
+                        dialogs.notice("Rejection failed", "Stop and restart the receiver before accepting another device.");
                         renderState();
                     }
                 });
@@ -530,6 +534,7 @@ public final class MainActivity extends Activity {
             return;
         }
         decisionInProgress = true;
+        dialogs.progress("Disconnecting", "Closing the approved connection.");
         renderState();
         long connectionId = pairingState.connectionId();
         controlWorker.execute(() -> {
@@ -558,6 +563,7 @@ public final class MainActivity extends Activity {
                     if (!pairingState.controlChannelClosed()) {
                         return;
                     }
+                    dialogs.notice("Disconnected", "Screen access for this session has ended.");
                     activeSignaling = null;
                     tvReceiverState = null;
                     requestDetails.setText(R.string.pairing_trust_remains);
@@ -586,6 +592,7 @@ public final class MainActivity extends Activity {
             return;
         }
         try {
+            dialogs.close();
             TvApprovedSessionLauncher.open(this, signaling, offerSdp, state);
             serviceState.setText("Starting the approved H.264 screen session...");
         } catch (RuntimeException error) {
@@ -663,7 +670,7 @@ public final class MainActivity extends Activity {
             pairingState.waitFailed();
         }
         decisionInProgress = true;
-        serviceState.setText("Refreshing the one-time pairing code...");
+        dialogs.progress("Refreshing invitation", "Creating a new one-time QR invitation.");
         renderState();
         int refreshGeneration = serviceGeneration;
         controlWorker.execute(() -> {
@@ -681,6 +688,7 @@ public final class MainActivity extends Activity {
                         renderState();
                         return;
                     }
+                    dialogs.endProgress();
                     displayInvitation(freshInvitation);
                     requestDetails.setText("Fresh invitation created. Ready for the PC to pair.");
                     serviceState.setText(R.string.pairing_ready);
@@ -694,8 +702,7 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     decisionInProgress = false;
-                    serviceState.setText("Pairing code refresh failed: "
-                            + (error.getMessage() == null ? "Unknown error" : error.getMessage()));
+                    dialogs.notice("Invitation refresh failed", "Check the network connection, then stop and restart receiving.");
                     renderState();
                 });
             }
@@ -713,10 +720,12 @@ public final class MainActivity extends Activity {
         invitationQr.setContentDescription(getString(R.string.pairing_accessibility_qr));
         invitationQr.setVisibility(View.VISIBLE);
         invitationText.setText(invitation.uri);
-        invitationText.setVisibility(View.VISIBLE);
+        invitationText.setVisibility(View.GONE);
     }
 
     private void stopReceiver() {
+        if (dialogs != null) dialogs.close();
+        approvalDialog = null;
         if (advertisement != null) advertisement.stop();
         boolean wasActive = pairingState.phase() != TvPairingState.Phase.STOPPED;
         RustApprovedSignalingChannel signaling = activeSignaling;
@@ -785,21 +794,22 @@ public final class MainActivity extends Activity {
             sessionState.setText("Receiver ready for a sender");
         }
 
-        endpointSpinner.setEnabled(stopped && !localEndpoints.isEmpty());
         startButton.setEnabled(nativeReady && stopped && !decisionInProgress);
         stopButton.setEnabled(!stopped);
-        findViewById(R.id.network_setup).setVisibility(stopped ? View.VISIBLE : View.GONE);
         startButton.setVisibility(stopped ? View.VISIBLE : View.GONE);
         stopButton.setVisibility(stopped ? View.GONE : View.VISIBLE);
         findViewById(R.id.pairing_columns).setVisibility(stopped ? View.GONE : View.VISIBLE);
         findViewById(R.id.pairing_code_panel).setVisibility(pending || paired ? View.GONE : View.VISIBLE);
         findViewById(R.id.pairing_controls).setVisibility(pending || paired || pairingState.canWait()
                 ? View.VISIBLE : View.GONE);
-        boolean hasInvitation = invitationText.getVisibility() == View.VISIBLE;
+        boolean hasInvitation = invitationQr.getVisibility() == View.VISIBLE && !invitationText.getText().toString().isEmpty();
         findViewById(R.id.copy_invitation_button).setEnabled(hasInvitation && !decisionInProgress);
         findViewById(R.id.share_invitation_button).setEnabled(hasInvitation && !decisionInProgress);
-        approveButton.setVisibility(pending ? View.VISIBLE : View.GONE);
-        rejectButton.setVisibility(pending ? View.VISIBLE : View.GONE);
+        approveButton.setVisibility(View.GONE);
+        rejectButton.setVisibility(View.GONE);
+        grantView.setVisibility(View.GONE);
+        grantSend.setVisibility(View.GONE);
+        grantAnnotate.setVisibility(View.GONE);
         closeChannelButton.setVisibility(paired ? View.VISIBLE : View.GONE);
         if (!pending) {
             grantView.setVisibility(View.GONE);
@@ -819,7 +829,7 @@ public final class MainActivity extends Activity {
         if (paired) {
             helpText.setText("Waiting for the approved sender to select a screen or window. No capture starts automatically.");
         } else if (stopped) {
-            helpText.setText("Choose an active local address, then start the receiver. A sender request will never be auto-approved.");
+            helpText.setText("Connect to Wi-Fi or Ethernet, then start the receiver. A sender request will never be auto-approved.");
         } else if (waiting) {
             helpText.setText("The receiver is waiting for one verified sender request. Stop receiver cancels the wait.");
         }
@@ -859,8 +869,7 @@ public final class MainActivity extends Activity {
             } else if (pairingState.phase() == TvPairingState.Phase.WAITING_FOR_REQUEST) {
                 pairingState.waitFailed();
             }
-            serviceState.setText(title + ": "
-                    + (error.getMessage() == null ? "Unknown error" : error.getMessage()));
+            dialogs.notice(title, "The connection was interrupted. Stop and restart the receiver.");
             renderState();
         });
     }
@@ -868,6 +877,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        dialogs.close();
         stopReceiver();
         controlWorker.shutdown();
         acceptWorker.shutdown();
@@ -883,10 +893,7 @@ public final class MainActivity extends Activity {
             this.address = address;
         }
 
-        @Override
-        public String toString() {
-            return interfaceName + " - " + address + ":" + PAIRING_PORT;
-        }
+
     }
 
     private static final class FreshInvitation {

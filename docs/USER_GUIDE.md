@@ -1,7 +1,7 @@
 # Use MirrorMesh
 
-For 0.2.0 compact invitations, device search and both screen directions, see
-[Connect MirrorMesh devices](connections.md). The following baseline flow still applies.
+For current 0.4.0 directions, approval popups and native casting availability, see
+[Connect MirrorMesh devices](connections.md). Upgrade Windows and Android together.
 
 ## Install
 
@@ -32,7 +32,7 @@ adb install -r .\releases\android-tv\MirrorMesh-tv-arm64-v8a-debug.apk
 
 1. Put the PC and receiver on the same trusted Wi-Fi or Ethernet LAN. Guest networks
    with client isolation will often prevent direct communication.
-2. Open MirrorMesh on Android. Select the receiver's LAN address and choose **Start receiver**.
+2. Open MirrorMesh on Android. Choose **Start receiver**; the active Wi-Fi/Ethernet address is selected automatically.
    On Android 17+, allow the local-network permission when prompted. Denial leaves pairing stopped.
 3. Use **Copy invitation** or **Share invitation** to transfer the complete text to the PC.
    On a TV, scan the QR with a phone and transfer the decoded text. A QR text reader is
@@ -83,8 +83,9 @@ image on Android is needed to confirm reception and presentation.
 
 The control connection uses TCP 8765. WebRTC uses negotiated UDP ports for encrypted
 media. Configure app-specific access on a trusted network when required; do not disable
-Windows Defender or the firewall. There is no TURN relay, arbitrary subnet scan, audio,
-Android screen sending, Windows receiving or synchronized annotation in this release.
+Windows Defender or the firewall. There is no TURN relay, arbitrary subnet scan or
+synchronized annotation. App screen sharing is video-only; native AirPlay uses its separate
+audio/video pipeline. See the current connection guide for Android sending and PC receiving.
 
 For logs, launch Windows via `flutter run -d windows` from its app directory. Android
 diagnostics are visible in the receiver and via `adb logcat`; share only relevant lines,

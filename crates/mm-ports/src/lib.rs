@@ -151,6 +151,11 @@ pub trait TrustedPeerPort: Send + Sync {
 /// Implementations must keep private material inside the platform identity adapter,
 /// refuse to sign non-domain-separated pairing messages, and never export the private seed.
 pub trait LocalPairingIdentityPort: Send + Sync {
+    /// Optional public facts bound to the signed pairing request; never a hardware attestation.
+    fn device_details(&self) -> Option<mm_domain::ReportedDeviceDetails> {
+        None
+    }
+
     fn local_public_key(&self) -> Result<PeerPublicKey, PortError>;
 
     /// Signs the canonical domain-separated message produced by the pairing application.

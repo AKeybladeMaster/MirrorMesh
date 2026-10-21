@@ -1,8 +1,7 @@
 # Build Windows and Android
 
 All commands below are local; no GitHub Actions or unit tests are invoked. Run from the
-repository root on the authorized release branch: finish the AirPlay startup repair on
-`test_3`, then use `test_4` after the requested handoff. Preserve every other branch.
+repository root on `test_5` only. Build scripts enforce that branch. Preserve every other branch.
 
 ## Toolchain
 
@@ -133,6 +132,6 @@ In Xcode select your development team, use an extension identifier prefixed with
 Runner app identifier, and provision the same App Group for Runner and MirrorMeshBroadcast.
 The configurator creates/embeds the ReplayKit Upload Extension and configures entitlements.
 It changes the local Xcode project; review and commit those generated project settings only
-on `test_3`. Credentials and provisioning profiles stay outside Git. Full-device sharing
+on `test_5`. Credentials and provisioning profiles stay outside Git. Full-device sharing
 appears only when the extension is present; app-only ReplayKit capture remains available.
 Check `docs/connections.md` for directions and verification boundaries.

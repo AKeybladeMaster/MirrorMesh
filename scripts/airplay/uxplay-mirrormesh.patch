@@ -34,8 +34,21 @@ index c38f191..eb1e5c0 100644
  
  #ifdef test_digest
      printf("username: [%s]  realm: [%s]\n", username, realm);
+diff --git a/lib/raop.h b/lib/raop.h
+index 704c516..e926ace 100644
+--- a/lib/raop.h
++++ b/lib/raop.h
+@@ -107,7 +107,7 @@ struct raop_callbacks_s {
+     void  (*audio_get_format)(void *cls, unsigned char *ct, unsigned short *spf, bool *usingScreen, bool *isMedia, uint64_t *audioFormat);
+     void  (*video_report_size)(void *cls, float *width_source, float *height_source, float *width, float *height);
+     void  (*mirror_video_running)(void *cls, bool is_running);
+-    void  (*report_client_request) (void *cls, char *deviceid, char *model, char *name, bool *admit);
++    void  (*report_client_request) (void *cls, char *deviceid, char *model, char *name, const char *source_ip, bool *admit);
+     void  (*display_pin) (void *cls, char * pin);
+     void  (*register_client) (void *cls, const char *device_id, const char *pk_str, const char *name);
+     bool  (*check_register) (void *cls, const char *pk_str);
 diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
-index c413c0a..7e85b2c 100644
+index c413c0a..12cc295 100644
 --- a/lib/raop_handlers.h
 +++ b/lib/raop_handlers.h
 @@ -644,6 +644,13 @@ raop_handler_setup(raop_conn_t *conn,
@@ -95,6 +108,17 @@ index c413c0a..7e85b2c 100644
  		    if (!conn->authenticated) {
                          // if random_pw is used, the auth_fail_count will be the number of times it is displayed after creation
                          if (len != -1) {
+@@ -758,7 +778,9 @@ raop_handler_setup(raop_conn_t *conn,
+         plist_t req_name_node = plist_dict_get_item(req_root_node, "name");
+         plist_get_string_val(req_name_node, &name);  
+         if (raop->callbacks.report_client_request) {
+-            raop->callbacks.report_client_request(raop->callbacks.cls, deviceID, model, name, &admit_client);
++            char source_ip[64] = {0};
++            utils_ipaddress_to_string(conn->remotelen, conn->remote, conn->zone_id, source_ip, sizeof(source_ip));
++            raop->callbacks.report_client_request(raop->callbacks.cls, deviceID, model, name, source_ip, &admit_client);
+         }
+         if (admit_client && deviceID && name && raop->callbacks.register_client) {
+             char *client_device_id = NULL;
 diff --git a/renderers/video_renderer.c b/renderers/video_renderer.c
 index a2b470e..c1cb227 100644
 --- a/renderers/video_renderer.c
@@ -164,7 +188,7 @@ index a2b470e..c1cb227 100644
          gchar *debug = NULL;
          gboolean flushing = FALSE;
 diff --git a/uxplay.cpp b/uxplay.cpp
-index be41031..13065e1 100644
+index be41031..50d585d 100644
 --- a/uxplay.cpp
 +++ b/uxplay.cpp
 @@ -145,6 +145,7 @@ static bool fullscreen = false;
@@ -215,11 +239,20 @@ index be41031..13065e1 100644
      switch (reason) {
      case 1:
          LOGI("*** ERROR lost connection with client (network problem?)");
+@@ -2670,7 +2676,7 @@ extern "C" void conn_reset (void *cls, int reason) {
+     reset_loop = true;
+ }
+ 
+-extern "C" void report_client_request(void *cls, char *deviceid, char * model, char *name, bool * admit) {
++extern "C" void report_client_request(void *cls, char *deviceid, char * model, char *name, const char *source_ip, bool * admit) {
+     LOGI("connection request from %s (%s) with deviceID = %s\n", name, model, deviceid);
+     if (restrict_clients) {
+         *admit = check_client(deviceid);
 @@ -2685,6 +2691,7 @@ extern "C" void report_client_request(void *cls, char *deviceid, char * model, c
          *admit = false;
          LOGI("*** attempt to connect by blocked client (clientID %s): DENIED\n", deviceid);
      }
-+    if (*admit && !mm_bridge_approve()) *admit = false;
++    if (*admit && !mm_bridge_approve(name, model, source_ip)) *admit = false;
      // Pass device model to renderer for device frame display
      if (*admit && use_video) {
          video_renderer_set_device_model(model, name);

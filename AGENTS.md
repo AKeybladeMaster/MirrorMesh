@@ -1,10 +1,12 @@
 # MirrorMesh release branch operating contract
 
-The owner authorized the AirPlay startup repair and release checkpoint on `test_3`,
-then creation of and transition to a new `test_4` branch. Finish and push that repair on
-`test_3` first. After creating `test_4`, work, commit and push only on `test_4`; preserve
-`test_3` as the release checkpoint. Never update, merge into, or push `test_2`, `test`,
-`dev`, `main` or any `task_*` branch. Build scripts accept both authorized release branches.
+The owner confirmed Windows/Android sharing and native iPhone/iPad AirPlay connections,
+then requested `test_5` from committed `test_4` at 56a8a28. Work, commit and push only on
+`test_5`. Preserve `test_4`, `test_3`, `test_2`, `test`, `dev`, `main` and all `task_*` refs.
+Scope: informative device approval, one automatically selected LAN listener, private
+network addresses outside incoming approval, popup operation feedback, minimal native
+interfaces, and the requested screen-sharing directions/native receiver integrations.
+Never present unsupported native casting or unbuilt iOS binaries as completed products.
 
 Read `README.md`, `docs/IMPLEMENTATION_STATUS.md`, `docs/build-release.md`,
 `docs/protocol.md`, `docs/security-legal.md` and `session-context.md` before changes.

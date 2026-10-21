@@ -106,12 +106,45 @@ void mm_bridge_pin(const char *pin) {
 extern "C" void mm_bridge_video() { event("VIDEO"); }
 extern "C" void mm_bridge_error() { event("ERROR"); }
 
-bool mm_bridge_approve() {
+// Hex is a bounded field framing format on the private status pipe, never an edit encoding.
+// Untrusted names cannot inject a status line or a delimiter.
+static std::string public_field(const char *value) {
+    if (!value) return "";
+    const size_t bytes = strnlen(value, 1025);
+    if (bytes > 1024) return "";
+    const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value,
+        static_cast<int>(bytes), nullptr, 0);
+    if (count <= 0) return "";
+    std::wstring wide(count, L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, static_cast<int>(bytes), &wide[0], count);
+    std::wstring clean;
+    size_t scalars = 0;
+    for (size_t index = 0; index < wide.size() && scalars < 80; ++index) {
+        const wchar_t ch = wide[index];
+        if (ch < 32 || (ch >= 127 && ch <= 159) || ch == 0x061c || ch == 0x200e || ch == 0x200f
+            || (ch >= 0x202a && ch <= 0x202e) || (ch >= 0x2066 && ch <= 0x2069)) continue;
+        clean += ch;
+        if (ch >= 0xd800 && ch <= 0xdbff && index + 1 < wide.size()) clean += wide[++index];
+        ++scalars;
+    }
+    const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, clean.data(),
+        static_cast<int>(clean.size()), nullptr, 0, nullptr, nullptr);
+    if (length <= 0 || length > 320) return "";
+    std::string utf8(length, '\0');
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, clean.data(), static_cast<int>(clean.size()),
+        &utf8[0], length, nullptr, nullptr);
+    const char *digits = "0123456789abcdef";
+    std::string encoded;
+    for (unsigned char byte : utf8) { encoded += digits[byte >> 4]; encoded += digits[byte & 15]; }
+    return encoded;
+}
+
+bool mm_bridge_approve(const char *name, const char *model, const char *source_ip) {
     if (!mm_bridge_enabled()) return true;
     std::unique_lock<std::mutex> lock(approval_guard, std::try_to_lock);
     if (!lock.owns_lock()) return false;
     const unsigned long id = next_request.fetch_add(1);
-    event("REQUEST=" + std::to_string(id));
+    event("REQUEST=" + std::to_string(id) + "\t" + public_field(name) + "\t" + public_field(model) + "\t" + public_field(source_ip));
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     const ULONGLONG deadline = GetTickCount64() + 30000;
     std::string line;

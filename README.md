@@ -1,15 +1,17 @@
 # MirrorMesh
 
 Local screen sharing from a **Windows x64 PC to a native Android phone, tablet or TV receiver**.
-Release integration adds compact invitations, device search and native send/receive
-integrations, based on `test_2` at `ef05d95`. The AirPlay repair checkpoint is on `test_3`;
-the owner's requested next development branch is `test_4`.
+Current development is exclusively on `test_5`, from preserved `test_4` at `56a8a28`.
+Version 0.4.0 adds signed reported device facts in approval dialogs, automatic LAN selection,
+private setup screens and popup feedback on Windows, Android and iOS source interfaces.
+Update Windows and Android together: new device-fact proofs require upgraded receivers.
 
-Windows 0.3.2 retains the AirPlay code while iOS waits for entry, repairs startup
-packaging, fits incoming screens inside the window
-and includes a native iOS Screen
-Mirroring [AirPlay preview](docs/airplay.md), with PIN and explicit PC consent. The owner
-reports PC↔Android working on 0.2.1. The new viewer and AirPlay path need device verification.
+The owner reports PC/Android sharing and native iPhone/iPad AirPlay connections working
+before these changes. New dialogs and route selection need device verification. Native
+[AirPlay](docs/airplay.md) keeps PIN entry and explicit PC consent. Miracast opens the
+installed Windows Wireless Display app in its own window. Native Google Cast reception
+requires a compatible Windows provider, which is not available. iOS app source is integrated;
+compilation/signing on macOS remains pending. See the [readiness table](docs/IMPLEMENTATION_STATUS.md).
 
 ## Get started
 

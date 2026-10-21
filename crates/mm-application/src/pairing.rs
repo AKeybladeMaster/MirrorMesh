@@ -12,7 +12,7 @@ use mm_security::{
 };
 
 pub const MAX_PAIRING_SIGNATURE_BYTES: usize = 512;
-const PAIRING_PROOF_DOMAIN: &[u8] = b"MirrorMesh.PairingProof.v1\0";
+use mm_domain::{PAIRING_PROOF_DOMAIN_V1, PAIRING_PROOF_DOMAIN_V2, ReportedDeviceDetails};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairingCoordinatorError {
@@ -77,6 +77,7 @@ pub struct PairingProof {
     nonce: PairingNonce,
     peer_id: DeviceId,
     display_name: String,
+    device_details: Option<ReportedDeviceDetails>,
     public_key: PeerPublicKey,
     requested_grants: TrustedPeerGrants,
     signature: Vec<u8>,
@@ -107,6 +108,7 @@ impl PairingProof {
             nonce,
             peer_id,
             display_name,
+            device_details: None,
             public_key,
             requested_grants,
             signature,
@@ -134,6 +136,7 @@ impl PairingProof {
         let public_key = identity
             .local_public_key()
             .map_err(PairingProofSigningError::Identity)?;
+        let details = identity.device_details();
         let unsigned = Self::new(
             receiver_id,
             nonce,
@@ -143,7 +146,8 @@ impl PairingProof {
             requested_grants,
             vec![0],
         )
-        .map_err(PairingProofSigningError::InvalidProof)?;
+        .map_err(PairingProofSigningError::InvalidProof)?
+        .with_device_details(details.clone());
         let signature = identity
             .sign_pairing_message(&unsigned.signing_message())
             .map_err(PairingProofSigningError::Identity)?;
@@ -157,11 +161,17 @@ impl PairingProof {
             requested_grants,
             signature,
         )
+        .map(|proof| proof.with_device_details(details))
         .map_err(PairingProofSigningError::InvalidProof)
     }
 
     /// Canonical bytes the sender signs and the receiver verifies.
     pub fn signing_message(&self) -> Vec<u8> {
+        let domain = if self.device_details.is_some() {
+            PAIRING_PROOF_DOMAIN_V2
+        } else {
+            PAIRING_PROOF_DOMAIN_V1
+        };
         let name_bytes = self.display_name.as_bytes();
         let name_length = (name_bytes.len() as u32).to_be_bytes();
         let grants = self.requested_grants;
@@ -169,16 +179,18 @@ impl PairingProof {
             | (u8::from(grants.allows(PeerGrant::Send)) << 1)
             | (u8::from(grants.allows(PeerGrant::Annotate)) << 2);
 
-        let mut message = Vec::with_capacity(
-            PAIRING_PROOF_DOMAIN.len() + 16 + 16 + 16 + 4 + name_bytes.len() + 1,
-        );
-        message.extend_from_slice(PAIRING_PROOF_DOMAIN);
+        let mut message =
+            Vec::with_capacity(domain.len() + 16 + 16 + 16 + 4 + name_bytes.len() + 1);
+        message.extend_from_slice(domain);
         message.extend_from_slice(self.receiver_id.as_bytes());
         message.extend_from_slice(self.nonce.as_bytes());
         message.extend_from_slice(self.peer_id.as_bytes());
         message.extend_from_slice(&name_length);
         message.extend_from_slice(name_bytes);
         message.push(grant_bits);
+        if let Some(details) = &self.device_details {
+            details.append_canonical(&mut message);
+        }
         message
     }
 
@@ -196,6 +208,16 @@ impl PairingProof {
 
     pub fn display_name(&self) -> &str {
         &self.display_name
+    }
+
+    /// Attach validated facts before signing or verification. This never alters a signature.
+    pub fn with_device_details(mut self, details: Option<ReportedDeviceDetails>) -> Self {
+        self.device_details = details;
+        self
+    }
+
+    pub fn device_details(&self) -> Option<&ReportedDeviceDetails> {
+        self.device_details.as_ref()
     }
 
     pub fn public_key(&self) -> &PeerPublicKey {
@@ -216,6 +238,7 @@ pub struct PendingPairingApproval {
     receiver_id: DeviceId,
     peer_id: DeviceId,
     display_name: String,
+    device_details: Option<ReportedDeviceDetails>,
     public_key: PeerPublicKey,
     fingerprint: PeerFingerprint,
     requested_grants: TrustedPeerGrants,
@@ -223,6 +246,9 @@ pub struct PendingPairingApproval {
 }
 
 impl PendingPairingApproval {
+    pub fn device_details(&self) -> Option<&ReportedDeviceDetails> {
+        self.device_details.as_ref()
+    }
     pub const fn peer_id(&self) -> DeviceId {
         self.peer_id
     }
@@ -342,6 +368,7 @@ impl<P: TrustedPeerPort, I: PairingIdentityPort> PairingCoordinator<P, I> {
             receiver_id: self.local_device_id,
             peer_id: proof.peer_id,
             display_name: proof.display_name,
+            device_details: proof.device_details,
             public_key: proof.public_key,
             fingerprint,
             requested_grants: proof.requested_grants,

@@ -5,7 +5,7 @@ project = Xcodeproj::Project.open(File.join(ios_root, 'Runner.xcodeproj'))
 runner = project.targets.find { |target| target.name == 'Runner' } or abort 'Runner target missing'
 extension = project.targets.find { |target| target.name == 'MirrorMeshBroadcast' }
 unless extension
-  extension = project.new_target(:app_extension, 'MirrorMeshBroadcast', :ios, '14.0')
+  extension = project.new_target(:app_extension, 'MirrorMeshBroadcast', :ios, '15.0')
   group = project.main_group.new_group('BroadcastExtension', 'BroadcastExtension')
   extension.source_build_phase.add_file_reference(group.new_file('SampleHandler.swift'))
   group.new_file('Info.plist')
@@ -19,7 +19,7 @@ runner.build_configurations.each do |configuration|
   settings['MIRRORMESH_APP_GROUP'] ||= ENV.fetch('MM_IOS_APP_GROUP', 'group.com.mirrormesh.screen')
   settings['MIRRORMESH_BROADCAST_ID'] = ENV.fetch('MM_IOS_BROADCAST_ID', 'com.mirrormesh.app.broadcast')
   settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Broadcast.entitlements'
-  settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+  settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
 end
 extension.build_configurations.each do |configuration|
   settings = configuration.build_settings

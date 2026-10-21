@@ -219,6 +219,10 @@ pub(crate) fn accept_one_request() -> Result<Value, String> {
         "request_id": request_id,
         "peer_id": request.peer_id.to_string(),
         "display_name": request.display_name,
+        "device_details": request.device_details.as_ref().map(|details| json!({
+            "platform": details.platform(), "manufacturer": details.manufacturer(),
+            "model": details.model(), "os_version": details.os_version(),
+        })),
         "fingerprint": request.fingerprint.to_hex(),
         "source_ip": request.source_ip.to_string(),
         "verification_code": request.verification_code,

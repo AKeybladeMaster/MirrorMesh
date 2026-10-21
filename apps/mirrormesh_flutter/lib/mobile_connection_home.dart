@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'native_connection.dart';
+import 'device_context.dart';
+import 'connection_popups.dart';
 import 'ios_pairing_bootstrap.dart';
 import 'receive_screen_page.dart';
 import 'webrtc_engine.dart';
@@ -74,6 +76,7 @@ class _MobileSharePageState extends State<MobileSharePage>
   Timer? _deadline;
   bool _broadcastAvailable = false, _wholeDevice = false;
   bool _broadcastChecked = false;
+  ConnectionPopup<void>? _pairingPopup;
   @override
   void initState() {
     super.initState();
@@ -117,8 +120,22 @@ class _MobileSharePageState extends State<MobileSharePage>
       _error = null;
     });
     final generation = ++_generation;
+    _pairingPopup = ConnectionPopup<void>(
+      context,
+      (context) => PopScope(
+        canPop: false,
+        child: AlertDialog.adaptive(
+          title: const Text('Connecting to receiver'),
+          content: const Text(
+            'Approve this device on the receiver. Screen capture still requires your permission.',
+          ),
+          actions: [popupAction(context, 'Cancel', _stop)],
+        ),
+      ),
+    );
     try {
       await const IosPairingBootstrap().prepare();
+      await configureDeviceProfile();
       final result = await nativeConnection({
         'op': 'send_pair',
         'invitation': _invitation.text.trim(),
@@ -133,10 +150,20 @@ class _MobileSharePageState extends State<MobileSharePage>
         final status = await nativeConnection({'op': 'send_poll', 'id': id});
         if (!mounted || generation != _generation) return;
         if (status['state'] == 3) {
+          _pairingPopup?.close();
+          _pairingPopup = null;
           setState(() {
             _approved = true;
             _status = 'Approved. Start sharing only when you are ready.';
           });
+          unawaited(
+            connectionNotice(
+              context,
+              'Connection approved',
+              'Choose a screen using the system capture dialog when you are ready.',
+              brief: true,
+            ),
+          );
           break;
         }
         if ((status['state'] as int) >= 4) {
@@ -151,8 +178,17 @@ class _MobileSharePageState extends State<MobileSharePage>
       if (mounted) {
         setState(() => _error = error.toString());
         await _stop();
+        if (mounted) {
+          await connectionNotice(
+            context,
+            'Connection failed',
+            'Refresh the receiver invitation and try again.',
+          );
+        }
       }
     } finally {
+      _pairingPopup?.close();
+      _pairingPopup = null;
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -309,6 +345,8 @@ class _MobileSharePageState extends State<MobileSharePage>
 
   Future<void> _stop() async {
     ++_generation;
+    _pairingPopup?.close();
+    _pairingPopup = null;
     _deadline?.cancel();
     final id = _id;
     _id = null;

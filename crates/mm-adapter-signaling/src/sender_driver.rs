@@ -21,6 +21,44 @@ struct SenderInput {
     verification: Arc<SenderVerification>,
 }
 
+type DeviceProfile = (String, mm_domain::ReportedDeviceDetails);
+static DEVICE_PROFILE: OnceLock<Mutex<Option<DeviceProfile>>> = OnceLock::new();
+
+/// Configure public OS-provided details before pairing. Each attempt takes a snapshot.
+pub fn configure_device_profile(
+    name: String,
+    details: mm_domain::ReportedDeviceDetails,
+) -> Result<(), SenderPairingError> {
+    if name.trim().is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
+        return Err(SenderPairingError::InvalidSessionMessage);
+    }
+    *lock_recover(DEVICE_PROFILE.get_or_init(|| Mutex::new(None))) = Some((name, details));
+    Ok(())
+}
+
+struct ProfiledIdentity {
+    inner: Arc<dyn LocalPairingIdentityPort>,
+    details: mm_domain::ReportedDeviceDetails,
+}
+
+impl LocalPairingIdentityPort for ProfiledIdentity {
+    fn device_details(&self) -> Option<mm_domain::ReportedDeviceDetails> {
+        Some(self.details.clone())
+    }
+    fn local_public_key(&self) -> Result<mm_domain::PeerPublicKey, mm_ports::PortError> {
+        self.inner.local_public_key()
+    }
+    fn sign_pairing_message(&self, message: &[u8]) -> Result<Vec<u8>, mm_ports::PortError> {
+        self.inner.sign_pairing_message(message)
+    }
+    fn rotate_identity(&self) -> Result<mm_domain::PeerPublicKey, mm_ports::PortError> {
+        self.inner.rotate_identity()
+    }
+    fn delete_identity(&self) -> Result<(), mm_ports::PortError> {
+        self.inner.delete_identity()
+    }
+}
+
 enum SenderTarget {
     Invitation(String),
     Discovered {
@@ -313,6 +351,18 @@ fn begin_pairing_task(
     display_name: String,
     identity: Arc<dyn LocalPairingIdentityPort>,
 ) -> Result<u64, SenderPairingError> {
+    let profile = lock_recover(DEVICE_PROFILE.get_or_init(|| Mutex::new(None))).clone();
+    let (display_name, identity) = if let Some((name, details)) = profile {
+        (
+            name,
+            Arc::new(ProfiledIdentity {
+                inner: identity,
+                details,
+            }) as Arc<dyn LocalPairingIdentityPort>,
+        )
+    } else {
+        (display_name, identity)
+    };
     let mut slot = lock_recover(task_slot());
     if let Some(task) = slot.as_ref() {
         let state = lock_recover(&task.snapshot).state;

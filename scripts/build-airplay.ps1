@@ -1,7 +1,7 @@
 param([string]$MsysRoot = '', [switch]$SkipCompile)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -notin @('test_3','test_4')) { throw 'Build only from test_3 or test_4.' }
+if ((git -C $root branch --show-current) -ne 'test_5') { throw 'Build only from test_5.' }
 if (-not $MsysRoot) { $MsysRoot = Join-Path $root '.toolchains/msys64' }
 $MsysRoot = (Resolve-Path -LiteralPath $MsysRoot).Path
 $bash = Join-Path $MsysRoot 'usr/bin/bash.exe'
@@ -174,7 +174,7 @@ try {
     # The local source payload needs no upstream CI/workflow configuration.
     $ciEntries = @($zip.Entries | Where-Object { $_.FullName.StartsWith('.github/') })
     foreach ($entry in $ciEntries) { $entry.Delete() }
-    foreach ($entry in @('CMakeLists.txt','uxplay.cpp','renderers/video_renderer.c','lib/raop_handlers.h','lib/pairing.c','mirrormesh_bridge.cpp','mirrormesh_bridge.h')) {
+    foreach ($entry in @('CMakeLists.txt','uxplay.cpp','renderers/video_renderer.c','lib/raop_handlers.h','lib/raop.h','lib/pairing.c','mirrormesh_bridge.cpp','mirrormesh_bridge.h')) {
         $old = $zip.GetEntry($entry)
         if ($old) { $old.Delete() }
         [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip,(Join-Path $source $entry),$entry)

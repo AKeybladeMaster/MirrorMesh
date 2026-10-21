@@ -612,6 +612,14 @@ impl WssPairingClient {
             nonce: proof.nonce().to_hex(),
             peer_id: proof.peer_id().to_string(),
             display_name: proof.display_name().to_owned(),
+            device_details: proof
+                .device_details()
+                .map(|details| mm_protocol::DeviceDetails {
+                    platform: details.platform().to_owned(),
+                    manufacturer: details.manufacturer().to_owned(),
+                    model: details.model().to_owned(),
+                    os_version: details.os_version().to_owned(),
+                }),
             public_key: encode_lower_hex(proof.public_key().as_bytes()),
             requested_grants: grants_to_wire(proof.requested_grants()),
             signature: encode_lower_hex(proof.signature()),

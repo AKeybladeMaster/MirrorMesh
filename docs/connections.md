@@ -1,64 +1,91 @@
-# Connect MirrorMesh devices - Windows 0.3.0 / Android 0.2.1
+# Connect MirrorMesh devices - 0.4.0 / test_5
 
-Upgrade both ends to 0.2.0 to use compact invitations. An IPv4 invitation now has 121
-characters (IPv6: 137), with the same full fingerprint, 128-bit nonce and two-minute expiry.
-Older long invitations still work in the new apps; older apps cannot read the short form.
+Install the new Windows and Android apps together. Device facts use signed v2 pairing
+proofs, which require upgraded receivers. New receivers still accept old v1 senders.
+Compact invitations retain the full pinned fingerprint, nonce and two-minute expiry.
 
-## Windows PC to Android phone or Android/Google TV
+## PC to Android phone or Android/Google TV
 
-Install the native `phone` or `tv` APK on the receiver and choose Start receiver. On Windows,
-choose Find devices on this network. Search by name and select the receiver to request
-a connection directly (both ends need 0.2.1). If more than one address appears, choose the
-one on the same network as the PC. Compare all four groups of the connection code shown
-on both devices. On the PC select The codes match; on Android select the permission checkbox
-and Approve. Reject unexpected requests or mismatched codes. Then choose a screen/window
-on the PC. Discovery alone never authorizes sharing. Older receivers use invitations;
-manual invitations also remain available when multicast is blocked. Search only lists
-active MirrorMesh receivers. Keep the receiver screen open while requesting a connection.
+1. Open MirrorMesh on the phone/TV and choose Start receiver. Wi-Fi or Ethernet is selected
+   automatically. Allow local-network access if Android requests it.
+2. On Windows choose Find devices on this network and select the receiver. Compare every
+   group of the connection code in the popups on both screens. Confirm matching codes on
+   the PC; on Android review the device name/model/system, check permission and Approve.
+3. Choose what to share on the PC and select a screen or window. Pairing never starts capture.
 
-Generic TVs without the MirrorMesh Android/Google TV receiver are not supported by this
-route. Miracast, AirPlay and Chromecast are separate protocols and are not implemented here.
+If multicast discovery is blocked, use Copy/Share invitation on the receiver and paste it
+into the PC app. On a TV, scan the QR using your phone and transfer the decoded invitation.
+The invitation is not printed in setup; copy/share still transfer its full authenticated text.
+Reject unexpected requests or mismatched codes. Device facts are sender-reported hints,
+not hardware attestation. Only the incoming approval popup shows the actual peer address.
 
-## Android phone to PC, another Android phone or Android TV
+Keep the receiver page open during pairing. Generic TVs need the MirrorMesh Android TV
+app for this route. A browser receiver is not interchangeable with the native TLS listener.
 
-On Windows choose Receive a device's screen / show this PC's QR. Select the PC's LAN
-address and Start receiving. On Android receivers use Start receiver as before.
+## Android phone or TV to PC
 
-On the Android sender, use a camera/QR reader to open the `mirrormesh://` invitation in
-MirrorMesh, or choose Share this device's screen instead and paste the decoded invitation.
-Pair with receiver, approve the verified device on the receiver, then choose the screen
-through Android's capture dialog. A foreground notification provides Stop sharing.
-The receiving PC uses native WebRTC rendering. Use Stop receiving to close its listener
-and connection. Capture does not start from merely opening a QR link.
+On Windows choose Receive a device's screen / show this PC's QR, then Start receiving.
+On Android choose Share this device's screen, open the receiver QR using a camera/QR reader,
+or paste its invitation. Pair, approve the Android device on the PC, then choose a screen
+using Android's system capture dialog. A foreground notification provides Stop sharing.
 
-### If Android → PC stops after capture approval
+The TV APK has the same sender source. The TV OS must offer MediaProjection capture;
+protected content may be blank and some TV firmware may not permit screen capture.
+TV sending remains hardware verification pending. No capture permission is bypassed.
 
-Update both devices to 0.2.1. Android now waits for offer submission before polling the
-session. Its sharing page shows preparation, connection and failure stages; it no longer
-reports streaming just because the service started. If a failure remains, note that stage
-and the PC's MM-CONTROL diagnostic. Do not share the invitation, SDP or full network logs.
+The PC fits received video inside its window. Stop receiving closes its listener/session.
+Capture never begins merely by opening a QR link. Android-to-Android/TV uses the same
+receiver invitation and explicit approval flow.
 
-## iOS directions (source integrated; Apple build pending)
+## PC to iOS MirrorMesh app (source integrated; macOS build pending)
 
-For **native iOS Control Center Screen Mirroring → PC**, use Windows 0.3.0's
-Receive iPhone / iPad with AirPlay page. No MirrorMesh iOS app is needed for that path.
-See the [AirPlay guide](airplay.md) for PIN, PC consent, builds and current limitations.
-The following describes the separate MirrorMesh iOS app route.
+In the iOS app choose Receive another screen / show QR, then Start receiving. Copy its
+invitation to the Windows app, pair, approve the reported PC in the iOS popup, then select
+a screen/window on Windows. The shared Rust engine handles pinned signaling and approval;
+native WebRTC renders video. No pixels go through Dart/FFI.
 
-The iOS home offers Share this device and Receive another screen / show QR. Use a receiver
-invitation to send, or display the iOS receiver invitation on another sender. Camera app
-links are stored for the Share page; pasting the decoded text is also supported.
+An iOS app binary has not been built on this Windows host. Use the macOS/Xcode instructions
+in [build-release.md](build-release.md) for compilation, signing and installation. No IPA
+or device-verified iOS app is claimed. The separate Share action uses ReplayKit and needs
+its provisioned Broadcast Upload Extension for whole-device capture; app-only capture is
+explicitly labelled if the extension is absent.
 
-Full-device iOS sending uses ReplayKit's system broadcast picker and a signed
-MirrorMeshBroadcast Upload Extension. See [build instructions](build-release.md). Without
-the configured extension the UI offers app-only capture and labels that scope explicitly.
-The extension sends bounded frames to native WebRTC through the App Group's Unix socket;
-screen pixels never pass through Dart or Rust FFI. Apple signing, native compilation,
-background lifecycle and real-device behavior have not been verified on this host.
+## Native iPhone/iPad Screen Mirroring to PC
 
-## Evidence boundaries
+Use Receive iPhone / iPad with AirPlay, then Start. On iPhone/iPad open Control Center,
+Screen Mirroring, MirrorMesh PC. Enter the PC popup's code on iOS. Review the reported
+name/model and source address in the PC approval popup, check permission and Approve.
+OS/manufacturer details unavailable through AirPlay are shown as not supplied. No iOS
+MirrorMesh app is needed. The code expires after two minutes; Stop closes the native helper.
+See [AirPlay details](airplay.md). The owner confirmed native AirPlay connections before
+0.4.0; the new dialogs still need physical verification.
 
-The owner reported the existing Windows-to-phone path working. New directions, discovery,
-QR opening, TV interoperability, OS consent, stop/revocation and cleanup still need device
-verification. A build is not a device result. LAN video remains the target; no cloud account,
-TURN relay, system audio or arbitrary-network scanning is added.
+## Native Android wireless display options
+
+On Windows choose Android wireless display / Cast options:
+
+- **Wireless display / Miracast:** opens Microsoft's installed Wireless Display app in its
+  own window. Windows handles device approval, rendering and disconnect. Install the
+  optional feature in Settings > System > Projecting to this PC if it is missing. A
+  compatible Wi-Fi adapter and Android Miracast sender are required. This is an external
+  system receiver handoff, not an embedded MirrorMesh session. Check its own support message.
+- **Google Cast:** unavailable because there is no compatible Windows receiver SDK/provider.
+  Google's public receiver SDK targets Cast devices/Web/Android TV. The option reports this
+  limitation and offers the MirrorMesh Android route; it does not pretend to start casting.
+- **MirrorMesh app:** opens the PC QR receiver page for the Android app.
+
+Switch modes after ending the current sharing session. Close Wireless Display in its own
+window when finished; MirrorMesh does not terminate a system-owned receiver process.
+
+## Stop, privacy and verification
+
+Use Stop sharing/Disconnect to end capture; use Stop receiving to close the listener.
+Reject grants no trust. Revoke access in the Android viewer persists revocation and ends
+its session. Android screenshots save a received frame and report completion in a popup.
+Invitations are single use and expire; refresh before pairing again. Guest/client-isolated
+networks can prevent connections. No cloud account, arbitrary subnet scan, TURN relay,
+silent capture, automatic approval or firewall-security change is added.
+
+PC/Android sharing and native iOS connections were owner-confirmed before these changes.
+Build evidence and source status are separate from new-device behavior. See
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for exact readiness and remaining work.
