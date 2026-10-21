@@ -31,6 +31,42 @@ fn trusted_peer_database_path(local_app_data: &Path) -> PathBuf {
         .join(TRUSTED_PEERS_DATABASE)
 }
 
+/// Uses the same protected identity and trust database for explicit inbound pairing.
+pub fn create_pairing_service(
+    address: std::net::SocketAddr,
+) -> Result<
+    mm_adapter_signaling::native_service::NativePairingService<
+        SqliteTrustedPeers,
+        WindowsPairingIdentity,
+    >,
+    mm_adapter_signaling::native_service::NativePairingServiceError,
+> {
+    use mm_adapter_signaling::native_service::{NativePairingService, NativePairingServiceError};
+    initialize_pairing_runtime().map_err(NativePairingServiceError::Platform)?;
+    let root = env::var_os("LOCALAPPDATA")
+        .ok_or(NativePairingServiceError::Platform(PortError::Unavailable))?;
+    let identity = Arc::new(
+        WindowsPairingIdentity::open_or_create().map_err(NativePairingServiceError::Platform)?,
+    );
+    let public_key = identity
+        .local_public_key()
+        .map_err(NativePairingServiceError::Platform)?;
+    let fingerprint = identity
+        .fingerprint_public_key(&public_key)
+        .map_err(NativePairingServiceError::Platform)?;
+    let peers = Arc::new(
+        SqliteTrustedPeers::open(trusted_peer_database_path(Path::new(&root)))
+            .map_err(|_| NativePairingServiceError::Platform(PortError::StorageFailure))?,
+    );
+    let runtime = PairingRuntime::new(
+        device_id_from_fingerprint(fingerprint),
+        Arc::clone(&identity),
+        peers,
+    )
+    .map_err(NativePairingServiceError::Platform)?;
+    NativePairingService::bind(address, runtime, identity)
+}
+
 fn initialize_once<R>(
     slot: &OnceLock<Mutex<Option<(DeviceId, R)>>>,
     initialize: impl FnOnce() -> Result<(DeviceId, R), PortError>,
@@ -68,4 +104,12 @@ pub fn initialize_pairing_runtime() -> Result<DeviceId, PortError> {
         let runtime = PairingRuntime::new(device_id, identity, trusted_peers)?;
         Ok((device_id, runtime))
     })
+}
+
+pub fn revoke_trusted_peer(id: DeviceId, now: u64) -> Result<(), PortError> {
+    use mm_ports::TrustedPeerPort;
+    let root = env::var_os("LOCALAPPDATA").ok_or(PortError::Unavailable)?;
+    SqliteTrustedPeers::open(trusted_peer_database_path(Path::new(&root)))
+        .map_err(|_| PortError::StorageFailure)?
+        .revoke(id, now)
 }

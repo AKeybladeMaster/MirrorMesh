@@ -78,12 +78,14 @@ public final class MainActivity extends Activity {
     private boolean destroyed;
     private int serviceGeneration;
     private int waitGeneration;
+    private ReceiverAdvertisement advertisement;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         bindViews();
+        advertisement = new ReceiverAdvertisement(this);
         adaptLayout();
         View root = findViewById(android.R.id.content);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -101,6 +103,10 @@ public final class MainActivity extends Activity {
         initializeNativeContext();
 
         startButton.setOnClickListener(view -> startReceiver());
+        findViewById(R.id.open_sender_button).setOnClickListener(view -> {
+            stopReceiver();
+            startActivity(new Intent(this, SenderActivity.class));
+        });
         stopButton.setOnClickListener(view -> stopReceiver());
         waitButton.setOnClickListener(view -> waitForSender());
         approveButton.setOnClickListener(view -> approveRequest());
@@ -272,6 +278,9 @@ public final class MainActivity extends Activity {
                     invitationText.setText(invitation);
                     invitationText.setVisibility(View.VISIBLE);
                     pairingState.receiverStarted();
+                    advertisement.start(response.optString("device_id"),
+                            "MirrorMesh " + (getPackageName().endsWith(".tv") ? "TV" : "Android")
+                                    + " " + android.os.Build.MODEL.replace('.', '-'));
                     serviceState.setText(R.string.pairing_ready);
                     requestDetails.setText("Waiting for an explicitly selected sender.");
                     renderState();
@@ -703,6 +712,7 @@ public final class MainActivity extends Activity {
     }
 
     private void stopReceiver() {
+        if (advertisement != null) advertisement.stop();
         boolean wasActive = pairingState.phase() != TvPairingState.Phase.STOPPED;
         RustApprovedSignalingChannel signaling = activeSignaling;
         activeSignaling = null;

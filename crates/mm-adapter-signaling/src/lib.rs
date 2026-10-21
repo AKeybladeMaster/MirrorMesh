@@ -1,4 +1,6 @@
 use std::fmt;
+pub mod native_service;
+pub mod sender_driver;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str;
@@ -482,7 +484,7 @@ impl WssPairingClient {
         sent_at_ms: u64,
     ) -> Result<PendingWssPairingClient, WssClientError>
     where
-        I: LocalPairingIdentityPort,
+        I: LocalPairingIdentityPort + ?Sized,
     {
         let invitation = parse_pairing_qr(invitation_uri, now_unix_seconds, approved_ports)
             .map_err(WssClientError::PairingQr)?;

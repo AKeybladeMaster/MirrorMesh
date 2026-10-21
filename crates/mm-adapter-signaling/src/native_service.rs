@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use mm_adapter_signaling::{
+use crate::{
     PairingConnection, PendingPairingConnection, WssApprovalError, WssControlChannelError,
     WssListenerError, WssPairingListener,
 };
@@ -15,7 +15,7 @@ use mm_ports::{
 };
 use mm_runtime::{PairingRuntime, PairingRuntimeError};
 
-/// Android TV receiver service over the shared authenticated pairing runtime and WSS adapter.
+/// Native receiver service over the shared authenticated pairing runtime and WSS adapter.
 ///
 /// Call [`Self::bind`] only after an explicit user action. Calls to [`Self::accept_request`] block
 /// while waiting for the next request and must run on a worker thread. [`Self::cancel_wait`] ends
@@ -23,7 +23,7 @@ use mm_runtime::{PairingRuntime, PairingRuntimeError};
 /// permanently stops this service instance. The returned pending request contains verified
 /// identity metadata only; it is not trusted until [`Self::approve`] succeeds after explicit
 /// user consent.
-pub struct AndroidTvPairingService<P, I>
+pub struct NativePairingService<P, I>
 where
     P: TrustedPeerPort,
     I: LocalPairingIdentityPort + PairingIdentityPort + LocalTlsIdentityPort + 'static,
@@ -34,7 +34,7 @@ where
     stopped: AtomicBool,
 }
 
-impl<P, I> AndroidTvPairingService<P, I>
+impl<P, I> NativePairingService<P, I>
 where
     P: TrustedPeerPort,
     I: LocalPairingIdentityPort + PairingIdentityPort + LocalTlsIdentityPort + 'static,
@@ -44,7 +44,7 @@ where
         address: SocketAddr,
         runtime: PairingRuntime<P, I>,
         identity: Arc<I>,
-    ) -> Result<Self, AndroidTvPairingServiceError> {
+    ) -> Result<Self, NativePairingServiceError> {
         Self::bind_shared(address, Arc::new(Mutex::new(runtime)), identity)
     }
 
@@ -53,30 +53,30 @@ where
         address: SocketAddr,
         runtime: Arc<Mutex<PairingRuntime<P, I>>>,
         identity: Arc<I>,
-    ) -> Result<Self, AndroidTvPairingServiceError> {
+    ) -> Result<Self, NativePairingServiceError> {
         let runtime_fingerprint = runtime
             .lock()
-            .map_err(|_| AndroidTvPairingServiceError::RuntimeLockPoisoned)?
+            .map_err(|_| NativePairingServiceError::RuntimeLockPoisoned)?
             .local_fingerprint();
         let pairing_public_key = identity
             .local_public_key()
-            .map_err(AndroidTvPairingServiceError::Platform)?;
+            .map_err(NativePairingServiceError::Platform)?;
         let tls_public_key = identity
             .tls_server_public_key()
-            .map_err(AndroidTvPairingServiceError::Platform)?;
+            .map_err(NativePairingServiceError::Platform)?;
         let tls_fingerprint = identity
             .fingerprint_public_key(&tls_public_key)
-            .map_err(AndroidTvPairingServiceError::Platform)?;
+            .map_err(NativePairingServiceError::Platform)?;
         if pairing_public_key != tls_public_key || tls_fingerprint != runtime_fingerprint {
-            return Err(AndroidTvPairingServiceError::IdentityMismatch);
+            return Err(NativePairingServiceError::IdentityMismatch);
         }
 
         let tls_identity: Arc<dyn LocalTlsIdentityPort> = identity;
         let tls_config =
-            tls13_server_config(tls_identity).map_err(AndroidTvPairingServiceError::Tls)?;
+            tls13_server_config(tls_identity).map_err(NativePairingServiceError::Tls)?;
         let listener = WssPairingListener::bind(address, tls_config)
             .map_err(WssListenerError::Io)
-            .map_err(AndroidTvPairingServiceError::Listener)?;
+            .map_err(NativePairingServiceError::Listener)?;
         Ok(Self {
             listener,
             runtime,
@@ -86,11 +86,11 @@ where
     }
 
     /// Returns the actual bound address, including an OS-assigned port when bound to port zero.
-    pub fn local_addr(&self) -> Result<SocketAddr, AndroidTvPairingServiceError> {
+    pub fn local_addr(&self) -> Result<SocketAddr, NativePairingServiceError> {
         self.listener
             .local_addr()
             .map_err(WssListenerError::Io)
-            .map_err(AndroidTvPairingServiceError::Listener)
+            .map_err(NativePairingServiceError::Listener)
     }
 
     /// Creates a short-lived invitation for the explicitly selected numeric LAN endpoint.
@@ -99,16 +99,16 @@ where
         endpoint: &str,
         now_monotonic_ms: u64,
         now_unix_seconds: u64,
-    ) -> Result<PairingInvitation, AndroidTvPairingServiceError> {
+    ) -> Result<PairingInvitation, NativePairingServiceError> {
         let port = self.local_addr()?.port();
         let mut runtime = self
             .runtime
             .lock()
-            .map_err(|_| AndroidTvPairingServiceError::RuntimeLockPoisoned)?;
+            .map_err(|_| NativePairingServiceError::RuntimeLockPoisoned)?;
         runtime
             .create_invitation(endpoint, &[port], now_monotonic_ms, now_unix_seconds)
             .map_err(|error| {
-                AndroidTvPairingServiceError::Pairing(PairingRuntimeError::Coordinator(error))
+                NativePairingServiceError::Pairing(PairingRuntimeError::Coordinator(error))
             })
     }
 
@@ -116,33 +116,33 @@ where
     pub fn accept_request(
         &self,
         now_monotonic_ms: u64,
-    ) -> Result<PendingAndroidTvPairing, AndroidTvPairingServiceError> {
+    ) -> Result<PendingNativePairing, NativePairingServiceError> {
         if self.stopped.load(Ordering::Acquire) {
-            return Err(AndroidTvPairingServiceError::Listener(
+            return Err(NativePairingServiceError::Listener(
                 WssListenerError::Cancelled,
             ));
         }
         let mut runtime = self
             .runtime
             .lock()
-            .map_err(|_| AndroidTvPairingServiceError::RuntimeLockPoisoned)?;
+            .map_err(|_| NativePairingServiceError::RuntimeLockPoisoned)?;
         let result = self
             .listener
             .accept_pairing_request_cancellable(&mut runtime, now_monotonic_ms, &self.cancellation)
-            .map_err(AndroidTvPairingServiceError::Listener);
+            .map_err(NativePairingServiceError::Listener);
         if !self.stopped.load(Ordering::Acquire) {
             self.cancellation.store(false, Ordering::Release);
         }
         let pending = result?;
         let approval = pending.admitted().approval();
-        let request = AndroidTvPairingRequest {
+        let request = NativePairingRequest {
             source_ip: pending.admitted().source_ip(),
             peer_id: approval.peer_id(),
             display_name: approval.display_name().to_owned(),
             fingerprint: approval.fingerprint(),
             requested_grants: approval.requested_grants(),
         };
-        Ok(PendingAndroidTvPairing { request, pending })
+        Ok(PendingNativePairing { request, pending })
     }
 
     /// Cancels an idle accept loop. Once stopped, this service instance cannot accept again.
@@ -166,15 +166,15 @@ where
     /// Persists only an explicitly accepted subset and returns its approved control channel.
     pub fn approve(
         &self,
-        pending: PendingAndroidTvPairing,
+        pending: PendingNativePairing,
         approved_grants: TrustedPeerGrants,
         now_monotonic_ms: u64,
         paired_at_unix_ms: u64,
-    ) -> Result<(TrustedPeer, PairingConnection), AndroidTvPairingServiceError> {
+    ) -> Result<(TrustedPeer, PairingConnection), NativePairingServiceError> {
         let runtime = self
             .runtime
             .lock()
-            .map_err(|_| AndroidTvPairingServiceError::RuntimeLockPoisoned)?;
+            .map_err(|_| NativePairingServiceError::RuntimeLockPoisoned)?;
         pending
             .pending
             .approve(
@@ -183,13 +183,13 @@ where
                 now_monotonic_ms,
                 paired_at_unix_ms,
             )
-            .map_err(AndroidTvPairingServiceError::Approval)
+            .map_err(NativePairingServiceError::Approval)
     }
 }
 
 /// Display-safe metadata for a verified request awaiting receiver consent.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AndroidTvPairingRequest {
+pub struct NativePairingRequest {
     pub source_ip: std::net::IpAddr,
     pub peer_id: DeviceId,
     pub display_name: String,
@@ -198,13 +198,13 @@ pub struct AndroidTvPairingRequest {
 }
 
 /// A verified sender request that still requires explicit Android TV user consent.
-pub struct PendingAndroidTvPairing {
-    request: AndroidTvPairingRequest,
+pub struct PendingNativePairing {
+    request: NativePairingRequest,
     pending: PendingPairingConnection,
 }
 
-impl PendingAndroidTvPairing {
-    pub fn request(&self) -> &AndroidTvPairingRequest {
+impl PendingNativePairing {
+    pub fn request(&self) -> &NativePairingRequest {
         &self.request
     }
 
@@ -213,15 +213,15 @@ impl PendingAndroidTvPairing {
         self,
         reason: &str,
         sent_at_unix_ms: u64,
-    ) -> Result<(), AndroidTvPairingServiceError> {
+    ) -> Result<(), NativePairingServiceError> {
         self.pending
             .reject(reason, sent_at_unix_ms)
-            .map_err(AndroidTvPairingServiceError::Control)
+            .map_err(NativePairingServiceError::Control)
     }
 }
 
 #[derive(Debug)]
-pub enum AndroidTvPairingServiceError {
+pub enum NativePairingServiceError {
     Platform(PortError),
     Tls(TlsAdapterError),
     Listener(WssListenerError),
@@ -232,7 +232,7 @@ pub enum AndroidTvPairingServiceError {
     RuntimeLockPoisoned,
 }
 
-impl fmt::Display for AndroidTvPairingServiceError {
+impl fmt::Display for NativePairingServiceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Platform(error) => {
@@ -253,4 +253,4 @@ impl fmt::Display for AndroidTvPairingServiceError {
     }
 }
 
-impl std::error::Error for AndroidTvPairingServiceError {}
+impl std::error::Error for NativePairingServiceError {}

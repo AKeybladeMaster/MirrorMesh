@@ -18,6 +18,7 @@ const PAIRING_RUNTIME_UNAVAILABLE: i32 = 2;
 type IosRuntime = PairingRuntime<SqliteTrustedPeers, IosPairingIdentity>;
 
 static IOS_PAIRING_RUNTIME: OnceLock<Mutex<Option<(DeviceId, IosRuntime)>>> = OnceLock::new();
+static IOS_DATABASE_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
 
 fn device_id_from_fingerprint(fingerprint: PeerFingerprint) -> DeviceId {
     let mut id = [0_u8; DEVICE_ID_BYTES];
@@ -44,7 +45,53 @@ fn initialize_pairing_runtime(database_path: &Path) -> Result<DeviceId, PortErro
         Arc::new(SqliteTrustedPeers::open(database_path).map_err(|_| PortError::StorageFailure)?);
     let pairing_runtime = PairingRuntime::new(device_id, identity, trusted_peers)?;
     *runtime_slot = Some((device_id, pairing_runtime));
+    let _ = IOS_DATABASE_PATH.set(database_path.to_path_buf());
     Ok(device_id)
+}
+
+pub fn local_device_id() -> Result<DeviceId, PortError> {
+    IOS_PAIRING_RUNTIME
+        .get()
+        .ok_or(PortError::Unavailable)?
+        .lock()
+        .map_err(|_| PortError::StorageFailure)?
+        .as_ref()
+        .map(|(id, _)| *id)
+        .ok_or(PortError::Unavailable)
+}
+
+pub fn create_pairing_service(
+    address: std::net::SocketAddr,
+) -> Result<
+    mm_adapter_signaling::native_service::NativePairingService<
+        SqliteTrustedPeers,
+        IosPairingIdentity,
+    >,
+    mm_adapter_signaling::native_service::NativePairingServiceError,
+> {
+    use mm_adapter_signaling::native_service::{NativePairingService, NativePairingServiceError};
+    let id = local_device_id().map_err(NativePairingServiceError::Platform)?;
+    let identity = Arc::new(
+        IosPairingIdentity::open_or_create().map_err(NativePairingServiceError::Platform)?,
+    );
+    let path = IOS_DATABASE_PATH
+        .get()
+        .ok_or(NativePairingServiceError::Platform(PortError::Unavailable))?;
+    let peers = Arc::new(
+        SqliteTrustedPeers::open(path)
+            .map_err(|_| NativePairingServiceError::Platform(PortError::StorageFailure))?,
+    );
+    let runtime = PairingRuntime::new(id, Arc::clone(&identity), peers)
+        .map_err(NativePairingServiceError::Platform)?;
+    NativePairingService::bind(address, runtime, identity)
+}
+
+pub fn revoke_trusted_peer(id: DeviceId, now: u64) -> Result<(), PortError> {
+    use mm_ports::TrustedPeerPort;
+    let path = IOS_DATABASE_PATH.get().ok_or(PortError::Unavailable)?;
+    SqliteTrustedPeers::open(path)
+        .map_err(|_| PortError::StorageFailure)?
+        .revoke(id, now)
 }
 
 /// Initializes local iOS pairing state after the Flutter UI's explicit user action.

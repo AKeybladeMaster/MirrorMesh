@@ -1,7 +1,7 @@
 # Build Windows and Android
 
 All commands below are local; no GitHub Actions or unit tests are invoked. Run from the
-repository root on branch `test_2`. Do not merge or push another branch for this work.
+repository root on branch `test_3`. Do not merge or push another branch for this work.
 
 ## Toolchain
 
@@ -77,7 +77,8 @@ Set-Location apps\mirrormesh_flutter
 The default ABI is ARM64. `-Abi x86_64` builds that ABI separately. Outputs go to
 `releases/android-phone` and `releases/android-tv`; each APK has a `.sha256` sidecar.
 Both flavors use the same JNI library, identity/pairing engine and native decoder.
-The phone APK is a receiver; it does not implement Android screen sending.
+The phone APK includes a receiver and a user-consented MediaProjection sender. Android/TV
+sender and new Windows receiver behavior still require device validation.
 
 To sign distribution builds, set these environment variables privately before the release
 command: `MM_ANDROID_KEYSTORE` (absolute path), `MM_ANDROID_STORE_PASSWORD`,
@@ -109,3 +110,25 @@ flutter analyze
 
 Compilation cannot establish that real devices render media, meet latency targets or recover
 correctly on a specific network. See [verification status](verification.md).
+
+## iOS source build (macOS required)
+
+The new iOS paths have not been compiled on this Windows host. Install Xcode, CocoaPods
+(including the xcodeproj Ruby gem), Flutter and the Rust `aarch64-apple-ios` target. From
+`apps/mirrormesh_flutter`, run `flutter pub get --enforce-lockfile`, then:
+
+```sh
+cd ios
+MM_IOS_APP_GROUP=group.your.provisioned.group \
+MM_IOS_BROADCAST_ID=your.unique.app.broadcast ruby scripts/configure-broadcast.rb
+cd ..
+flutter build ios --release
+```
+
+In Xcode select your development team, use an extension identifier prefixed with the
+Runner app identifier, and provision the same App Group for Runner and MirrorMeshBroadcast.
+The configurator creates/embeds the ReplayKit Upload Extension and configures entitlements.
+It changes the local Xcode project; review and commit those generated project settings only
+on `test_3`. Credentials and provisioning profiles stay outside Git. Full-device sharing
+appears only when the extension is present; app-only ReplayKit capture remains available.
+Check `docs/connections.md` for directions and verification boundaries.

@@ -4,6 +4,9 @@ use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 mod attempt_limiter;
+mod compact_invitation;
+
+pub use compact_invitation::format_pairing_qr;
 
 pub use attempt_limiter::{
     DEFAULT_MAX_TRACKED_PAIRING_SOURCES, DEFAULT_PAIRING_ATTEMPT_LIMIT,
@@ -300,7 +303,7 @@ impl PairingQrPayload {
 
 /// Format the exact v1 QR URI after the endpoint, identity, nonce, and wall-clock
 /// expiration have been approved by the caller.
-pub fn format_pairing_qr(
+pub fn format_pairing_qr_v1(
     endpoint: ManualIpEndpoint,
     device_id: DeviceId,
     fingerprint: PeerFingerprint,
@@ -335,6 +338,9 @@ pub fn parse_pairing_qr(
     }
     if input.len() > MAX_PAIRING_QR_BYTES {
         return Err(PairingQrError::TooLong);
+    }
+    if let Some(encoded) = input.strip_prefix("mirrormesh://p/") {
+        return compact_invitation::parse(encoded, now_unix_seconds, approved_ports);
     }
 
     let query = input

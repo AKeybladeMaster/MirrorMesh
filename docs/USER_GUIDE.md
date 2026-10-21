@@ -1,5 +1,8 @@
 # Use MirrorMesh
 
+For 0.2.0 compact invitations, device search and both screen directions, see
+[Connect MirrorMesh devices](connections.md). The following baseline flow still applies.
+
 ## Install
 
 **Windows:** extract `releases/MirrorMesh-windows-x64.zip`, then open `MirrorMesh.exe`.

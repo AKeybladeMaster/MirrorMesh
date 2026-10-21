@@ -9,6 +9,7 @@ final class NativePairingBridge {
     private NativePairingBridge() {}
 
     static native boolean initializeRustAndroidContext(Object applicationContext);
+    static native String connectionCommand(String commandJson);
 
     /** Starts pairing on an explicitly selected numeric local endpoint and returns JSON. */
     static native String startPairing(String socketAddress);

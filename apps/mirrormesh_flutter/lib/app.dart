@@ -8,6 +8,9 @@ import 'rust_session_status.dart';
 import 'webrtc_engine.dart';
 import 'windows_pairing_bootstrap.dart';
 import 'windows_sender_session.dart';
+import 'network_devices.dart';
+import 'receive_screen_page.dart';
+import 'mobile_connection_home.dart';
 
 class MirrorMeshApp extends StatelessWidget {
   const MirrorMeshApp({super.key, this.rustSessionStatus});
@@ -29,7 +32,9 @@ class MirrorMeshApp extends StatelessWidget {
         border: OutlineInputBorder(),
       ),
     ),
-    home: const MirrorMeshHome(),
+    home: Platform.isIOS
+        ? const MobileConnectionHome()
+        : const MirrorMeshHome(),
   );
 }
 
@@ -46,6 +51,9 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   String? _deviceId, _error, _sourceName;
   int? _requestId;
   bool _busy = false, _polling = false;
+  bool _searching = false;
+  List<Map<String, dynamic>> _nearby = [];
+  String _deviceFilter = '';
   Timer? _pairingTimer;
   WindowsSenderPairingStatus? _pairingStatus;
   WindowsSenderSessionController? _session;
@@ -89,7 +97,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('MirrorMesh 0.1.1')),
+    appBar: AppBar(title: const Text('MirrorMesh 0.2.0')),
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -106,6 +114,68 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                 'Windows sender → Android phone, tablet or TV receiver',
               ),
               const SizedBox(height: 24),
+              OutlinedButton.icon(
+                onPressed:
+                    _requestId == null &&
+                        !_busy &&
+                        (Platform.isWindows || Platform.isIOS)
+                    ? () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => const ReceiveScreenPage(),
+                        ),
+                      )
+                    : null,
+                icon: const Icon(Icons.qr_code_2),
+                label: const Text(
+                  'Receive a device’s screen / show this PC’s QR',
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: Platform.isWindows && !_searching
+                    ? _searchDevices
+                    : null,
+                icon: Icon(_searching ? Icons.hourglass_top : Icons.search),
+                label: Text(
+                  _searching
+                      ? 'Searching the local network…'
+                      : 'Find devices on this network',
+                ),
+              ),
+              if (_nearby.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  decoration: const InputDecoration(
+                    labelText: 'Search by device name',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (value) =>
+                      setState(() => _deviceFilter = value.toLowerCase()),
+                ),
+                const Text(
+                  'Discovery results are unverified. Use the selected receiver’s invitation to verify its identity.',
+                ),
+                for (final device in _nearby.where(
+                  (item) => (item['name'] as String).toLowerCase().contains(
+                    _deviceFilter,
+                  ),
+                ))
+                  ListTile(
+                    leading: Icon(
+                      device['receive'] == true ? Icons.cast : Icons.computer,
+                    ),
+                    title: Text(device['name'] as String),
+                    subtitle: Text(
+                      '${device['receive'] == true ? 'Can receive screens' : 'Sender'} · ${(device['endpoints'] as List).join(', ')}',
+                    ),
+                    trailing: device['receive'] == true
+                        ? const Icon(Icons.qr_code)
+                        : null,
+                    onTap: device['receive'] == true
+                        ? () => _selectNearbyDevice(device)
+                        : null,
+                  ),
+              ],
+              const SizedBox(height: 16),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -273,6 +343,53 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Future<void> _pasteInvitation() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (mounted && data?.text != null) _invitation.text = data!.text!.trim();
+  }
+
+  Future<void> _searchDevices() async {
+    setState(() {
+      _searching = true;
+      _error = null;
+    });
+    try {
+      final devices = await discoverNetworkDevices();
+      if (!mounted) return;
+      setState(
+        () => _nearby = devices
+            .where((device) => device['id'] != _deviceId)
+            .toList(),
+      );
+      if (_nearby.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No MirrorMesh receivers found. Start the Android/TV receiver, check the same LAN, then search again. Other TVs need the MirrorMesh receiver app.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = _describe(error));
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  void _selectNearbyDevice(Map<String, dynamic> device) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Connect to ${device['name']}'),
+        content: const Text(
+          'Open MirrorMesh on this receiver. Copy its invitation into the field on this PC, then pair. The receiver will ask you to approve this PC. A discovery result alone cannot authorize sharing.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Enter invitation'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _connect() async {
@@ -472,7 +589,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Future<void> _copyDiagnostics() => Clipboard.setData(
     ClipboardData(
       text:
-          'MirrorMesh Windows 0.1.1\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
+          'MirrorMesh Windows 0.2.0\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
     ),
   );
 

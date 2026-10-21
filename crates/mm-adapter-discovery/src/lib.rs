@@ -440,6 +440,7 @@ impl MdnsDiscoveryAdapter {
                 }
                 Ok(_) => {}
                 Err(_) if self.cancelled.load(Ordering::Acquire) => break,
+                Err(mdns_sd::RecvTimeoutError::Timeout) => continue,
                 Err(_) => return Err(PortError::Unavailable),
             }
         }

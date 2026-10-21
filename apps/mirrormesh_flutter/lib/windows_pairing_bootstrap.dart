@@ -306,7 +306,7 @@ class WindowsSenderPairingStatus {
     5 => 'The receiver did not approve screen viewing. Select Allow view and approve the new request.',
     6 => 'Windows could not complete a local pairing operation.',
     7 => 'The approved signaling channel failed.',
-    10 => 'The invitation format is invalid. Copy the entire mirrormesh://pair link, not a browser search or sharing-page URL.',
+    10 => 'The invitation format is invalid. Copy the entire mirrormesh:// link, not a browser search or sharing-page URL.',
     11 => 'This invitation has expired. Refresh the code on Android, then immediately copy and paste the new link.',
     12 => 'The invitation expiry is ahead of the allowed window. Enable automatic date and time on both devices, then refresh the code.',
     13 => 'The receiver refused the connection. Start the receiver and check its selected Wi-Fi or Ethernet address.',

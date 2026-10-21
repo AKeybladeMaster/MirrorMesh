@@ -1,6 +1,6 @@
 # Implementation status — test release integration
 
-Branch baseline: `test` at `d5d6053`. Current work belongs exclusively to `test_2`.
+Branch baseline: `test_2` at `ef05d95`. Current work belongs exclusively to `test_3`.
 This document supersedes historical increment counts for this release candidate.
 
 ## Readiness labels
@@ -13,6 +13,26 @@ This document supersedes historical increment counts for this release candidate.
 - **CODE_COMPLETE:** the complete agreed product requirements are implemented; not yet achieved project-wide.
 
 ## Current reference pipeline
+
+### 0.2.0 connection checkpoint (2026-10-21)
+
+| Requested integration | Source implemented | Build evidence | Device evidence |
+| --- | --- | --- | --- |
+| Compact invitations, legacy input compatibility | Shared Rust v2 encoding/parser | Windows and Android builds passed | Pending |
+| PC network search and name filtering | Existing Rust mDNS adapter + Flutter UI | Windows build passed | Pending |
+| Android/TV discoverable receivers | Public Android NSD advertisements | ARM64 phone/TV APKs passed | Pending |
+| PC receiver QR and inbound video | Shared receiver registry + native WebRTC renderer | Windows build passed | Pending |
+| Android sending to PC/Android/TV | Shared sender driver + MediaProjection service | ARM64 phone/TV APKs passed | Pending |
+| iOS send/receive, QR app links and ReplayKit extension | Integrated source and Mac project configurator | Flutter analysis passed; Xcode native build unavailable | Pending |
+| PC to native Android/Google TV receiver | Existing route plus discovery UI | Windows and TV APKs passed | TV pending |
+
+The owner reports the preceding app works, including Windows-to-phone sharing. This is
+user-reported baseline evidence; the new directions and discovery are not hardware verified.
+Generic Miracast/AirPlay/Chromecast TVs remain unsupported. iOS requires a Mac build,
+project configuration, a provisioned App Group and signing before its source can be
+considered BUILD_VERIFIED. No project-wide CODE_COMPLETE or production claim is made.
+
+The following table describes the baseline path retained by these integrations.
 
 | Stage | Source | Build evidence | Hardware |
 | --- | --- | --- | --- |
@@ -58,10 +78,11 @@ large binaries are local, Git-ignored artifacts. These are **BUILD_VERIFIED**, n
 
 1. Confirm the Windows plugin's capture backend on supported GPUs; dedicated WGC selection
    and guaranteed hardware encoding are not implemented or established by these builds.
-2. Native Android sending, Windows receiving, system audio and synchronized annotations
-   remain outside the completed reference path.
-3. Linux and iOS retain identity/platform foundations but lack a fully integrated native
-   capture-to-receiver path. iOS needs Apple tooling and signing for build verification.
+2. Native Android sending and Windows receiving are now source/build integrated; new
+   direction and cleanup behavior need device validation. System audio and synchronized
+   annotations remain incomplete.
+3. Linux still lacks its fully integrated media path. iOS has source for send/receive
+   and broadcast capture, requiring Apple tooling and signing for build verification.
 4. Browser receiver still lacks the authenticated signaling integration required to stream.
 5. Internet relay configuration, multi-party sessions, polished installers and store packages
    remain incomplete. The current path is direct LAN video only.

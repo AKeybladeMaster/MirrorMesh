@@ -125,7 +125,7 @@ impl PairingProof {
         peer_id: DeviceId,
         display_name: String,
         requested_grants: TrustedPeerGrants,
-        identity: &impl LocalPairingIdentityPort,
+        identity: &(impl LocalPairingIdentityPort + ?Sized),
     ) -> Result<Self, PairingProofSigningError> {
         if receiver_id == peer_id {
             return Err(PairingProofSigningError::SelfPairing);

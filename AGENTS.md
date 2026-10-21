@@ -1,8 +1,8 @@
-# MirrorMesh test_2 branch operating contract
+# MirrorMesh test_3 branch operating contract
 
 This branch was explicitly requested for release integration. Work, commit and push only
-on `test_2`, created from `test` at the user's request for Android UI/accessibility work;
-never update, merge into, or push `test`, `dev`, `main` or any `task_*` branch.
+on `test_3`, created from committed `test_2` at the user's request for connection features;
+never update, merge into, or push `test_2`, `test`, `dev`, `main` or any `task_*` branch.
 
 Read `README.md`, `docs/IMPLEMENTATION_STATUS.md`, `docs/build-release.md`,
 `docs/protocol.md`, `docs/security-legal.md` and `session-context.md` before changes.

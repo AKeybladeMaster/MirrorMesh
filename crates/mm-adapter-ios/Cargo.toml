@@ -16,4 +16,5 @@ mm-domain.workspace = true
 mm-ports.workspace = true
 mm-runtime.workspace = true
 mm-store.workspace = true
+mm-adapter-signaling.workspace = true
 zeroize.workspace = true

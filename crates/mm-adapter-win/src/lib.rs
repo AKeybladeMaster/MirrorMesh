@@ -19,4 +19,4 @@ pub use sender_pairing::{
 };
 
 #[cfg(windows)]
-pub use runtime::initialize_pairing_runtime;
+pub use runtime::{create_pairing_service, initialize_pairing_runtime, revoke_trusted_peer};

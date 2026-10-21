@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -ne 'test_2') { throw 'Build this release from the test_2 branch.' }
+if ((git -C $root branch --show-current) -ne 'test_3') { throw 'Build this release from the test_3 branch.' }
 if (-not $AndroidSdk) { $AndroidSdk = Join-Path $root '.toolchains/android-sdk' }
 $env:ANDROID_SDK_ROOT = (Resolve-Path -LiteralPath $AndroidSdk).Path
 if (-not $env:JAVA_HOME) { throw 'Set JAVA_HOME to a JDK 17 or newer installation.' }

@@ -1,5 +1,37 @@
 # MirrorMesh session context
 
+## ACTIVE CHECKPOINT - 2026-10-21 / test_3 connection features
+
+- User confirms the app works. First committed/pushed all prior UI changes to `test_2`
+  at `ef05d95`, then created `test_3`. New work/commits/pushes only on `test_3`.
+- User requested shorter invitations, QR connections in both directions, PC/TV mirroring,
+  PC-side QR, and a searchable local-device list. Explicit answer: offer BOTH directions.
+- Implemented compact `mirrormesh://p/` invitations (121 IPv4 / 137 IPv6 characters,
+  full identity fingerprint, nonce and expiry retained); v1 input remains accepted.
+- Refactored Windows sender worker and Android generic receiver listener into shared
+  mm-adapter-signaling modules. Existing Windows C ABI and Android JNI delegate to them.
+- Added common metadata-only native JSON commands; Windows Flutter receiver page with QR,
+  explicit identity/permission approval and native WebRTC receive; Windows mDNS Search/filter;
+  Android NSD public hints while receiving. Discovery never grants trust or exposes nonces.
+- Added Android sender Activity + MediaProjection foreground service with system consent,
+  H.264 negotiation, notification Stop, startup deadline and cleanup; QR app-link handler.
+- Added iOS send/receive UI, URL handling, platform service factory, ReplayKit broadcast
+  extension source plus macOS project configurator. Xcode/signing/build unavailable here;
+  no iOS source/build/hardware completeness claim. Broadcast target must be configured on Mac.
+- Rust check/Clippy, Flutter formatting/analysis, Android phone/TV debug and unsigned
+  release builds, and Windows packaging passed. Android lint passed with 0 errors and
+  78 warnings per variant. Final reviewed Windows and Android packages also built with exit 0.
+  No test suites or workflows were added/run.
+- Shared Gradle cache was locked by VS Code's Java daemon. Use
+  GRADLE_USER_HOME=$PWD/.toolchains/gradle-test3 for local builds. User process was preserved.
+- Code review findings were fixed: revocation event mapping, idempotent receiver teardown,
+  stale startup/approval/answer guards, iOS warm QR resume, and bounded native JPEG framing.
+  Plist/entitlement XML parsed. iOS Swift/Ruby/native build still requires a Mac; no Apple
+  build or device result is claimed. New instructions: docs/connections.md and ADR0057.
+- This checkpoint accompanies the `test_3` commit; inspect HEAD/origin/test_3 to confirm
+  the final commit/push state. Do not stage/delete the pre-existing
+  untracked releases/MirrorMesh-win-x64/ folder. Dependencies are pinned/locked.
+
 ## CURRENT UI CHECKPOINT - test_2 / Android 0.1.2
 
 - User confirms PC-to-Android-phone sharing works on the baseline and requested UI/UX

@@ -90,6 +90,18 @@ func mirrormeshIOSKeychainDeleteSeed() -> Int32 {
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  static var pendingInvitation: String?
+  static func acceptInvitation(_ url: URL) {
+    guard url.scheme == "mirrormesh", ["p", "pair"].contains(url.host ?? ""),
+          url.absoluteString.utf8.count <= 1024 else { return }
+    pendingInvitation = url.absoluteString
+  }
+
+  override func application(_ application: UIApplication, open url: URL,
+      options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+    Self.acceptInvitation(url)
+    return url.scheme == "mirrormesh" || super.application(application, open: url, options: options)
+  }
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -104,6 +116,19 @@ func mirrormeshIOSKeychainDeleteSeed() -> Int32 {
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     pairingChannel.setMethodCallHandler { call, result in
+      if call.method == "hasBroadcastExtension" {
+        let identifier = Bundle.main.object(forInfoDictionaryKey: "RTCScreenSharingExtension") as? String
+        let plugins = Bundle.main.builtInPlugInsURL.flatMap {
+          try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)
+        } ?? []
+        result(plugins.contains { Bundle(url: $0)?.bundleIdentifier == identifier && identifier != nil })
+        return
+      }
+      if call.method == "takeInvitation" {
+        result(Self.pendingInvitation)
+        Self.pendingInvitation = nil
+        return
+      }
       guard call.method == "preparePairingRuntime" else {
         result(FlutterMethodNotImplemented)
         return
