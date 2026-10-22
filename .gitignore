@@ -48,6 +48,8 @@ Thumbs.db
 *.tmp
 
 # Local secrets / signing material
+# Runtime-generated AirPlay private key; never include an extracted receiver's state.
+/releases/**/airplay/0
 .env
 .env.*
 !.env.example
