@@ -171,7 +171,9 @@ Use GPU surfaces, HW H.264, 1-2 outstanding frames, 0 B-frames, minimum decoder 
 
 ## Implementation
 
-See [implementation.md](implementation.md), [codex/README.md](../codex/README.md) and the six `codex/05[a-f]-*.md` briefs. **Parallel means the same implementation wave, not independent protocol designs.**
+Current source organization is described in [the architecture map](ARCHITECTURE.md)
+and [the build guide](build-release.md). Historical task briefs remain in Git history.
+The original phases below are design scope, not the current release's completion claim.
 
 1. **P0:** REA/evidence, lawful analysis gate, security model, verify OS APIs and Android TV/browser capabilities.
 2. **P1:** In parallel, scaffold **all six** targets using fake capture/decoder while core owner locks protocol v1, Rust ports, session state and ADR-0002 transport preflight.

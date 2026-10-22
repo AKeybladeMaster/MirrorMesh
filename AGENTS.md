@@ -1,32 +1,32 @@
-# MirrorMesh release branch operating contract
+# MirrorMesh release maintenance contract
 
-The owner confirmed the Windows/Android apps and iOS connections, with TV untested and
-native Miracast/Google Cast not working. The confirmed 0.4.0 commit d4c9c1e is pushed as
-`pre_release_v1`. Work, commit and push only on `test_6`, created from that checkpoint.
-Preserve `pre_release_v1`, `test_5`, all older test branches, `dev`, `main` and `task_*` refs.
-Scope: TV installation instructions, legitimate native Cast provider integration, diagnosis
-of native receiver prerequisites, and functional macOS/Linux source and release builds.
-An external licensed receiver is not an embedded MirrorMesh engine. Do not purchase a
-license or redistribute commercial providers without authorization and applicable rights.
-Never present unsupported native casting or unbuilt Apple/Linux binaries as completed products.
+The owner explicitly authorized preserving `test_6`, consolidating on `pre_release`,
+then merging and pushing `pre_release` into `main` as the final repository checkpoint
+for now. That authorization replaces earlier test_6-only branch restrictions.
+Preserve `test_6` checkpoint `4052f40`, `pre_release_v1` and all older refs. Future work
+must respect the owner's next branch instructions; do not rewrite published history.
 
-Read `README.md`, `docs/IMPLEMENTATION_STATUS.md`, `docs/build-release.md`,
-`docs/protocol.md`, `docs/security-legal.md` and `session-context.md` before changes.
-The original specification and ADRs remain design references. Historical task plans and
-verification suites remain in the unchanged `dev` history.
+Read README.md, docs/ARCHITECTURE.md, docs/build-release.md,
+docs/IMPLEMENTATION_STATUS.md, docs/protocol.md, docs/security-legal.md and
+session-context.md before changes.
 
-1. Preserve the shared Rust architecture and native media pipeline. Reuse the existing
-   identity, pairing, signaling, trust and session components.
-2. Do not add test files, fuzz targets, GitHub Actions or run unit/instrumentation suites.
-   The user explicitly requested this branch policy. Use builds, formatters and static
-   analysis; report their actual exit codes. Physical verification remains deferred.
-3. No raw media frames through Dart/FFI. No silent capture or automatic approval.
-4. Keep TLS authentication and QR pinning intact. Do not disable Defender, bypass platform
-   security, embed signing secrets or scan arbitrary networks.
-5. Use transparent patches, scoped edits and reviewable diffs. Verify paths before deletion.
-   Never use Base64 to hide file edits. Report exact commands if Defender blocks an action.
-6. Keep dependencies locked. Document meaningful protocol/security/permission changes in an ADR.
-7. Keep `CODE_COMPLETE`, `BUILD_VERIFIED` and `HARDWARE_VERIFIED` distinct. A successful build
-   is not a functioning-device claim. Do not mark the whole project production complete.
-8. Save resumable progress in `session-context.md` periodically and before credit limits.
-   Do not claim access to a credit gauge that the environment does not expose.
+1. Reuse the shared Rust identity, TLS, pairing, signaling, trust and session engine.
+   No raw media frames through Dart/FFI, silent capture or automatic approval.
+2. Do not add/run unit or instrumentation suites, fuzz targets or GitHub Actions.
+   Builds, formatters, artifact integrity checks and static analysis are permitted.
+3. Preserve TLS/QR authentication and platform consent. Never disable Defender,
+   bypass platform security, embed signing secrets or scan arbitrary networks.
+4. Use transparent patches and scoped changes. Report exact blocked commands.
+   Never hide edits in Base64 or alter technique solely to evade protection.
+5. Keep dependencies locked. Record meaningful protocol/security/permission changes
+   in an ADR. Avoid code moves that break native relative paths or build generation.
+6. Distinguish CODE_COMPLETE, BUILD_VERIFIED and HARDWARE_VERIFIED. Do not claim
+   native Cast/Miracast success, Apple binaries or production completion without evidence.
+7. Keep keys, invitations, credentials, private paths and device/network identities
+   out of public documentation and source archives. Runtime-generated receiver state
+   is not a release input. Do not touch an owner's running extracted app.
+8. Save concise sanitized resumable progress in session-context.md periodically.
+   No credit gauge is exposed; do not claim to observe a usage percentage.
+
+Historical reports, prototype sources and old ADRs remain in the test_6 checkpoint.
+Local archived material is ignored under .toolchains/release-consolidation-archive.

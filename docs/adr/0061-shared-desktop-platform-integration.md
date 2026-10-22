@@ -42,7 +42,7 @@ The unavailable Google Cast GUI option is removed; no provider is installed or b
 
 ## Build boundary
 
-Linux builds run in a native Linux environment. The Windows Docker wrapper checks test_6,
+Linux builds run in a native Linux environment. The release Windows Docker wrapper
 snapshots explicit source roots and compiles inside a private container filesystem, so it
 does not overwrite Windows Flutter/Cargo outputs. The pinned Flutter/Rust versions and
 locked project dependencies are retained. The Linux archive contains a complete bundle,

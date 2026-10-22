@@ -2,7 +2,6 @@
 # Run on a Mac with Xcode/CocoaPods. This script cannot cross-build on Windows/WSL.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-[ "$(git -C "$root" branch --show-current)" = test_6 ] || { printf 'Use test_6.\n' >&2; exit 1; }
 [ "$(uname -s)" = Darwin ] || { printf 'macOS and Xcode are required.\n' >&2; exit 1; }
 export CI=true FLUTTER_SUPPRESS_ANALYTICS=true
 cd "$root/apps/mirrormesh_flutter"

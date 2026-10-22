@@ -1,18 +1,23 @@
-# Local release artifacts
+# Personal build outputs
 
-Build with `scripts/build-windows.ps1` and `scripts/build-android.ps1`.
-The scripts create Windows portable files and Android phone/TV APKs here, with checksums.
-Generated binary payloads and SDK caches are excluded from Git; source, build instructions,
-folder descriptions and checksums are tracked on `test_6`. Stable Windows/Android: 0.4.0;
-new desktop/Android preview: 0.4.1. The preserved stable branch is `pre_release_v1`.
-Upgrade both apps together for signed device details. iOS app builds need macOS/Xcode;
-no IPA is available. See `docs/connections.md` for native protocol availability.
+Generated payloads stay local/ignored; source, folder descriptions and public checksum
+metadata are kept in Git. Version 0.4.1 is the current personal release checkpoint.
 
-Debug APKs are locally signed installable previews. Release APKs are unsigned until the
-owner supplies signing credentials. Windows is unsigned. No device-validation or store
-release claim is implied by these artifacts.
+| Output | Producer |
+| --- | --- |
+| `windows-x64/`, `MirrorMesh-windows-x64.zip` | `scripts/build-windows.ps1` |
+| `android-phone/*.apk`, `android-tv/*.apk` | `scripts/build-android.ps1` |
+| `linux-x64/`, `MirrorMesh-0.4.1-linux-x64.tar.gz` | `scripts/build-linux-docker.ps1` or `build-linux.sh` |
+| `MirrorMesh-0.4.1-source.zip` | `scripts/package-source.ps1` from committed source |
+| Intended `macos-universal/` app | `scripts/build-macos.sh` on a Mac; unbuilt here |
 
-Linux packaging: `scripts/build-linux-docker.ps1` on Windows with Docker Desktop, or
-`sh scripts/build-linux.sh` on Linux. Outputs a complete x64 tarball and checksums.
-macOS source build: `sh scripts/build-macos.sh` on a Mac; no macOS binary exists here.
-See [build instructions](../docs/build-release.md) and [TV installation](../docs/install-android-tv.md).
+Keep complete app folders; the Windows EXE and Linux executable are not standalone.
+Debug APKs are locally signed/installable. Optimized unsigned APKs need your private key
+before installation/distribution. Windows is unsigned; no Mac/iOS binary is supplied.
+
+Build from clean source, never from an extracted app's private runtime state. Keep licenses,
+notices and matching AirPlay source with the generated complete Windows bundle.
+Older personal extracted folders remain ignored and untouched.
+
+See [builds](../docs/build-release.md), [TV installation](../docs/install-android-tv.md)
+and [actual readiness](../docs/IMPLEMENTATION_STATUS.md).

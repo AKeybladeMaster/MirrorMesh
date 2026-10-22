@@ -1,7 +1,22 @@
 # Build desktop and Android apps
 
+## Choose your release product
+
+| Need | Source | Personal-use output |
+| --- | --- | --- |
+| Windows PC | Flutter Windows host + shared Rust + native AirPlay bridge | Complete portable ZIP, unsigned |
+| Android phone/tablet | Native `apps/android-tv`, phone flavor | Locally signed debug APK or owner-signed optimized APK |
+| Android TV / Google TV | Same source, TV flavor | TV APK; ARM64 OS required |
+| Linux x64 | Flutter GTK host + shared Rust | Ubuntu 24.04-compatible complete tarball |
+| macOS desktop | Flutter Swift host + Apple Rust adapter | Intended universal app; Mac build/sign verification still pending |
+| iOS app | Swift host + ReplayKit extension + Apple adapter | Intended provisioned app; Mac build/sign verification still pending |
+
+Keep native source directories in place: CMake, Gradle and Xcode resolve the Rust root
+relative to their project folders. The canonical Android APK is not a Flutter Android build.
+
 All commands below are local; no GitHub Actions or unit tests are invoked. Run from the
-repository root on `test_6` only. Build scripts enforce that branch. Preserve every other branch.
+repository root. Build scripts support `main`, release checkouts and extracted source archives;
+they do not switch branches, commit or push. Pin dependencies rather than upgrading while building.
 
 ## Toolchain
 
@@ -16,11 +31,11 @@ repository root on `test_6` only. Build scripts enforce that branch. Preserve ev
 | Android NDK | 28.2.13676358 |
 
 Enable Windows Developer Mode for Flutter plugin symlinks. Install the required tools
-before building. The current machine's SDKs are at:
+before building and set your own SDK locations (examples contain no private machine paths):
 
 ```powershell
 $env:FLUTTER_ROOT = "$env:LOCALAPPDATA\Programs\MirrorMeshFlutter\flutter"
-$env:JAVA_HOME = 'C:\Program Files\Java\jdk-21.0.10'
+$env:JAVA_HOME = 'C:\path\to\your\jdk'
 $env:ANDROID_SDK_ROOT = "$PWD\.toolchains\android-sdk"
 ```
 
@@ -132,7 +147,7 @@ In Xcode select your development team, use an extension identifier prefixed with
 Runner app identifier, and provision the same App Group for Runner and MirrorMeshBroadcast.
 The configurator creates/embeds the ReplayKit Upload Extension and configures entitlements.
 It changes the local Xcode project; review and commit those generated project settings only
-on `test_6`. Credentials and provisioning profiles stay outside Git. Full-device sharing
+on your development branch. Credentials and provisioning profiles stay outside Git. Full-device sharing
 appears only when the extension is present; app-only ReplayKit capture remains available.
 Check `docs/connections.md` for directions and verification boundaries.
 
@@ -172,7 +187,7 @@ still need desktop/device verification. App sharing remains video-only in this r
 ## macOS source build (a Mac is required)
 
 There is no macOS binary produced on this Windows/WSL host. On a Mac with the full Xcode
-toolchain supported by Flutter 3.47.7 and Rust 1.99.1, check out `test_6`, then:
+toolchain supported by Flutter 3.47.7 and Rust 1.99.1, use the release source, then:
 
 ```sh
 sh scripts/build-macos.sh
@@ -206,3 +221,49 @@ The current host reported Wi-Fi support but mixed display-driver support; no act
 handshake repair is verified. Use the MirrorMesh Android app for the owner-confirmed path.
 No Google Cast provider is installed: no compatible permanently free Windows provider has
 been verified, and the owner declined paid licenses/trials.
+
+## Personal release procedure
+
+1. Use a fresh checkout of `main` or extract the committed source ZIP. Install the pinned
+   tools above; retain Cargo/Flutter/Gradle lock/pin files. Set SDK variables to your own locations.
+2. Build only the platform you need. Debug Android APKs are sufficient for personal installation.
+   For signed optimized Android builds, provide your private signing environment; never commit it.
+3. Keep the complete product folder. On another computer, extract to a new folder rather
+   than mixing DLLs/assets from old versions. Do not package a working receiver's private state.
+4. Verify archive/APK SHA-256 sidecars and payload `SHA256SUMS.txt` where supplied.
+5. Install/run locally, approve the required network/capture prompts, and verify a changing
+   image on the receiver. Builds and sender counters are not device/media acceptance.
+6. Preserve the same Android signing key for updates. Windows certificate signing, Apple
+   provisioning/notarization and store submissions are optional separate owner operations.
+
+Build products are ignored locally under `releases/`; source and public checksum metadata
+belong in Git. Windows and Android signing credentials are external private inputs.
+AirPlay runtime notices/licenses/matching source materials belong in the complete Windows ZIP.
+
+### Minimal source archive
+
+After committing the desired source in a Git checkout:
+
+```powershell
+.\scripts\package-source.ps1
+```
+
+This packages the committed tree using `.gitattributes` export exclusions, checks common
+private-key/token patterns, and writes `releases/MirrorMesh-0.4.1-source.zip` plus `.sha256`.
+It excludes generated release folders, SDKs/caches, personal state and maintenance session notes.
+It does not include untracked edits or prove that every possible secret format is absent.
+Native builds work without `.git`; the Windows Docker wrapper also supports that source ZIP.
+
+### Local debug commands
+
+```powershell
+Set-Location apps\mirrormesh_flutter
+flutter run -d windows
+# On a Linux desktop: flutter run -d linux
+# On a Mac with Xcode: flutter run -d macos
+```
+
+For Android, build/install the debug flavor and use the SDK's `adb logcat` for relevant
+app messages. Replace private device names, endpoints, paths and invitations before sharing
+output. The app's Copy diagnostics action provides counters/errors without an invitation.
+Use [the README FAQ](../README.md#faq--connection-and-playback) for known symptoms and fixes.

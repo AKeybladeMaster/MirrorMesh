@@ -1,7 +1,6 @@
 # Workspace-local build prerequisites. Never changes Defender or firewall settings.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -ne 'test_6') { throw 'Use test_6 for this setup.' }
 $tools = Join-Path $root '.toolchains'
 $msys = Join-Path $tools 'msys64'
 $downloads = Join-Path $tools 'downloads'

@@ -5,7 +5,6 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -ne 'test_6') { throw 'Build this release from test_6.' }
 if (-not $FlutterRoot) {
     $installedFlutter = Join-Path $env:LOCALAPPDATA 'Programs/MirrorMeshFlutter/flutter'
     if (Test-Path -LiteralPath $installedFlutter) { $FlutterRoot = $installedFlutter }
@@ -62,6 +61,7 @@ foreach ($document in @('docs/USER_GUIDE.md', 'docs/connections.md', 'docs/build
     Copy-Item -LiteralPath (Join-Path $root $document) -Destination $output
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'diagnose-airplay.ps1') -Destination $output
+Copy-Item -LiteralPath (Join-Path $root 'docs/windows-portable.md') -Destination (Join-Path $output 'README.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'diagnose-miracast.ps1') -Destination $output
 $files = Get-ChildItem -LiteralPath $output -File -Recurse | Where-Object Name -ne 'SHA256SUMS.txt'
 $checksums = $files | Sort-Object FullName | ForEach-Object {

@@ -5,8 +5,7 @@ with unchecked permission before approval. It includes the 0.3.1 startup packagi
 The locally built receiver preview is separate from the
 MirrorMesh iOS app and does not require an IPA, ReplayKit extension or Xcode signing.
 The owner confirmed PC/Android sharing and native iPhone/iPad AirPlay connections before
-0.4.0. The new dialogs need physical verification. Devices: iPhone 15 Pro Max and base iPad from 2020;
-their iOS/iPadOS versions have not been recorded.
+the current release. The latest dialogs and version-specific OS compatibility need physical verification.
 
 ## Connect
 
@@ -80,8 +79,7 @@ orientation, DPI, latency and reconnect still require device validation.
 
 ## Build
 
-From the repository root on the authorized release branch (`test_3` for this repair;
-`test_4` after the requested handoff):
+From the release source root (a Git checkout or extracted source archive):
 
 ```powershell
 .\scripts\setup-airplay-toolchain.ps1

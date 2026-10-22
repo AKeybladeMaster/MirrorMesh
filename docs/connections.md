@@ -1,4 +1,4 @@
-# Connect MirrorMesh devices - 0.4.0 / test_5
+# Connect MirrorMesh devices — 0.4.1
 
 Install the new Windows and Android apps together. Device facts use signed v2 pairing
 proofs, which require upgraded receivers. New receivers still accept old v1 senders.

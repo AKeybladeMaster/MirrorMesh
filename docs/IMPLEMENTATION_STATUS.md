@@ -1,270 +1,53 @@
-# Implementation status — test release integration
+# Release readiness — 0.4.1
 
-Current branch: `test_6`, from working 0.4.0 preserved as `pre_release_v1` / `d4c9c1e`.
-Current desktop/Android preview version: 0.4.1. No other branch is modified.
-This document supersedes historical increment counts for this release candidate.
+This repository checkpoint consolidates the `test_6` implementation for `main` via
+`pre_release`. It is the owner's final repository release for now, not a claim that
+every original specification requirement or platform has full acceptance.
 
-## Readiness labels
+## Evidence labels
 
-- **Source implemented:** integrated code exists; this alone does not prove runtime behavior.
-- **Build verified:** an actual compiler/package build succeeded for the stated target.
-- **Automated integration verified:** not claimed for this branch; user requested no test suites.
-- **Hardware verified:** user-reported PC/Android sharing and native iPhone/iPad AirPlay
-  connections before test_5 (2026-10-21). Android is Redmi Note 5 / Android 13; PC GPU and
-  exact iOS versions were not supplied. This is user evidence, not independent verification.
-  TV and new 0.4.0 dialogs/network selection remain hardware verification pending.
-- **CODE_COMPLETE:** the complete agreed product requirements are implemented; not yet achieved project-wide.
+- **Source implemented:** integrated code exists.
+- **BUILD_VERIFIED:** the stated compiler/package command completed successfully.
+- **HARDWARE_VERIFIED:** stated device behavior was observed/reported; builds alone do not establish it.
+- **CODE_COMPLETE:** all agreed product requirements are implemented; not achieved project-wide.
 
-## Current reference pipeline
-
-### 0.4.1 desktop integration and receiver diagnosis (2026-10-22, test_6)
-
-- **Source implemented:** Linux/macOS desktop send and receive use the existing Rust
-  identity, pinned TLS, approval, signaling, trust and native WebRTC pipeline. Linux
-  reuses Secret Service/private SQLite; macOS reuses the Apple adapter with a separate
-  Keychain namespace. Public device facts, one LAN interface and fullscreen are integrated.
-  Shared stop/revoke events now retain their details; Android and Flutter iOS senders
-  handle both terminal events.
-- **BUILD_VERIFIED:** Linux x86_64 Ubuntu 24.04 build/package exit 0; locked workspace
-  Clippy and Flutter analysis exit 0. Archive contains the native executable, Flutter,
-  WebRTC and Rust shared libraries; all 19 packaged file digests match. All reported
-  dynamic dependencies resolve in the build image. System-audio loopback is unavailable
-  in that image; app screen sharing remains video-only. No Linux desktop media ran.
-- **BUILD_VERIFIED:** Android ARM64 phone/TV debug and unsigned optimized release APK
-  build/package commands exit 0, version 0.4.1/code 10. No test suite or workflow ran.
-- **BUILD_VERIFIED:** Windows 0.4.1+10 native/Flutter portable build and packaging exit 0.
-  The complete unsigned bundle includes the AirPlay runtime, Miracast diagnostic and TV
-  installation guide. Owner-confirmed 0.4.0 remains preserved on `pre_release_v1`.
-- **macOS:** source and universal build pipeline added, including explicit static-only
-  Rust link and runtime FFI exports. POSIX shell syntax is valid. No Mac/Xcode is available;
-  Swift/Apple linking, entitlement/signing, Keychain, capture and playback are UNVERIFIED.
-  No macOS .app, ZIP/DMG or iOS IPA was produced on Windows/WSL.
-- **Miracast:** Windows-owned Wireless Display handoff now has a live OS status popup
-  and explicit projection-settings button, plus a read-only diagnostic script. Owner
-  reports PC discovery succeeds but connection fails. This host reports Wi-Fi support
-  with mixed display-driver support/no HDCP. These findings do not prove a root cause
-  or repair. No driver, firewall, policy or authorization setting was changed.
-- **Google Cast:** no compatible permanently free Windows receiver provider verified.
-  Owner declined paid providers/trials and chose Miracast/MirrorMesh. No provider installed;
-  unavailable Cast GUI option removed. Cast reception remains unimplemented.
-- **HARDWARE_VERIFIED:** owner reports Windows/Android app sharing and native iOS AirPlay
-  connections on the preserved version. TV, new desktop platforms, 0.4.1 changes and native
-  Miracast media remain hardware verification pending. No project-wide CODE_COMPLETE claim.
-
-| Target | Source | Build/release | Hardware |
+| Target/direction | Implemented source | Compilation/package evidence | Device evidence / limits |
 | --- | --- | --- | --- |
-| Windows x64 | Integrated sender/receiver, AirPlay companion, OS Miracast status | 0.4.1 portable preview build/package exit 0 | Prior app/AirPlay owner-confirmed; Miracast connection fails |
-| Android phone ARM64 | Native sender/receiver and terminal cleanup | 0.4.1 installable debug / unsigned optimized APKs, exit 0 | Prior app owner-confirmed; new cleanup pending |
-| Android TV ARM64 | Shared native receiver/sender | 0.4.1 TV APKs, exit 0; installation guide added | NOT tested on TV |
-| Linux x64 | Shared desktop pairing/media, GTK context/fullscreen | 0.4.1 tarball, build/static/package exit 0 | Desktop keyring, capture, decode and codec behavior pending |
-| macOS ARM64/x64 | Shared Apple adapter, desktop native channels and build pipeline | Source only; no Mac compiler or binary | Pending |
-| iOS app | Existing native receive / ReplayKit source | No Mac build/signing or IPA | App build pending; native iOS AirPlay to Windows owner-confirmed |
-| Browser receiver | Retained foundation | Shared authenticated media path incomplete | Pending |
+| Windows → Android app | Approved pairing, native capture/WebRTC/H.264, native Android rendering | Windows x64 and phone/TV ARM64 packages built | Earlier phone sharing owner-confirmed; TV unverified |
+| Android app → Windows | Explicit MediaProjection, authenticated signaling, fitted receive view | Phone/TV APK and Windows builds pass | Earlier phone sharing owner-confirmed; TV capture depends on its OS |
+| Native iOS AirPlay → Windows | Native helper, PIN retention, explicit PC approval, fitted rendering | Complete Windows helper/runtime package built | Earlier iPhone/iPad connections owner-confirmed; latest changes need device confirmation |
+| Linux desktop | Shared Rust pairing/identity/trust and native desktop WebRTC path | Ubuntu 24.04 x64 tarball built; dependencies resolve | Desktop keyring/capture/Wayland/codec/media behavior unverified |
+| macOS desktop | Swift host, shared Apple adapter, static Rust FFI and universal build pipeline | Unbuilt: no Mac/Xcode available | No .app/DMG, Keychain, capture or playback claim |
+| iOS app | Native receive mode, ReplayKit app/extension sender source | Unbuilt: no Mac/Xcode/provisioning available | No IPA or device behavior claim |
+| Native Android Miracast → Windows | OS Wireless Display handoff and live capability/listening popup | Windows host and diagnostic script built/checked | Owner reports phone stuck Connecting with no Windows request; unresolved |
+| Native Google Cast → Windows | No compatible provider integrated | Not available | No free compatible provider verified; no paid trial/license installed |
 
-See [ADR0061](adr/0061-shared-desktop-platform-integration.md),
-[build instructions](build-release.md) and [TV installation](install-android-tv.md).
+App screen sharing is video-only. AirPlay has its separate native media pipeline.
+No cloud login, TURN relay, automatic approval or arbitrary network scan is configured.
+Reported device facts are not hardware attestation.
 
-### 0.4.0 device approval and private connection UI (test_5)
+## Preserved build evidence
 
-- **Source implemented:** bounded signed device facts (name, platform, model, manufacturer,
-  OS version where available), verified before incoming approval. These are sender-reported
-  facts, not hardware attestation. Legacy v1 proofs remain accepted; v2 senders require
-  upgraded receivers. Install the new Windows and Android apps together.
-- **Source implemented:** one automatically selected MirrorMesh LAN listener; local IP
-  selectors, discovered-address lists and displayed invitation text removed. QR/copy/share
-  retain complete identity pinning and expiry. Observed source IP appears in approval only.
-- **Source implemented:** modal start, PIN, device approval, code comparison and operation
-  result feedback. Grants start unchecked; no automatic approval or capture. Native AirPlay
-  name/model/socket source IP use bounded private IPC; native video cannot cover approval.
-- **Source implemented:** phone/TV use the same explicit MediaProjection sender and native
-  WebRTC receiver. Flutter iOS receive mode uses the shared Rust listener and native WebRTC
-  rendering; its device profile and automatic network provider are integrated in Swift.
-- **BUILD_VERIFIED:** Windows 0.4.0+9 native/Flutter and complete portable package exit 0.
-  Phone/TV ARM64 debug and optimized unsigned APK builds exit 0. Rust workspace
-  check, Clippy (`--workspace --lib --locked -- -D warnings`), Dart format/Flutter analyzer,
-  C++ format check and PowerShell parsing exit 0. Android Lint exit 0 with zero errors and
-  68 warnings per flavor; warnings include hardcoded text and existing manifest/API hints.
-  No unit/instrumentation suite, workflow or physical-device verification ran.
-- **HARDWARE_VERIFIED:** owner-reported PC/Android sharing and native iPhone/iPad AirPlay
-  connections before test_5. New dialogs, large text, D-pad/VoiceOver/TalkBack, LAN selection
-  and TV sending remain hardware verification pending. No new physical result is claimed.
-- **Known incomplete:** full native Google Cast reception is blocked by missing compatible
-  Windows SDK/provider (owner confirmed none). Miracast is a system Wireless Display window
-  handoff; an embedded MirrorMesh Miracast session is not implemented. iOS app compilation,
-  signing and installation require macOS/Xcode and are unverified. No project-wide
-  CODE_COMPLETE, production-ready or automatic media integration claim.
+Implementation checkpoint `c22b9a0` built Windows 0.4.1+10, Linux x64 and Android phone/TV
+0.4.1/code10 debug plus optimized unsigned APKs. Commands exited 0. Windows archive
+verified 285 payload digests; Linux verified 19 and no world-writable archive members;
+all four APK sidecars/version metadata matched. Those package hashes describe their exact
+earlier bytes; repackaging guides changes hashes without proving new device behavior.
 
-| Product / direction | Source status | Build / release boundary |
-| --- | --- | --- |
-| Windows PC to Android phone/TV app | Integrated capture, H.264, pairing, facts and dialogs | Windows portable bundle and phone/TV APK builds exit 0; unsigned Windows preview |
-| Android phone/TV to Windows app | Integrated OS capture permission and native media | Phone/TV ARM64 debug/release builds exit 0; releases unsigned; TV hardware pending |
-| Windows PC to iOS MirrorMesh app | Integrated listener, native WebRTC receive mode and Swift profile | iOS build/signing pending on macOS; no IPA |
-| Native iPhone/iPad AirPlay to PC | Integrated helper, PIN, explicit approval and device facts | Helper and full Windows bundle build exit 0; new UI hardware pending |
-| Native Android Miracast to PC | Installed Windows Wireless Display app handoff | Separate OS window/consent; feature and compatible Wi-Fi required; no embedded receiver |
-| Native Android Google Cast to PC | Not implemented | Blocked: no compatible Windows provider/SDK |
+The release consolidation preserves native media/protocol code and dependency pins,
+removes archived prototypes/reports, and makes build scripts independent of branch names.
+Current build results and reproducible commands are in [verification](verification.md)
+and [build instructions](build-release.md).
 
-See [ADR0060](adr/0060-device-facts-and-private-connection-ui.md) for the proof format,
-metadata privacy, routing and native protocol boundaries. Historical build evidence below
-describes its stated older versions.
+## Deferred activities
 
-### Windows 0.3.2 AirPlay code retention (2026-10-21, test_4)
+- TV installation, D-pad usability, decoding and OS capture compatibility.
+- Linux desktop keyring, discovery, capture/portal permissions, codecs and real media.
+- Mac/iOS compilation, signing, provisioning, Keychain and real media on Apple hardware.
+- Native Miracast listening/handshake/driver interoperability diagnosis.
+- Latest UI/cleanup/reconnection/accessibility behavior on actual devices.
+- Owner signing, notarization/store submission and wider distribution decisions.
 
-- **Source implemented:** retain the PIN when iOS closes its short authentication
-  connection; clear it when authentication advances to PC approval, video starts or Stop.
-  A pending code expires after120s by stopping its helper. Challenges during active video
-  or pending approval cannot arm an unrelated expiry timer. Controls scroll in bounded
-  height, with a prominent wrapping code panel revealed when a code arrives.
-- **BUILD_VERIFIED:** final Windows 0.3.2+8 package build and Flutter analysis exit0;
-  formatting, PowerShell syntax and whitespace checks exit0. Archive inspected and283
-  packaged file digests verified. Android remains compatible0.2.1 without new changes.
-- **Local control-path diagnosis verified:** original immediate-close request failed
-  before the fix; holding the socket open succeeded. Final bundled -CheckPin returns
-  CODE_AVAILABLE/exit0 after immediate close for both PIN-start(200) and password SETUP(401).
-  Digits are never logged; no client approved, no media streamed, no helper left running.
-- **Hardware verification pending:** owner confirms iOS finds MirrorMesh PC and asks for
-  a code on0.3.1, while PC shows none. New code display/entry, approval and actual media on
-  iPhone/iPad still need confirmation. Expiry and active-stream behavior are source reviewed,
-  not physical-device verified. No project-wide CODE_COMPLETE or media integration claim.
-
-### Windows 0.3.1 AirPlay startup repair (2026-10-21)
-
-- **Source implemented:** package GStreamer core DLLs in `airplay/bin`, classify plugins
-  by their actual source directory and include UxPlay's required `autodetect` plugin.
-  Inspect final packaged imports and run a restricted-PATH loader check during packaging.
-  Native errors now distinguish missing DLLs, wrong architecture, media errors and timeout.
-- **BUILD_VERIFIED:** final Windows 0.3.1+7 build/package and Flutter analysis exited 0;
-  Dart format, PowerShell parsing and diff checks exited 0. Versioned owner-local ZIP and
-  SHA-256 sidecar are in `releases/`; 283 packaged file digests were verified.
-- **Local runtime diagnosis:** packaged helper help exits 0. The real native startup
-  diagnostic retains Ready for two seconds within a 15-second window, then exits 0
-  with no helper process left. It approves no client and captures/receives no media.
-  These are startup checks, not an automated media integration suite.
-- **Hardware verification pending:** the owner reported 0.3.0 stopping immediately and
-  absent iPad discovery. Both reproduced startup defects are repaired locally; iPad/iPhone
-  discovery, PIN/consent, decoding, audio and streaming still need physical confirmation.
-  Android remains on compatible 0.2.1 with no source changes or new APK required.
-- **Branch handoff:** repair/release checkpoint is committed and pushed on `test_3`, then
-  `test_4` is created from it as requested. Inspect Git for the resulting hashes/active branch.
-
-### Windows 0.3.0 fitted viewer and native AirPlay preview (2026-10-21)
-
-- **Source implemented:** received WebRTC video fits the available PC window using contain
-  sizing and a bounded video area; Stop stays visible. Windows full screen uses F11/Escape.
-- **Source implemented:** native iOS Control Center Screen Mirroring receiver through a
-  pinned UxPlay companion, mDNS, per-connection PIN, explicit PC Allow/Reject, native
-  D3D11/FFmpeg video + WASAPI audio, bounded window placement and owned-process cleanup.
-  This is separate from the unchanged MirrorMesh QR/TLS WebRTC engine and iOS ReplayKit app.
-- **BUILD_VERIFIED:** Windows 0.3.0+6 native compilation, locked-toolchain setup check,
-  helper compilation and portable bundle packaging all exited 0. The runtime includes 141
-  required binaries plus modified UxPlay source/notices. Flutter analysis exited 0 with
-  no issues. No receiver has been started here.
-- **Automated integration verified:** not claimed; no test suites are authorized.
-- **Hardware verification pending:** viewer layout and AirPlay on iPhone 15 Pro Max / 2020
-  base iPad. Their exact iOS/iPadOS versions are unknown. No AirPlay screenshots, certified
-  compatibility, DRM streaming, AWDL or multi-room claim. Public dependency redistribution
-  review is pending; this is a local preview, not a production-complete release.
-
-See [AirPlay guide](airplay.md) and [ADR0059](adr/0059-native-airplay-and-bounded-receiver-view.md).
-
-### 0.2.1 sender startup and direct LAN requests (2026-10-21)
-
-- **Source implemented:** Android sender no longer polls before offer submission; an idle
-  approved shared channel returns Pending. Android displays preparation/negotiation/failure
-  stages. PC receiver errors distinguish protocol rejection and transport/channel closure.
-- **Source implemented:** selecting a compatible discovered receiver sends a direct request;
-  both screens show a matching code, receiver grants remain unchecked and the native sender
-  cannot reach Approved until both receiver approval and sender confirmation. QR remains
-  available. LAN nonce provenance survives listener restarts; source throttling is retained.
-- **Build verified:** final 0.2.1 Windows EXE/ZIP and Android ARM64 phone/TV debug and
-  unsigned release APKs passed with exit 0. Rust check/Clippy, Flutter analysis and Android
-  lint passed with exit 0; lint reports 0 errors and 77 warnings per flavor.
-- **Automated integration verified:** not claimed; no test suites are permitted on this branch.
-- **Hardware verification pending:** owner reported Redmi Note 5 / Android 13 → PC failing
-  after capture approval. A source startup race is fixed, but the physical failure was not
-  reproduced here. Direct request prompts, code comparison and actual media still need the
-  final user-device phase. No project-wide CODE_COMPLETE claim.
-
-See [ADR0058](adr/0058-direct-lan-requests-and-sender-startup.md).
-
-### 0.2.0 connection checkpoint (2026-10-21)
-
-| Requested integration | Source implemented | Build evidence | Device evidence |
-| --- | --- | --- | --- |
-| Compact invitations, legacy input compatibility | Shared Rust v2 encoding/parser | Windows and Android builds passed | Pending |
-| PC network search and name filtering | Existing Rust mDNS adapter + Flutter UI | Windows build passed | Pending |
-| Android/TV discoverable receivers | Public Android NSD advertisements | ARM64 phone/TV APKs passed | Pending |
-| PC receiver QR and inbound video | Shared receiver registry + native WebRTC renderer | Windows build passed | Pending |
-| Android sending to PC/Android/TV | Shared sender driver + MediaProjection service | ARM64 phone/TV APKs passed | Pending |
-| iOS send/receive, QR app links and ReplayKit extension | Integrated source and Mac project configurator | Flutter analysis passed; Xcode native build unavailable | Pending |
-| PC to native Android/Google TV receiver | Existing route plus discovery UI | Windows and TV APKs passed | TV pending |
-
-The owner reports the preceding app works, including Windows-to-phone sharing. This is
-user-reported baseline evidence; the new directions and discovery are not hardware verified.
-Generic Miracast/AirPlay/Chromecast TVs remain unsupported. iOS requires a Mac build,
-project configuration, a provisioned App Group and signing before its source can be
-considered BUILD_VERIFIED. No project-wide CODE_COMPLETE or production claim is made.
-
-The following table describes the baseline path retained by these integrations.
-
-| Stage | Source | Build evidence | Hardware |
-| --- | --- | --- | --- |
-| Windows local identity and QR-pinned WSS client | Implemented | Rust workspace compiled | Pending |
-| Android identity, TLS listener, approval, SQLite trust | Implemented | ARM64 JNI compiled | Pending |
-| Windows real pairing and source-selection UI | Implemented; demo home removed | Flutter analysis and 0.1.1 EXE packaging passed | Pending |
-| Windows native desktop capture, H.264 WebRTC sender | Implemented through pinned plugin | 0.1.1 Windows native build passed | Pending |
-| Android receive-only WebRTC, hardware H.264, fullscreen surface | Implemented | Phone and TV APK assembly passed | Pending |
-| Receiver screenshots | Implemented using received native frame | APK assembly passed | Pending |
-| Stop/reconnect/startup deadlines and cleanup | Implemented | Windows and Android builds passed | Pending |
-| Persisted receiver revocation and authenticated notification | Integrated | Android APK assembly passed | Pending |
-| Android 17 local-network consent, phone layout, invitation sharing | Integrated | Android APK assembly passed | Pending |
-
-## Android 0.1.2 UI checkpoint
-
-The user confirms PC screen sharing works on an Android phone and requested Android
-accessibility/visibility improvements on a new `test_2` branch. Source changes reorganize
-setup, invitation sharing and approval; use scalable text and minimum 56dp controls;
-correct focused-button contrast; and separate video controls from the rendering surface.
-Connection details are expandable and revocation requires confirmation. Frame counters
-no longer replace screenshot feedback. Transport, identity and media code are unchanged.
-Compilation and static analysis of the new UI are in progress; native visual/TalkBack
-verification has not been performed. See `docs/android-ui.md` for design and boundaries.
-
-## Historical pairing feedback and 0.1.1 checkpoint (2026-10-20)
-
-The user reports that Windows rejected an invitation or did not reach receiver approval.
-The exact error and receiver device model are pending; no device is attached to ADB.
-This failure was not reproduced here. The later user report confirms successful PC-to-phone
-sharing, without establishing the original failure cause or compatibility with other devices.
-
-Source changes add fixed `MM-PAIR-*` diagnostics for invitation, network, secure-handshake
-and approval failures, and bound the approval wait by invitation expiry. Android invitation
-refresh resumes listening and ignores callbacks from a cancelled older wait. TLS pinning,
-signed identity proof and explicit receiver consent remain enforced (ADR 0056).
-
-Windows x64 portable packaging and Android ARM64 phone/TV debug and unsigned release
-assembly succeeded. Installable debug previews and the Windows bundle are in `releases/`;
-large binaries are local, Git-ignored artifacts. These are **BUILD_VERIFIED**, not
-**HARDWARE_VERIFIED** across devices. The later PC-to-phone success is user-reported evidence.
-
-## Remaining product work
-
-1. Confirm the Windows plugin's capture backend on supported GPUs; dedicated WGC selection
-   and guaranteed hardware encoding are not implemented or established by these builds.
-2. Native Android sending and Windows receiving are now source/build integrated; new
-   direction and cleanup behavior need device validation. System audio and synchronized
-   annotations remain incomplete.
-3. Linux still lacks its fully integrated media path. iOS has source for send/receive
-   and broadcast capture, requiring Apple tooling and signing for build verification.
-4. Browser receiver still lacks the authenticated signaling integration required to stream.
-5. Internet relay configuration, multi-party sessions, polished installers and store packages
-   remain incomplete. The current path is direct LAN video only.
-
-Final physical media validation, performance measurement, device compatibility, owner signing
-and release/store operations are still pending. No percentage or project-wide completion is claimed.
-
-## Branch cleanup
-
-Test sources, fuzz targets, historical task briefs, obsolete spike notes and GitHub Actions
-were removed from this branch at the owner's request. Production Rust modules, native apps,
-platform foundations, locked dependencies and architecture/security documentation remain.
-No unit or instrumentation test command was run. The old files remain recoverable from `dev`.
+Historical browser prototype and duplicate Flutter Android shell are preserved at
+`test_6` / `4052f40`; neither is included as a final product in this release tree.
+No tests, fuzz targets or GitHub Actions are included/run under the owner's branch policy.
