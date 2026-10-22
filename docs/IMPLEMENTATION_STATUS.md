@@ -39,6 +39,12 @@ removes archived prototypes/reports, and makes build scripts independent of bran
 Current build results and reproducible commands are in [verification](verification.md)
 and [build instructions](build-release.md).
 
+The consolidation Windows rebuild/package, Rust/Dart/static checks and source ZIP export
+checks passed. Linux also compiled and packaged from the extracted committed source ZIP
+without `.git` (source `65c17bd`); its 21 packaged file digests and reported dependencies
+verify. The final Windows package verifies 285 file digests and all four Android APK
+sidecars match. This verifies retained build inputs after cleanup, not new hardware behavior.
+
 ## Deferred activities
 
 - TV installation, D-pad usability, decoding and OS capture compatibility.

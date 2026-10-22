@@ -16,7 +16,8 @@ suites, fuzz targets or GitHub Actions are added or run under the owner's releas
 | PowerShell build/package script parsing | Exit 0 |
 | Local Markdown link targets and targeted source credential scan | Passed; no missing targets or matched credentials |
 | Read-only consolidation/packaging review | No blocking findings; minor obsolete document links fixed |
-| Linux build from committed source ZIP without `.git` | Pending final archive verification before publication |
+| Committed source ZIP generation/export checks | Exit 0; 304 files; required build inputs retained and generated/private/maintenance paths excluded |
+| Linux build from committed source ZIP without `.git` | Exit 0; compilation, locked Clippy, Flutter analysis and packaging; `.toolchains/pre-release-linux-source.log` |
 
 All 17 Rust crates, dependency locks, native media/protocol implementations and relative
 build roots are retained. Archived prototypes/reports remain in `test_6` / `4052f40`.
@@ -29,6 +30,12 @@ Linux tarball manifest/permissions/dependencies, APK sidecars/version metadata a
 exports. A source archive contains committed build inputs; generated releases and personal
 state are excluded. Targeted secret-pattern checks are useful but not exhaustive proof.
 The source ZIP is staged privately until its checks succeed, then published locally with a sidecar.
+
+Final consolidation artifact checks passed: Windows verifies 285 payload digests; Linux
+verifies 21 payload digests, no world-writable members and no unresolved reported libraries;
+all four Android APK sidecars match. The Linux compile used the extracted source archive
+from `65c17bd`, with no Git metadata. Subsequent evidence updates change documentation and
+checksums only. No device media run is implied by these results.
 
 ## Device evidence and known limits
 
