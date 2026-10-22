@@ -1,6 +1,23 @@
 # MirrorMesh
 
-Local screen sharing with explicit device approval. No cloud account is required.
+<p align="center">
+  Local screen sharing across personal devices, with explicit approval and no cloud account.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Flutter-UI-02569B?logo=flutter&logoColor=white&style=for-the-badge" alt="Flutter UI" />
+  <img src="https://img.shields.io/badge/Dart-Desktop%20and%20Apple%20apps-0175C2?logo=dart&logoColor=white&style=for-the-badge" alt="Dart" />
+  <img src="https://img.shields.io/badge/Rust-Shared%20core-000000?logo=rust&logoColor=white&style=for-the-badge" alt="Rust shared core" />
+  <img src="https://img.shields.io/badge/Java-Native%20Android-ED8B00?logo=openjdk&logoColor=white&style=for-the-badge" alt="Java Android app" />
+  <img src="https://img.shields.io/badge/WebRTC-Media%20transport-333333?style=for-the-badge" alt="WebRTC media transport" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/mirrormesh-preview.png" alt="Concept illustration of MirrorMesh sharing a PC screen with a phone and television" width="100%" />
+</p>
+
+<p align="center"><em>Concept artwork, not an in-app screenshot. Platform readiness varies; see the status table below.</em></p>
+
 **Version 0.4.1 is the final repository checkpoint for now**, with the limitations below.
 It is a personal-use preview, not a claim of production or universal device compatibility.
 
