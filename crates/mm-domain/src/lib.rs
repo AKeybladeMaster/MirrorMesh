@@ -1,11 +1,16 @@
 mod capabilities;
 mod device;
+mod device_details;
 mod identifier;
 mod session;
 mod trusted_peer;
 
 pub use capabilities::{CapabilitySet, NegotiatedCapabilities, VideoCodec};
 pub use device::{Device, DeviceRole};
+pub use device_details::{
+    MAX_DEVICE_DETAIL_CHARS, PAIRING_PROOF_DOMAIN_V1, PAIRING_PROOF_DOMAIN_V2,
+    ReportedDeviceDetails, is_canonical_pairing_message,
+};
 pub use identifier::{DeviceId, MessageId, SessionId};
 pub use session::{SessionEvent, SessionState, try_transition};
 pub use trusted_peer::{

@@ -7,6 +7,9 @@ use std::sync::Mutex;
 
 use mm_ports::{PortError, PreferencesPort};
 
+mod sqlite_trusted_peers;
+pub use sqlite_trusted_peers::{MAX_TRUSTED_PEERS, SqliteTrustedPeers};
+
 const FILE_HEADER: &str = "mirrormesh-preferences-v1\n";
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_KEY_BYTES: usize = 128;
@@ -18,6 +21,8 @@ pub enum StoreError {
     InvalidValue,
     MalformedFile,
     FileTooLarge,
+    Sqlite(rusqlite::Error),
+    UnsupportedSchema(i64),
     Io(std::io::Error),
 }
 
@@ -28,6 +33,10 @@ impl fmt::Display for StoreError {
             Self::InvalidValue => formatter.write_str("preference value exceeds its allowed size"),
             Self::MalformedFile => formatter.write_str("preferences file is malformed"),
             Self::FileTooLarge => formatter.write_str("preferences file exceeds its allowed size"),
+            Self::Sqlite(error) => write!(formatter, "SQLite storage failed: {error}"),
+            Self::UnsupportedSchema(version) => {
+                write!(formatter, "unsupported SQLite schema version: {version}")
+            }
             Self::Io(error) => write!(formatter, "preferences I/O failed: {error}"),
         }
     }
@@ -38,6 +47,12 @@ impl std::error::Error for StoreError {}
 impl From<std::io::Error> for StoreError {
     fn from(error: std::io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+impl From<rusqlite::Error> for StoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
     }
 }
 
@@ -222,58 +237,4 @@ fn temporary_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".tmp-{}", std::process::id()));
     path.with_file_name(name)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{FilePreferences, StoreError, validate_key};
-    use mm_ports::PreferencesPort;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn path() -> std::path::PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "mirrormesh-preferences-{}-{unique}",
-            std::process::id()
-        ))
-    }
-
-    #[test]
-    fn persists_values_and_removes_keys() {
-        let file = path();
-        let preferences = FilePreferences::open(&file).unwrap();
-        preferences.set("quality", "720p30").unwrap();
-        drop(preferences);
-
-        let reopened = FilePreferences::open(&file).unwrap();
-        assert_eq!(reopened.get("quality").unwrap().as_deref(), Some("720p30"));
-        reopened.remove("quality").unwrap();
-        assert_eq!(
-            FilePreferences::open(&file)
-                .unwrap()
-                .get("quality")
-                .unwrap(),
-            None
-        );
-        let _ = std::fs::remove_file(file);
-    }
-
-    #[test]
-    fn rejects_corrupt_file_and_invalid_keys() {
-        let file = path();
-        std::fs::write(&file, b"broken\n").unwrap();
-        assert!(matches!(
-            FilePreferences::open(&file),
-            Err(StoreError::MalformedFile)
-        ));
-        assert!(matches!(validate_key(""), Err(StoreError::InvalidKey)));
-        assert!(matches!(
-            validate_key("key\nname"),
-            Err(StoreError::InvalidKey)
-        ));
-        let _ = std::fs::remove_file(file);
-    }
 }

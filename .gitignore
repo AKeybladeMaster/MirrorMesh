@@ -1,5 +1,21 @@
 # Rust build output
 /target/
+/.toolchains/
+/releases/MirrorMesh-win-x64/
+/releases/**/*.exe
+/releases/**/*.dll
+/releases/**/*.zip
+/releases/*-source.zip.sha256
+/releases/**/*.apk
+/releases/**/*.aab
+/releases/**/*.tar.gz
+/releases/linux-x64/*
+!/releases/linux-x64/README.md
+/releases/macos-universal/*
+!/releases/macos-universal/README.md
+/releases/**/data/
+/releases/windows-x64/*
+!/releases/windows-x64/SHA256SUMS.txt
 /fuzz/target/
 /fuzz/artifacts/
 
@@ -33,6 +49,8 @@ Thumbs.db
 *.tmp
 
 # Local secrets / signing material
+# Runtime-generated AirPlay private key; never include an extracted receiver's state.
+/releases/**/airplay/0
 .env
 .env.*
 !.env.example

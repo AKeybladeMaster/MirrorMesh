@@ -5,6 +5,14 @@ members = [
     "crates/mm-protocol",
     "crates/mm-ports",
     "crates/mm-security",
+    "crates/mm-adapter-identity",
+    "crates/mm-adapter-tls",
+    "crates/mm-adapter-signaling",
+    "crates/mm-adapter-discovery",
+    "crates/mm-adapter-win",
+    "crates/mm-adapter-linux",
+    "crates/mm-adapter-android",
+    "crates/mm-adapter-ios",
     "crates/mm-store",
     "crates/mm-runtime",
     "crates/mm-transport",
@@ -24,6 +32,12 @@ mm-application = { path = "crates/mm-application" }
 mm-protocol = { path = "crates/mm-protocol" }
 mm-ports = { path = "crates/mm-ports" }
 mm-security = { path = "crates/mm-security" }
+mm-adapter-identity = { path = "crates/mm-adapter-identity" }
+mm-adapter-win = { path = "crates/mm-adapter-win" }
+mm-adapter-linux = { path = "crates/mm-adapter-linux" }
+mm-adapter-android = { path = "crates/mm-adapter-android" }
+mm-adapter-tls = { path = "crates/mm-adapter-tls" }
+mm-adapter-signaling = { path = "crates/mm-adapter-signaling" }
 mm-store = { path = "crates/mm-store" }
 mm-runtime = { path = "crates/mm-runtime" }
 mm-transport = { path = "crates/mm-transport" }
@@ -31,4 +45,17 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["raw_value"] }
 flutter_rust_bridge = "=2.13.0"
 getrandom = "=0.4.3"
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+windows-sys = { version = "=0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Threading"] }
+libc = "=0.2.183"
+secret-service = { version = "=5.1.0", default-features = false, features = ["rt-async-io-crypto-rust"] }
+mdns-sd = { version = "=0.21.5", default-features = false }
+curve25519-dalek = { version = "=5.0.0", default-features = false }
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
+sha2 = { version = "=0.11.0", default-features = false }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std"] }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
+rusqlite = { version = "=0.39.0", default-features = false, features = ["bundled"] }
+jni = "=0.21.1"
+ndk-context = "=0.1.1"
 

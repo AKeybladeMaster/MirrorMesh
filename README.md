@@ -1,164 +1,207 @@
-<p align="center">
-  <img src="docs/assets/mirrormesh-logo.svg" alt="MirrorMesh preview icon" width="156"/>
-</p>
-<h1 align="center">MirrorMesh</h1>
-<p align="center"><strong>Cross-platform, low-latency screen sharing with annotation and TV casting.</strong></p>
-<p align="center">
-  <img src="https://img.shields.io/badge/Core-Rust-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust core" />
-  <img src="https://img.shields.io/badge/UI-Flutter-02569B?style=flat-square&logo=flutter&logoColor=white" alt="Flutter UI" />
-  <img src="https://img.shields.io/badge/Android-Kotlin-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android project scaffold" />
-  <img src="https://img.shields.io/badge/iOS-Swift-F05138?style=flat-square&logo=swift&logoColor=white" alt="iOS project scaffold" />
-  <img src="https://img.shields.io/badge/Streaming-WebRTC-333333?style=flat-square&logo=webrtc&logoColor=white" alt="WebRTC" />
-  <img src="https://img.shields.io/badge/Build-GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white" alt="GitHub Actions" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square&logo=windows&logoColor=white" alt="Windows" />
-  <img src="https://img.shields.io/badge/Linux-x64-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux" />
-  <img src="https://img.shields.io/badge/Android-ARM64-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android" />
-  <img src="https://img.shields.io/badge/iOS-ARM64-000000?style=flat-square&logo=apple&logoColor=white" alt="iOS" />
-</p>
+# MirrorMesh
 
-> **Status: implementation scaffold; not a working mirroring product.** The Rust workspace has a strict bounded JSON protocol parser, a v1 golden offer fixture, domain/session types, ports, scoped consent, preferences storage, runtime, state-only FFI DTOs, and generated Flutter Rust Bridge bindings. Rust format/check/Clippy/tests pass. A test-only pairing coordinator now connects QR invitation and nonce handling to a signed-proof identity port and explicit grant approval; there is no production crypto adapter, QR UI, or durable trust store. The Flutter four-tab shell passes analysis/widget tests and compiles for Windows; its Windows build packages the Rust state library and displays the state-only session view. Flutter demo scan, pairing-start and end actions now use narrow Rust session commands; native integration coverage verifies the safe `Idle → Discovered → Pairing → Stopped` path. This remains a labeled local demo: it does not verify a peer, use the network, request capture, or stream media. The annotation preview uses a synthetic no-frame placeholder and screenshot export remains disabled. Live discovery and native media adapters are not connected. Linux and Android ARM64 library packaging and iOS device static linking with a Dart FFI export list are configured but not yet verified on their platform runners; the iOS simulator bridge remains unavailable. The TV browser has a tested capability/status shell. The native Android TV project has static source checks but has not been built. Authenticated signaling, production transport, media decoding, and hardware validation remain unimplemented. The SVG is an original placeholder icon, not a screenshot. See `docs/verification.md` for evidence and limits.
+Local screen sharing with explicit device approval. No cloud account is required.
+**Version 0.4.1 is the final repository checkpoint for now**, with the limitations below.
+It is a personal-use preview, not a claim of production or universal device compatibility.
 
-## Vision
+## Apps and current readiness
 
-Mirror a computer, phone or tablet to another supported device on an authorized LAN connection; control the session, take immediate snapshots, annotate over received video, and display it on TVs with a supported receiver. Work offline on supported native receivers, with an optional online HTTPS service for TV browser pairing.
+| Product | What it does | Evidence |
+| --- | --- | --- |
+| Windows x64 | Send to MirrorMesh receivers; receive Android/MirrorMesh and native iPhone/iPad AirPlay | Build verified; app sharing and AirPlay connections previously confirmed by the owner |
+| Android phone/tablet ARM64 | Receive a PC screen; send Android screen with OS permission | Debug and unsigned optimized APKs build verified; earlier app sharing owner-confirmed |
+| Android TV / Google TV ARM64 | Receive PC screen; send TV screen where the TV permits capture | APK build verified; physical TV use unverified |
+| Linux x64 | Shared desktop sender/receiver | Ubuntu 24.04 build verified; desktop keyring, capture and media unverified |
+| macOS ARM64 / Intel | Desktop sender/receiver source | Source only; requires a Mac/Xcode to build and verify |
+| iOS app | Receive PC screen; ReplayKit sender source | Source only; requires Mac/Xcode, provisioning and device verification |
 
-## Delivery targets and honest status
+Windows Miracast opens Microsoft's separate Wireless Display app. Connection failures
+remain unresolved; the app reports OS listening state without claiming media success.
+Google Cast reception is unavailable: no compatible free Windows provider was verified.
+Native iOS AirPlay does **not** require installing the MirrorMesh iOS app.
 
-**Decision MM-PLAN-001:** All four installed platforms start engineering **in parallel**; the native Android TV receiver is the **primary** TV sink; TV browser is a **capability-gated fallback**. No complete app or passing hardware test exists yet.
+## Start here
 
-| Parallel track | Planned installation | Intended roles | Readiness |
-|---|---|---|---|
-| Windows x64 | MSIX / signed installer | send + receive | Flutter shell compiles; no capture/transport adapter |
-| Linux x64 | `.deb` / AppImage | send + receive | Flutter shell source; platform build not run |
-| Android ARM64 phone/tablet | APK / AAB | send + receive | Flutter shell source; Android build not run |
-| iOS/iPadOS ARM64 | signed IPA / TestFlight | send + receive **subject to OS API availability** | Flutter shell source; iOS build not run |
-| **Android TV / Google TV** | dedicated native receiver APK | **receive (primary TV path)** | source shell only; not built |
-| Smart TV browser | HTTPS/WebRTC receiver web app | **fallback candidate; receiver flow disabled** | TypeScript capability shell; 7 Node tests pass; Edge 155 desktop localhost smoke; no TV/device test |
+1. [Build your personal apps](docs/build-release.md), or use a complete locally built bundle.
+2. [Install and connect](docs/USER_GUIDE.md). For television APKs, use the [TV installation guide](docs/install-android-tv.md).
+3. Start receiving on the target device, then find it from the sender or use its current invitation.
+4. Compare the connection code when requested. Review device information, select **Allow view**, then **Approve**.
+5. Select the screen/window or approve the OS capture prompt. Stop/Disconnect ends capture.
 
-### TV browser shell preview
+Use the same reachable, trusted LAN. Invitations expire and are single-use. Update sender
+and receiver together. Device names/models are signed **reported facts**, not hardware attestation.
+Screen sharing through MirrorMesh is video-only; the separate AirPlay pipeline handles its own media.
 
-![MirrorMesh TV browser receiver shell rendered in Microsoft Edge 155 on localhost. Secure origin, WebRTC, and H.264 are detected; authenticated signaling is unavailable and no session is connected.](docs/assets/tv-web-shell-edge-155.png)
+## Build the products
 
-This is a desktop browser screenshot of the capability shell. It does not show an Android TV browser, authenticated session, or received video.
-
-**Integration target:** each usable sender must connect to Android TV *and* at least one desktop; each native receiver must accept at least one known sender. Windows, Linux, Android, iOS, TV native and web teams progress concurrently after a short shared protocol/interface gate. More pathways are certified individually, not implied. The Apple iOS ScreenCaptureKit sample currently requires iOS 27+; older versions have a separate feasibility test.
-
-**Future experiments:** Google Cast, Miracast, AirPlay, Linux-phone/PSP compatibility. Unsupported: universal Smart TV mirroring, protected media capture, unauthorized input/control or invisible background recording.
-
-## Quick navigation
-
-1. [Product/architecture SPEC](docs/SPEC-001-mirrormesh.md)
-2. [Codex execution orders](codex/README.md) and [agent contract](AGENTS.md)
-3. [Reference app REA investigation SOP](docs/research/airmirroring-rea.md)
-4. [Device compatibility and TV strategy](docs/device-matrix.md)
-5. [Wire protocol and schemas](docs/protocol.md)
-6. [Shared glossary](docs/GLOSSARY.md)
-7. [Agent skills catalog](docs/skills.md)
-8. [Feature backlog and UI](docs/features-ui.md)
-9. [Parallel implementation and six workstreams](docs/implementation.md)
-10. [Build, releases and CI](docs/build-release.md)
-11. [Security, legal/clean-room process](docs/security-legal.md)
-12. [Testing and metrics](docs/verification.md)
-13. [Architecture choices](docs/adr/0001-rust-flutter-webRTC.md), [transport spike status](docs/adr/0002-transport-spike.md), [approved parallel-plan ADR](docs/adr/0003-parallel-targets-android-tv-primary.md), [trusted-peer record ADR](docs/adr/0004-trusted-peer-records.md), [SQLite store ADR](docs/adr/0005-sqlite-trusted-peer-store.md), [pairing coordinator contract ADR](docs/adr/0006-pairing-coordinator-proof-contract.md), [Ed25519 identity candidate ADR](docs/adr/0007-ed25519-identity-candidate.md)
-14. [Source references / API checks](docs/sources.md)
-15. [Contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
-
-## Quick start (verified Rust source scaffold)
-
-```bash
-# Install Rust 1.99.1 with the MSVC target and Visual Studio C++ Build Tools.
-cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-
-# TV browser capability shell (TypeScript build plus Node.js checks):
-cd apps/tv-web
-npm ci
-npm test
-
-# Flutter interface checks:
-cd ../mirrormesh_flutter
-flutter pub get
-dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test
-```
-
-On Windows, run the Rust commands from a Visual Studio developer shell so `link.exe` and Windows SDK libraries are configured. Rust and Flutter checks passed on 2026-10-18; a Windows Flutter shell build also completed. The Flutter test/build outputs were produced from a temporary copy because this session could not create Flutter's ignored `build/` directory inside the workspace. Android TV, Linux, Android phone, and iOS native builds are not yet verified; see `docs/verification.md`.
-
-## Installation and building the current shell
-
-No installable release or signed package is available yet. For a local Windows build, use Flutter 3.47.7 stable, Dart 3.13.5, Rust/Cargo 1.99.1 with the `x86_64-pc-windows-msvc` target, and Visual Studio C++ Build Tools with the Windows SDK. The verified command builds the control shell and bundles the Rust state library; it does not enable screen capture or streaming:
+Install the pinned tools in the [build guide](docs/build-release.md), then run from the repository root:
 
 ```powershell
-cd apps/mirrormesh_flutter
-flutter pub get
-flutter build windows --release
+# Windows: complete EXE/DLL/assets/AirPlay bundle
+.\scripts\setup-airplay-toolchain.ps1
+.\scripts\build-windows.ps1
+
+# Native Android: phone and TV flavors; installable local debug signature
+.\scripts\build-android.ps1 -Configuration debug
+
+# Optimized Android: unsigned unless your private signing environment is configured
+.\scripts\build-android.ps1 -Configuration release
+
+# Linux x64 from Windows, using Docker Desktop's Linux engine
+.\scripts\build-linux-docker.ps1
 ```
 
-After a successful build, launch `apps/mirrormesh_flutter/build/windows/x64/runner/Release/mirrormesh_flutter.exe`.
+On Linux: `sh scripts/build-linux.sh`. On a Mac: `sh scripts/build-macos.sh`.
+The iOS extension/provisioning steps are documented separately in the build guide.
+Build scripts work from `main`, a release checkout, or an extracted source archive;
+they do not change Git branches or run unit/instrumentation suites.
 
-The browser capability shell can be compiled and checked with Node.js 20 or later:
+Generated products go under `releases/`. Keep every DLL and the `data/` folder with the
+Windows EXE; it is not a standalone file. Linux likewise needs its `lib/` and `data/` folders.
+Windows is unsigned. Android `debug.apk` is installable; `release-unsigned.apk` is not.
+No macOS/iOS binary was produced on the Windows/WSL build machine.
 
-```sh
-cd apps/tv-web
-npm ci
-npm test
+## Code and workspace
+
+```text
+apps/
+  android-tv/             Native Android phone + TV app, Java/WebRTC/JNI
+  mirrormesh_flutter/     Shared Flutter UI and Windows/Linux/macOS/iOS hosts
+crates/                  Shared Rust identity, trust, protocol, sessions and adapters
+scripts/                 Local builds, packaging, native AirPlay bridge and diagnostics
+docs/                    Architecture, build/use guides, protocol and actual readiness
+releases/                Output folders and public checksums; generated payloads ignored
+Cargo.toml / Cargo.lock  Rust workspace and locked dependencies
+rust-toolchain.toml      Rust compiler/target pins
 ```
 
-The Android TV project currently has source and local state checks only. Its Gradle/APK build and device installation have not been verified. Platform build commands and exact toolchain requirements are tracked in [Build, releases and CI](docs/build-release.md) and [verification](docs/verification.md).
+[Architecture and detailed code map](docs/ARCHITECTURE.md) explains each layer and platform path.
+[Readiness](docs/IMPLEMENTATION_STATUS.md) separates source, compilation and hardware evidence.
+The native Android app is the only APK implementation; the obsolete Flutter Android shell
+and unfinished browser prototype are preserved in the `test_6` checkpoint, outside this release tree.
+Older task plans, test history and draft ADRs remain in Git history. Current decisions are in `docs/adr/`.
 
-## Troubleshooting
+SDKs/caches (`.toolchains/`, `target/`, app build directories), editor preferences, local
+receiver state and extracted personal bundles are not release source. Keep signing keys,
+passwords and runtime identity files outside Git. Packaged third-party notices and matching
+AirPlay source/license materials are required parts of complete binary bundles.
 
-- **Rust state bridge unavailable:** Windows loads `mm_ffi.dll` beside the executable. Rebuild the Windows app with Cargo available on `PATH`; the CMake build compiles and stages the DLL. The app keeps the demo local if the library cannot load.
-- **Native Flutter bridge test is skipped:** set `MIRRORMESH_FFI_LIBRARY` to the built platform library before running `flutter test --no-pub test/rust_bridge_test.dart`. The test only runs on Windows/Linux when that variable is set.
-- **Windows Rust build cannot find the linker or Windows SDK:** open a Visual Studio developer shell with the C++ desktop workload and Windows SDK installed.
-- **TV web checks cannot find `tsc`:** use Node.js 20 or newer and run `npm ci` from `apps/tv-web` before `npm test`.
-- **Android TV build tools are missing:** the repository currently has source checks and a Java state harness, not a verified APK build. See the Android TV verification row before treating it as installable.
+## FAQ — connection and playback
 
-## Architecture at a glance
+### An invitation is rejected, expired, or never reaches approval
 
-```mermaid
-flowchart LR
-  UI["Flutter UI + overlays"] --> BR["flutter_rust_bridge control/events"]
-  BR --> CORE["Rust session / discovery / security"]
-  CORE --> RTC["WebRTC transport (ICE / DTLS / SRTP)"]
-  OS["Native capture + hardware encoder"] --> RTC
-  RTC --> RX["Native decoder + GPU texture OR browser video"]
-  RX --> UI
-  CORE --> DB["SQLite trust/settings"]
-```
+Start the receiver first, refresh its invitation and use the complete copied link or current QR.
+Enable automatic time on both devices. Use matching app versions. An invitation is not a
+browser search URL and must not be shortened by dropping authentication fields. For nearby
+devices, select the discovered device and compare the code on both screens.
 
-Raw frames/PCM must **not** be copied through Dart event streams. Bind native GPU surfaces or render decoded browser video directly. The Rust/WebRTC integration and native packaging remain research spikes with explicit go/no-go gates. The **Android TV native APK is the primary TV receiver**; the TV web receiver is a separate fallback only for compatible secure-origin/WebRTC browsers. Both receiver shells exist; neither currently streams media.
+### “Bad state: approved control message failed protocol or transport checks”
 
-## Repository standards
+Update both apps to the current matching build and pair again with a fresh invitation.
+Earlier Android capture startup exposed signaling/lifecycle incompatibilities that were
+corrected. If it recurs, share the app version, direction and sanitized error text; do not
+disable identity or transport checks. Never share the full invitation or pairing code.
 
-- Document every feature as **implemented / experimental / planned / unavailable** with test evidence; do not list wishlist features as shipping.
-- Keep clean-room REA outputs separated from product code; never commit copyrighted third-party binaries.
-- Each PR: scope, affected module, linked requirement, tests with commands and outputs, screenshots where UI changes, security consequences, rollback.
-- Each release: executable checksums, SBOM, source tag, changelog, signed artifacts where supported.
-- Add real demo GIF and `docs/assets/app-preview.png` after UI is built; optimize image and add descriptive alt text.
-- Publish architecture ADRs, benchmark methodology, verified compatibility matrix, and limitations to make the portfolio credible.
+### The phone stays on “Connecting…” and Windows Wireless Display shows nothing
 
-## Security and privacy
+This is the native Miracast path, separate from MirrorMesh app sharing. Open **Android
+wireless display options → Wireless display / Miracast** and check the popup's actual
+listening state. Keep the Windows receiver open; inspect **Projection settings** and
+the Wi-Fi/display manufacturers' driver support. Discovery alone does not prove a working
+connection. Run `scripts/diagnose-miracast.ps1` for read-only status. This failure is not
+verified as fixed; use MirrorMesh on both devices for the owner-confirmed app path.
 
-The demo does not read the screen, contact another device, or transmit media. Its Pairing label reflects a local state-machine transition; no peer identity has been verified. Production pairing, authenticated signaling, capture, and media transport are not implemented, so do not use this scaffold for sensitive screen sharing. Real capture must use explicit operating-system consent, and unattended recording is not allowed. See the [security and privacy model](docs/security-legal.md) and [vulnerability reporting policy](SECURITY.md).
+### Can I use Android's Google Cast button?
 
-## Performance methodology
+No compatible Google Cast receiver is bundled. Cast and Miracast are different protocols.
+Use Android Wireless display/Miracast where supported, or the MirrorMesh Android app.
+No paid provider or trial is installed automatically.
 
-No FPS, bitrate, latency, hardware codec, or end-to-end performance result is claimed. The [verification plan](docs/verification.md#measurement-method) describes timestamping, external-camera latency measurement, sample counts, and per-device reporting. Populate results only from named hardware fixtures; do not substitute mock runs for media benchmarks.
+### iPhone/iPad does not find the PC, or AirPlay stops immediately
 
-## Roadmap
+Extract the complete current Windows ZIP into a new folder. Start the AirPlay receiver
+and wait for readiness. Earlier builds had missing/misplaced native runtime DLLs/plugins;
+copying only the EXE or mixing old/new DLLs can reproduce startup errors such as `0xC0000135`.
+See [AirPlay setup](docs/airplay.md). Use the same reachable LAN and permit only the app's
+required private-network access if Windows asks; do not disable the firewall or Defender.
 
-Task 02 software work is in progress: the Rust workspace now has bounded WebRTC session/ICE controls, reconnect and RTP timing primitives, a bounded encoded-frame queue, a synthetic I420 source, and an engine port. ADR-0002 selects libwebrtc for platform integration. The engine dependency, authenticated signaling, real H.264 encoding, rendering and interoperability remain unimplemented; physical-device testing is deferred while code work continues. See the [transport status report](docs/spikes/transport-experiment-blocker.md), [Task 02 brief](codex/02-transport-spike.md), and [implementation status ledger](docs/IMPLEMENTATION_STATUS.md). Follow-on work covers production identity and consent, native platform adapters, rendering and snapshots, hosted quality gates, and sender-to-TV integration. The [implementation roadmap](docs/implementation.md) and [task board](codex/README.md) track those workstreams. No platform is listed as supported until its device path passes the documented gates.
+### iOS asks for an AirPlay code but the PC displays none
 
-## License
+The code appears only after the iOS authentication request. Use the current complete
+Windows build: earlier code retention across short socket closures was fixed. Check the
+PC's code popup, enter it on iOS, then approve the separate PC request. Restart reception
+if the code expired. Do not run multiple old receiver instances.
 
-**Undecided.** Do not publish application source under an assumed license. Decide permissive vs reciprocal licensing after checking media-library licenses and any reference-app interoperability work. Research documents may be published only if they contain original text and lawfully shareable evidence.
+### The mirrored phone screen is too tall, clipped or scrolls
 
-## Professional architecture help
+Update the PC app. The receive view fits the video within its window and preserves aspect
+ratio. Maximize or use the fullscreen control. Native AirPlay also supports F11/Escape.
+Black bars can be normal when device aspect ratios differ.
 
-[**sammuti.com**](https://sammuti.com)
+### Devices are missing from nearby search, or no LAN interface is available
+
+Start receiving on the destination and use Wi-Fi/Ethernet on the same reachable LAN.
+Guest/client isolation, VPN routing and blocked local discovery can prevent pairing.
+Discovery is a hint, not authentication; current QR/link pairing remains available.
+The app selects one physical LAN interface and hides local addresses during normal setup.
+
+### Pairing works but there is no picture, or it disconnects after starting
+
+Approve the sender's OS capture prompt and choose a valid source. Protected content may
+be blank; it is not bypassed. Check receiver codec support and sender diagnostics. Encoded
+frame/byte counters prove sender activity only. A visible changing picture proves reception.
+A short interruption has a bounded recovery period; after failure, refresh and pair again.
+
+## FAQ — installation and builds
+
+### How do I install the TV APK? Can I use a phone cable?
+
+Use the **TV** debug APK on Android TV/Google TV with an ARM64 Android OS. USB drive plus
+a TV file manager is the simplest route. A phone cable works only if the TV can browse
+the phone's MTP storage; it is not an automatic installer. Wireless ADB is another option.
+See [all installation steps](docs/install-android-tv.md). Non-Android TV systems cannot install it.
+
+### Android says the APK is incompatible, unsigned, or cannot update
+
+Check Android OS ABI, package flavor and signing certificate. A 64-bit chip can run a
+32-bit TV OS. Use a locally signed debug APK for personal previews; optimized unsigned APKs
+need your own private signing configuration. Keep the same signing key for updates.
+Uninstalling a differently signed app erases its local trust/settings, so back those up appropriately first.
+
+### Windows build fails on plugin symlinks or Git ownership
+
+Enable Windows Developer Mode for Flutter symlinks. Keep the repository/SDK in writable
+locations owned by your account. If Git reports dubious ownership, repair ownership or
+add **only your explicitly trusted repository/SDK path** to Git's safe-directory setting.
+Do not trust all directories. Re-run the pinned dependency/build commands afterward.
+
+### Defender blocks a script or a documentation edit
+
+Keep the exact command and intended behavior for review. Inspect whether the file was
+partially changed, then use a transparent patch for ordinary edits. Do not encode scripts
+to evade inspection, change execution technique solely to evade detection, or disable protection.
+
+### Linux pairing cannot open identity storage
+
+Run as your desktop user with a session D-Bus and an unlocked Secret Service keyring.
+Headless Docker builds do not provide that desktop session. The app fails closed instead
+of writing identity seeds as plaintext. Linux media/Wayland/GPU behavior still needs verification.
+
+### Can Windows/WSL produce macOS or iOS releases?
+
+Not with this build setup. Apple targets need a Mac, Xcode and appropriate signing/provisioning.
+The source and build instructions are included; no Apple binary is claimed. Do not replace
+secure Keychain storage or permissions just to make an unsigned preview appear functional.
+
+### What can I safely share when reporting a problem?
+
+Share app versions, platform/direction, sanitized error messages and media counters.
+Replace machine paths, device identities and network endpoints with generic placeholders.
+Do not include credentials, private keys, invitations, PINs, keystores or personal receiver state.
+
+## Release and verification policy
+
+Builds, formatters and static analysis are used locally. This release tree has no test suites,
+fuzz targets or GitHub Actions. Physical verification remains separate. `CODE_COMPLETE`,
+`BUILD_VERIFIED` and `HARDWARE_VERIFIED` are distinct; the full original product scope is not complete.
+See [verification boundaries](docs/verification.md) and [security/storage notes](docs/security-legal.md).

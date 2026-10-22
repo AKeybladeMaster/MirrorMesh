@@ -1,7 +1,44 @@
 //! Control-plane surface intended for a generated Flutter bridge.
 //! Events contain session state only; video frames and audio buffers never cross this API.
 
+#[cfg(any(
+    target_os = "windows",
+    target_os = "android",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "macos"
+))]
+mod connection_command;
 mod frb_generated;
+#[cfg(any(
+    target_os = "windows",
+    target_os = "android",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "macos"
+))]
+mod native_platform;
+#[cfg(any(
+    target_os = "windows",
+    target_os = "android",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "macos"
+))]
+mod native_receiver;
+mod network_devices;
+
+#[cfg(target_os = "android")]
+mod android_context;
+
+#[cfg(target_os = "android")]
+mod android_tv_pairing;
+
+#[cfg(target_os = "linux")]
+mod linux_pairing;
+
+#[cfg(target_os = "windows")]
+mod windows_pairing;
 
 pub mod bridge_api;
 

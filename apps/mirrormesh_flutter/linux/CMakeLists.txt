@@ -4,7 +4,7 @@ project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "mirrormesh_flutter")
+set(BINARY_NAME "MirrorMesh")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
 set(APPLICATION_ID "com.mirrormesh.mirrormesh_flutter")
@@ -91,7 +91,7 @@ install(CODE "
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
-# Build and bundle the state-only Rust bridge alongside Flutter's Linux libs.
+# Build and bundle the shared pairing/session Rust bridge alongside Flutter's Linux libs.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_program(CARGO_EXECUTABLE NAMES cargo cargo.exe)
   if(NOT CARGO_EXECUTABLE)
@@ -110,7 +110,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     OUTPUT "${MIRRORMESH_FFI_SO}"
     COMMAND "${CARGO_EXECUTABLE}" build
       --manifest-path "${MIRRORMESH_RUST_ROOT}/Cargo.toml"
-      --package mm-ffi --target x86_64-unknown-linux-gnu --release
+      --package mm-ffi --target x86_64-unknown-linux-gnu --release --locked
     DEPENDS
       "${MIRRORMESH_RUST_ROOT}/Cargo.toml"
       "${MIRRORMESH_RUST_ROOT}/Cargo.lock"
@@ -122,6 +122,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_custom_target(mirrormesh_rust_bridge_linux
     DEPENDS "${MIRRORMESH_FFI_SO}")
   add_dependencies(${BINARY_NAME} mirrormesh_rust_bridge_linux)
+  add_library(mirrormesh_ffi SHARED IMPORTED)
+  set_target_properties(mirrormesh_ffi PROPERTIES
+    IMPORTED_LOCATION "${MIRRORMESH_FFI_SO}" IMPORTED_NO_SONAME TRUE)
+  target_link_libraries(${BINARY_NAME} PRIVATE mirrormesh_ffi)
   install(FILES "${MIRRORMESH_FFI_SO}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)

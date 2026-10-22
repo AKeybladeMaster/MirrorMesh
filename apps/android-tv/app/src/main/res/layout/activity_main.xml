@@ -1,138 +1,66 @@
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/screen_background"
-    android:fillViewport="true">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="vertical"
-        android:paddingStart="64dp"
-        android:paddingTop="42dp"
-        android:paddingEnd="64dp"
-        android:paddingBottom="42dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:contentDescription="MirrorMesh TV receiver"
-            android:text="MIRRORMESH  /  TV RECEIVER"
-            android:textColor="@color/accent"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.12" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="34dp"
-            android:text="Your screen,\nready to share."
-            android:textColor="@color/text_primary"
-            android:textSize="48sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/session_state"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:accessibilityLiveRegion="polite"
-            android:text="No active session"
-            android:textColor="@color/text_primary"
-            android:textSize="22sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/service_state"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="27dp"
-            android:accessibilityLiveRegion="polite"
-            android:text="Local demonstration only. No network or video is connected."
-            android:textColor="@color/text_secondary"
-            android:textSize="17sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/demo_request_button"
-                android:layout_width="wrap_content"
-                android:layout_height="64dp"
-                android:layout_marginEnd="16dp"
-                android:minWidth="180dp"
-                android:background="@drawable/tv_button_background"
-                android:focusable="true"
-                android:focusableInTouchMode="true"
-                android:focusedByDefault="true"
-                android:text="Show local request"
-                android:textAllCaps="false"
-                android:textSize="18sp" />
-
-            <Button
-                android:id="@+id/accept_button"
-                android:layout_width="wrap_content"
-                android:layout_height="64dp"
-                android:layout_marginEnd="16dp"
-                android:minWidth="150dp"
-                android:background="@drawable/tv_button_background"
-                android:focusable="true"
-                android:focusableInTouchMode="true"
-                android:text="Accept"
-                android:textAllCaps="false"
-                android:textSize="18sp" />
-
-            <Button
-                android:id="@+id/reject_button"
-                android:layout_width="wrap_content"
-                android:layout_height="64dp"
-                android:layout_marginEnd="16dp"
-                android:minWidth="150dp"
-                android:background="@drawable/tv_button_background"
-                android:focusable="true"
-                android:focusableInTouchMode="true"
-                android:text="Reject"
-                android:textAllCaps="false"
-                android:textSize="18sp" />
-
-            <Button
-                android:id="@+id/stop_button"
-                android:layout_width="wrap_content"
-                android:layout_height="64dp"
-                android:minWidth="150dp"
-                android:background="@drawable/tv_button_background"
-                android:focusable="true"
-                android:focusableInTouchMode="true"
-                android:text="Disconnect"
-                android:textAllCaps="false"
-                android:textSize="18sp" />
+﻿<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/screen_background" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="24dp">
+        <TextView style="@style/MeshText.Secondary" android:text="@string/app_name" />
+        <Button android:id="@+id/open_sender_button" style="@style/MeshButton"
+            android:text="Share this device’s screen instead" />
+        <TextView style="@style/MeshText.Heading" android:layout_marginTop="8dp"
+            android:text="@string/receiver_title" android:textSize="30sp" />
+        <TextView android:id="@+id/session_state" style="@style/MeshText.Heading"
+            android:layout_marginTop="24dp" android:accessibilityLiveRegion="polite"
+            android:text="@string/pairing_stopped" android:textColor="@color/accent" />
+        <TextView android:id="@+id/service_state" style="@style/MeshText.Secondary"
+            android:layout_marginTop="8dp" android:accessibilityLiveRegion="polite"
+            android:text="@string/pairing_idle_help" />
+        <TextView style="@style/MeshText.Secondary" android:layout_marginTop="12dp"
+            android:text="Wi-Fi or Ethernet is selected automatically. You approve each incoming device." />
+        <Button android:id="@+id/start_receiver_button" style="@style/MeshButton.Primary"
+            android:text="@string/start_receiver" />
+        <LinearLayout android:id="@+id/pairing_columns" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="24dp" android:orientation="horizontal"
+            android:baselineAligned="false">
+            <LinearLayout android:id="@+id/pairing_code_panel" android:layout_width="320dp"
+                android:layout_height="wrap_content" android:layout_marginEnd="28dp" android:orientation="vertical">
+                <TextView style="@style/MeshText.Heading" android:text="@string/invitation_title" />
+                <TextView android:id="@+id/qr_help" style="@style/MeshText.Secondary"
+                    android:layout_marginTop="8dp" android:text="@string/invitation_help" />
+                <Button android:id="@+id/share_invitation_button" style="@style/MeshButton.Primary"
+                    android:text="@string/share_invitation" />
+                <Button android:id="@+id/copy_invitation_button" style="@style/MeshButton"
+                    android:text="@string/copy_invitation" />
+                <ImageView android:id="@+id/invitation_qr" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:adjustViewBounds="true" android:maxHeight="280dp"
+                    android:scaleType="fitCenter" android:layout_marginTop="16dp" android:background="#FFFFFF"
+                    android:padding="12dp" android:contentDescription="@string/pairing_accessibility_qr" android:visibility="gone" />
+                <TextView android:id="@+id/invitation_text" style="@style/MeshText.Secondary"
+                    android:layout_marginTop="8dp" android:ellipsize="middle" android:maxLines="2"
+                    android:textIsSelectable="true" android:contentDescription="@string/invitation_link_description"
+                    android:visibility="gone" />
+                <Button android:id="@+id/refresh_qr_button" style="@style/MeshButton"
+                    android:text="@string/refresh_invitation" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/pairing_controls" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView style="@style/MeshText.Heading" android:text="@string/approval_title" />
+                <TextView android:id="@+id/request_details" style="@style/MeshText"
+                    android:layout_marginTop="12dp" android:text="@string/no_sender" android:textIsSelectable="true" />
+                <TextView android:id="@+id/help_text" style="@style/MeshText.Secondary"
+                    android:layout_marginTop="12dp" android:text="@string/approval_help" />
+                <CheckBox android:id="@+id/grant_view" style="@style/MeshCheckBox"
+                    android:text="@string/grant_view_label" android:visibility="gone" />
+                <CheckBox android:id="@+id/grant_send" style="@style/MeshCheckBox"
+                    android:text="@string/grant_send_label" android:visibility="gone" />
+                <CheckBox android:id="@+id/grant_annotate" style="@style/MeshCheckBox"
+                    android:text="@string/grant_annotate_label" android:visibility="gone" />
+                <Button android:id="@+id/approve_button" style="@style/MeshButton.Primary" android:text="@string/approve_selected" />
+                <Button android:id="@+id/reject_button" style="@style/MeshButton" android:text="@string/reject_sender" />
+                <Button android:id="@+id/wait_button" style="@style/MeshButton.Primary" android:text="@string/wait_sender" />
+                <Button android:id="@+id/close_channel_button" style="@style/MeshButton" android:text="@string/disconnect_sender" />
+            </LinearLayout>
         </LinearLayout>
-
-        <Button
-            android:id="@+id/details_button"
-            android:layout_width="wrap_content"
-            android:layout_height="64dp"
-            android:layout_marginTop="20dp"
-            android:background="@drawable/tv_button_background"
-            android:focusable="true"
-            android:focusableInTouchMode="true"
-            android:text="Connection details"
-            android:textAllCaps="false"
-            android:textSize="17sp" />
-
-        <TextView
-            android:id="@+id/help_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="25dp"
-            android:accessibilityLiveRegion="polite"
-                android:text="Choose Show local request, then Accept or Reject it with the remote. This demonstration changes local UI state only; no sender can connect and no screen is captured."
-            android:textColor="@color/text_secondary"
-            android:textSize="15sp" />
+        <Button android:id="@+id/stop_receiver_button" style="@style/MeshButton"
+            android:layout_marginTop="24dp" android:text="@string/stop_receiver" />
     </LinearLayout>
 </ScrollView>

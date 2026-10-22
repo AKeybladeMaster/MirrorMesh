@@ -1,116 +1,269 @@
-# Build systems, packaging, GitHub Actions and README expectations
+# Build desktop and Android apps
 
-The initial local gates and CI workflow definitions are in place, but hosted workflow runs are still unverified. Keep platform compile checks distinct from real-device, capture-permission, streaming, and release-signing evidence. Android TV debug CI records its observed runner and SDK manifest; every actual release package still needs its own exact runner/tool manifest.
+## Choose your release product
 
-## Folder layout and toolchains
+| Need | Source | Personal-use output |
+| --- | --- | --- |
+| Windows PC | Flutter Windows host + shared Rust + native AirPlay bridge | Complete portable ZIP, unsigned |
+| Android phone/tablet | Native `apps/android-tv`, phone flavor | Locally signed debug APK or owner-signed optimized APK |
+| Android TV / Google TV | Same source, TV flavor | TV APK; ARM64 OS required |
+| Linux x64 | Flutter GTK host + shared Rust | Ubuntu 24.04-compatible complete tarball |
+| macOS desktop | Flutter Swift host + Apple Rust adapter | Intended universal app; Mac build/sign verification still pending |
+| iOS app | Swift host + ReplayKit extension + Apple adapter | Intended provisioned app; Mac build/sign verification still pending |
 
-```
-Cargo.toml / Cargo.lock / rust-toolchain.toml
-apps/mirrormesh_flutter/     # Windows/Linux/Android/iOS Flutter shell
-apps/android-tv/             # Kotlin TV receiver, possibly shared Android Flutter module
-apps/tv-web/                 # TypeScript browser receiver + web runtime capability tests
-crates/mm-{domain,application,ports,protocol,security,store,runtime,ffi}/
-crates/mm-adapter-{win,linux,android,ios}/
-crates/mm-transport-webrtc/  # selected at ADR-0002
-docs/                        # SPECS, ADRs, benchmarks, compatibility
-.github/workflows/
-scripts/
-```
+Keep native source directories in place: CMake, Gradle and Xcode resolve the Rust root
+relative to their project folders. The canonical Android APK is not a Flutter Android build.
 
-Pin exact tested versions after initial CI: stable Rust toolchain/target triples, Flutter SDK, Dart, Android SDK/NDK, Gradle, Kotlin, Xcode and libwebrtc or GStreamer binary set. Prefer reproducible SDK/container/rust toolchain and locked dependencies. Do not hardcode "latest" in release jobs.
+All commands below are local; no GitHub Actions or unit tests are invoked. Run from the
+repository root. Build scripts support `main`, release checkouts and extracted source archives;
+they do not switch branches, commit or push. Pin dependencies rather than upgrading while building.
 
-## Windows x64
+## Toolchain
 
-- Build on `windows-latest` runner with pinned Rust/Flutter and Windows SDK. Target: `x86_64-pc-windows-msvc`.
-- The Flutter Windows CMake build compiles `mm-ffi` and installs `mm_ffi.dll` beside the executable. Cargo and the pinned Rust target must be available; the bundled library exposes state-only session control, not pairing or media.
-- Native graphics: WGC/Direct3D 11/Media Foundation; test Intel/NVIDIA/AMD.
-- Release **MSIX x64** or signed exe installer (e.g., WiX) plus portable zip as secondary. Certificate kept in protected Actions secrets or trusted signing service. Bundle VC runtime/media dependencies properly; test uninstall, startup, firewall and unsigned install warnings.
-- Smoke-test clean Windows 10/11 x64 VM and physical GPU host; VM will not substitute GPU latency testing.
+| Tool | Version/configuration used |
+| --- | --- |
+| Rust | 1.99.1; locked Cargo dependencies; Windows MSVC and Android ARM64 targets |
+| Flutter / Dart | 3.47.7 / 3.13.5 |
+| Visual Studio | 2022 Build Tools, Desktop development with C++, Windows SDK, CMake |
+| Java | JDK 21 (Gradle/AGP require at least 17) |
+| Gradle / Android plugin | Wrapper 9.8.1 with SHA-256 pin / AGP 9.4.0 |
+| Android SDK | Platform `platforms;android-37.0`, Build Tools 36.0.0 |
+| Android NDK | 28.2.13676358 |
 
-## Linux x64
+Enable Windows Developer Mode for Flutter plugin symlinks. Install the required tools
+before building and set your own SDK locations (examples contain no private machine paths):
 
-- Target `x86_64-unknown-linux-gnu` with Rust 1.99.1. The Flutter Linux CMake build compiles `mm-ffi` and installs `libmm_ffi.so` in the relocatable bundle's `lib/` directory; the app loads it from there.
-- CI builds the Rust library, builds the Linux Flutter release shell, then runs the native state bridge test against the `.so` in the produced `bundle/lib`. This packaging path is configured but still needs a hosted Linux runner result.
-- Build on pinned supported Ubuntu runner; create tested `.deb`, AppImage; Flatpak/RPM optional.
-- Include/declare precise PipeWire, XDG Desktop Portal, graphics/codec runtime deps; don't assume proprietary codec packages redistributable.
-- Smoke test Wayland GNOME/KDE and X11 session; packaged app permission UX, portals, SELinux/AppArmor issues.
-
-## Android
-
-- The Flutter 3.47.7 toolchain pins NDK `28.2.13676358` and Android platform 36. CI cross-compiles `mm-ffi` for `aarch64-linux-android` using the NDK clang linker for API 21, stages `libmm_ffi.so` at `android/app/src/main/jniLibs/arm64-v8a`, builds an ARM64 debug APK, and verifies the packaged library path. The app loads the packaged `.so` by soname. This proves packaging only; no phone runtime test has run.
-- `flutter build apk --release --target-platform android-arm64`, `flutter build appbundle --release` as baseline only after native integration configured.
-- Kotlin MediaProjection + MediaCodec adapters and Rust `aarch64-linux-android` packaged `.so`; proper ABI alignment and foreground service manifest; user-initiated capture only.
-- Separate Android TV manifest/launcher icons/remote control focus and TV Play distribution track.
-- The Android TV debug workflow records the observed GitHub runner image, Java/Gradle/Android SDK package versions, APK SHA-256, and a CycloneDX preview generated from the APK. It writes and verifies `SHA256SUMS` for the APK, SBOM, and build manifest, then retains the debug APK and evidence for seven days; this is CI review data, not release packaging or device support.
-- Signing keystores stored outside repo; test Android OS 14/15/16/17 where hardware available; ensure specific SDK policies verified.
-
-## iOS/iPadOS
-
-- The macOS Xcode device build compiles Rust `aarch64-apple-ios` as a static library, force-loads it into Runner, writes an exported-symbols list from the archive, and retains global symbols for flutter_rust_bridge process lookup. The script verifies required bridge entry points before linking. `flutter build ios --no-codesign --no-pub` is configured in CI, pending a macOS runner result. The simulator build intentionally omits the Rust library and reports it unavailable.
-- Swift ScreenCaptureKit and VideoToolbox capture/receive work remains separate from this state-only bridge packaging.
-- Apple code signing/provisioning/App Store privacy manifest and relevant ScreenCaptureKit permission strings. `flutter build ipa --release` only after native integration; TestFlight acceptance required.
-- macOS build host and paid developer account likely required for broad distribution; jailbreak/homebrew unsupported.
-
-## Required parallel artifact gates
-
-| Pipeline | PR gate | Release / hardware gate |
-|---|---|---|
-| `windows-x64` | Rust/Flutter Windows compile + fake media + protocol fixtures | WGC/MF stream to Android TV + desktop, MSIX install |
-| `linux-x64` | Rust/Flutter Linux build + portal mocks + fixtures | PipeWire Wayland to Android TV + desktop, `.deb`/AppImage clean install |
-| `android-phone-arm64` | JNI/Kotlin/Flutter build + projection state tests | real MediaProjection phone→Android TV/desktop, APK install |
-| `ios-arm64` | macOS/Xcode compile + Swift availability checks | native iOS receiver test, capture only on supported tested OS, signed IPA/TestFlight |
-| `android-tv-arm64` | separate TV Android app build + remote UI tests | real Android TV H264 receiver, D-pad/QR/stop, APK install |
-| `tv-web` | JS/TS compile + WebRTC feature and HTTPS tests | actual model/browser H264 WebRTC playback + user approval; fallback only |
-
-Use GitHub Actions **independent jobs** and path filters; split physical-device/manual evidence from compiled CI claims. Failed platform gates do not erase progress on another target but do prevent that platform's supported-release designation.
-
-## CI suggested jobs
-
-- `core`: fmt + clippy + cargo test + cargo deny/audit + license compliance.
-- `flutter`: Dart format/analyze/widget tests; platform runner builds gated on platform adapters.
-- `protocol-fuzz`: cargo-fuzz on the bounded envelope/annotation message parser (weekly, manual, and protocol-change PR runs); the separate fuzz lockfile is included in advisory, license, and source checks.
-- `windows`: build Windows x64, package unsigned test artifact in PR.
-- `linux`: build linux x64 and smoke container/GUI test.
-- `android-phone`: Gradle/Flutter native build + emulator media projection unit tests where possible.
-- `android-tv`: separate TV receiver APK with D-pad/remote widget tests and real TV smoke gate.
-- `ios`: macOS build/sign only with SDK and provisioned credentials; independently test receive UI even when capture API gate is blocked; physical hardware tests external.
-- `tv-web`: secure-origin JavaScript build, certificate/capability tests, real TV-browser evidence before labeling fallback supported.
-- `release`: explicit approval on Git tag, dependency license review, SBOM, sign, hash, notarization/store upload as needed; attach only platform artifacts passing install, privacy and hardware acceptance.
-
-## README template and portfolio hygiene
-
-Top section:
-1. Original product icon/app preview image at `docs/assets/app-preview.png` once real app exists; do **not** use Microsoft Store competitor icon.
-2. Centered title/one-line description; technology badge row like root README; target OS badges.
-3. Honest status banner + feature summary + compatibility table **distinguishing planned vs tested**.
-4. 15s demo GIF/video (optimized), hardware/OS specs, short architecture diagram.
-5. Install links per OS after artifacts exist; SHA256 checksums.
-6. Usage tutorial with user-consent screenshots + troubleshooting.
-7. Detailed `docs/` links, developer prerequisites, build/test instructions, security/privacy, contribution/license and acknowledgment.
-8. Portfolio case study: challenge, approach, alternatives/ADRs, test fixtures, measured outcome, failures/limitations, 3–5 screenshots and link to source/release.
-
-Badge examples:
-
-```html
-<p align="center">
-  <img src="https://img.shields.io/badge/Core-Rust-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust"/>
-  <img src="https://img.shields.io/badge/UI-Flutter-02569B?style=flat-square&logo=flutter&logoColor=white" alt="Flutter"/>
-  <img src="https://img.shields.io/badge/Android-Kotlin-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Kotlin"/>
-  <img src="https://img.shields.io/badge/iOS-Swift-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift"/>
-  <img src="https://img.shields.io/badge/Media-WebRTC-333333?style=flat-square&logo=webrtc&logoColor=white" alt="WebRTC"/>
-</p>
+```powershell
+$env:FLUTTER_ROOT = "$env:LOCALAPPDATA\Programs\MirrorMeshFlutter\flutter"
+$env:JAVA_HOME = 'C:\path\to\your\jdk'
+$env:ANDROID_SDK_ROOT = "$PWD\.toolchains\android-sdk"
 ```
 
-**Caution:** user-provided badges for Java/C#/WebView/PowerShell were examples, not actual implementation choices. Do not claim those technologies in project badges unless used.
+For a new machine, obtain command-line tools from the [official Android download page](https://developer.android.com/studio),
+place them under `<SDK>/cmdline-tools/latest`, then install:
 
-## Per-package release metadata
+```powershell
+& "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin\sdkmanager.bat" `
+  "--sdk_root=$env:ANDROID_SDK_ROOT" `
+  'platform-tools' 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+rustup target add aarch64-linux-android
+```
 
-After a platform's build, install, privacy, security, and hardware gates pass, stage its package, package-level CycloneDX or SPDX JSON SBOM, and a complete UTF-8 THIRD-PARTY-NOTICES.txt in one directory. Copy docs/release-manifest.template.json and fill it with the exact source commit, track ID, hosted runner image version, SDK/tool versions, successful build command, and reproducibility status. Remove SDK entries that do not apply to that platform. Do not use latest, guessed values, or a source-only SBOM.
+Review the SDK license prompts during installation. No SDK, private keys or build cache
+belongs in Git. [AGP compatibility](https://developer.android.com/build/releases/agp-9-4-0-release-notes)
+documents the supported Gradle/JDK/NDK versions.
 
-Generate deterministic package checksums and the release manifest with:
+## Windows portable release
 
-    python scripts/create_release_metadata.py --artifacts dist/android-tv --context dist/android-tv-context.json --output dist/android-tv-metadata
+```powershell
+.\scripts\build-windows.ps1
+```
 
-The output directory must be outside the staged package directory. The script rejects template values, latest/current labels, missing or empty artifacts, absent SBOM/notices, and unrecognized SBOM JSON format. It lists SHA-256 and byte size for every staged file in release-manifest.json and writes a matching SHA256SUMS. It does not create or validate the legal completeness of notices, sign packages, verify reproducible builds, or establish device support. No release package is currently eligible for this step.
+The script enforces the Flutter lockfile, builds Rust plus the native Flutter runner,
+and builds/packages the local AirPlay companion by default. First run
+`scripts/setup-airplay-toolchain.ps1`; see [AirPlay prerequisites and lock](airplay.md).
+`-WithoutAirPlay` omits that companion for a developer-only native MirrorMesh build.
+The bundle includes the EXE, DLLs, Flutter assets and available Visual C++ runtime DLLs:
 
-The checked-in Rust and Flutter license-text previews are compared against their locked dependency graphs in CI and retained as review artifacts. The Flutter preview includes 14 runtime packages and the Flutter SDK license text. A release owner must combine these previews with any additional dependencies actually packaged by each platform toolchain and review the complete package notice; neither preview alone is suitable for distribution.
+- `releases/windows-x64/MirrorMesh.exe`
+- `releases/windows-x64/SHA256SUMS.txt`
+- `releases/MirrorMesh-windows-x64.zip`
+
+Override the SDK path with `-FlutterRoot C:\path\to\flutter`. If no installed Visual C++
+runtime redistributable files are found, pass `-VcRuntimeDirectory` or install Microsoft's
+VC++ x64 redistributable on the destination PC. The EXE needs its full bundle. Authenticode
+signing and an installer/MSIX are separate release operations requiring your certificate.
+
+Direct build/debug commands:
+
+```powershell
+Set-Location apps\mirrormesh_flutter
+& "$env:FLUTTER_ROOT\bin\flutter.bat" build windows --release
+& "$env:FLUTTER_ROOT\bin\flutter.bat" run -d windows
+```
+
+## Android phone and TV
+
+```powershell
+# Installable, locally debug-signed previews; no test suite is executed.
+.\scripts\build-android.ps1 -Configuration debug
+
+# Optimized release APKs, unsigned unless signing variables are supplied.
+.\scripts\build-android.ps1 -Configuration release
+```
+
+The default ABI is ARM64. `-Abi x86_64` builds that ABI separately. Outputs go to
+`releases/android-phone` and `releases/android-tv`; each APK has a `.sha256` sidecar.
+Both flavors use the same JNI library, identity/pairing engine and native decoder.
+The phone APK includes a receiver and a user-consented MediaProjection sender. Android/TV
+sender and new Windows receiver behavior still require device validation.
+
+To sign distribution builds, set these environment variables privately before the release
+command: `MM_ANDROID_KEYSTORE` (absolute path), `MM_ANDROID_STORE_PASSWORD`,
+`MM_ANDROID_KEY_ALIAS`, and `MM_ANDROID_KEY_PASSWORD`. Keep the same key for updates.
+Do not commit passwords or keystores. The build deliberately leaves release APKs unsigned
+when no key is provided. Google Play enrollment, upload signing and store review are not
+performed by the build script.
+
+Direct Gradle commands (from `apps/android-tv`):
+
+```powershell
+.\gradlew.bat :app:assemblePhoneRelease :app:assembleTvRelease --console=plain --no-daemon
+# AAB generation for an owner-signed store submission:
+.\gradlew.bat :app:bundlePhoneRelease :app:bundleTvRelease --console=plain --no-daemon
+```
+
+The `preBuild` dependency compiles `mm-ffi` with the NDK and stages `libmm_ffi.so` automatically.
+Do not manually copy an old JNI library into an APK.
+
+## Optional local static checks
+
+```powershell
+cargo fmt --all -- --check
+cargo check --workspace --lib --locked
+cargo clippy --workspace --lib --locked -- -D warnings
+# From apps/mirrormesh_flutter:
+flutter analyze
+```
+
+Compilation cannot establish that real devices render media, meet latency targets or recover
+correctly on a specific network. See [verification status](verification.md).
+
+## iOS source build (macOS required)
+
+The new iOS paths have not been compiled on this Windows host. Install Xcode, CocoaPods
+(including the xcodeproj Ruby gem), Flutter and the Rust `aarch64-apple-ios` target. From
+`apps/mirrormesh_flutter`, run `flutter pub get --enforce-lockfile`, then:
+
+```sh
+cd ios
+MM_IOS_APP_GROUP=group.your.provisioned.group \
+MM_IOS_BROADCAST_ID=your.unique.app.broadcast ruby scripts/configure-broadcast.rb
+cd ..
+flutter build ios --release
+```
+
+In Xcode select your development team, use an extension identifier prefixed with the
+Runner app identifier, and provision the same App Group for Runner and MirrorMeshBroadcast.
+The configurator creates/embeds the ReplayKit Upload Extension and configures entitlements.
+It changes the local Xcode project; review and commit those generated project settings only
+on your development branch. Credentials and provisioning profiles stay outside Git. Full-device sharing
+appears only when the extension is present; app-only ReplayKit capture remains available.
+Check `docs/connections.md` for directions and verification boundaries.
+
+## Linux x64 from Windows / Docker Desktop
+
+Docker Desktop must be running with its Linux engine (WSL2 backend). No extra Ubuntu WSL
+distribution is needed. The wrapper builds the pinned Ubuntu 24.04/Flutter 3.47.7/Rust 1.99.1
+toolchain, snapshots source roots, then builds in a separate container filesystem:
+
+```powershell
+.\scripts\build-linux-docker.ps1
+# Reuse an already built toolchain image:
+.\scripts\build-linux-docker.ps1 -SkipToolchainBuild
+```
+
+Native Linux build, after installing that same Flutter/Rust toolchain plus clang, CMake,
+Ninja, pkg-config, GTK3, OpenSSL and Secret Service development libraries:
+
+```sh
+sh scripts/build-linux.sh
+```
+
+Outputs: `releases/MirrorMesh-0.4.1-linux-x64.tar.gz`, its `.sha256` sidecar, and the complete
+`releases/linux-x64/MirrorMesh/` folder. Extract the archive into a new directory and run:
+
+```sh
+tar -xzf MirrorMesh-0.4.1-linux-x64.tar.gz
+./MirrorMesh/MirrorMesh
+```
+
+Keep `lib/` and `data/` next to the executable. This Ubuntu 24.04 x86_64 build needs a compatible
+desktop (glibc 2.39 or newer), GTK3, graphics/audio system libraries and a session D-Bus with an
+unlocked Secret Service keyring. Headless Docker supplies compilation evidence only; run the
+app as your desktop user. Linux Wayland/PipeWire portal capture and individual GPU codecs
+still need desktop/device verification. App sharing remains video-only in this release.
+
+## macOS source build (a Mac is required)
+
+There is no macOS binary produced on this Windows/WSL host. On a Mac with the full Xcode
+toolchain supported by Flutter 3.47.7 and Rust 1.99.1, use the release source, then:
+
+```sh
+sh scripts/build-macos.sh
+```
+
+The source targets macOS 13+ and both Apple Silicon / Intel. The script builds the Rust static
+bridge for both architectures, retains runtime FFI exports, and packages `MirrorMesh.app`
+as an **unsigned preview ZIP**. SwiftPM is used where supported; CocoaPods is required only
+when Flutter generates a fallback Podfile. Do not use `flutter build ios` for the Mac desktop app.
+
+For actual use/distribution, open `apps/mirrormesh_flutter/macos/Runner.xcworkspace` on the Mac,
+select your team and a unique bundle identifier, and sign with the network entitlements intact.
+Data Protection Keychain access requires an appropriately signed/entitled app; unsigned
+compilation alone does not prove secure identity storage. Allow local-network access and
+explicit screen-recording permission when macOS asks. Signing/notarization and Keychain,
+capture, universal linking and actual media behavior remain unverified without that Mac.
+
+## Miracast diagnosis
+
+In Windows MirrorMesh choose **Android wireless display options → Wireless display / Miracast**.
+The popup reads Windows receiver status; the separate Wireless Display window owns approval,
+video and Stop. Use **Projection settings** to inspect Windows' settings yourself. If Android
+sees the PC but fails to connect, discovery works; obtain the exact Windows receiver error.
+
+```powershell
+.\scripts\diagnose-miracast.ps1
+```
+
+This read-only report collects capability/listening state without private IPs or driver changes.
+The current host reported Wi-Fi support but mixed display-driver support; no actual Miracast
+handshake repair is verified. Use the MirrorMesh Android app for the owner-confirmed path.
+No Google Cast provider is installed: no compatible permanently free Windows provider has
+been verified, and the owner declined paid licenses/trials.
+
+## Personal release procedure
+
+1. Use a fresh checkout of `main` or extract the committed source ZIP. Install the pinned
+   tools above; retain Cargo/Flutter/Gradle lock/pin files. Set SDK variables to your own locations.
+2. Build only the platform you need. Debug Android APKs are sufficient for personal installation.
+   For signed optimized Android builds, provide your private signing environment; never commit it.
+3. Keep the complete product folder. On another computer, extract to a new folder rather
+   than mixing DLLs/assets from old versions. Do not package a working receiver's private state.
+4. Verify archive/APK SHA-256 sidecars and payload `SHA256SUMS.txt` where supplied.
+5. Install/run locally, approve the required network/capture prompts, and verify a changing
+   image on the receiver. Builds and sender counters are not device/media acceptance.
+6. Preserve the same Android signing key for updates. Windows certificate signing, Apple
+   provisioning/notarization and store submissions are optional separate owner operations.
+
+Build products are ignored locally under `releases/`; source and public checksum metadata
+belong in Git. Windows and Android signing credentials are external private inputs.
+AirPlay runtime notices/licenses/matching source materials belong in the complete Windows ZIP.
+
+### Minimal source archive
+
+After committing the desired source in a Git checkout:
+
+```powershell
+.\scripts\package-source.ps1
+```
+
+This packages the committed tree using `.gitattributes` export exclusions, checks common
+private-key/token patterns, and writes `releases/MirrorMesh-0.4.1-source.zip` plus `.sha256`.
+It excludes generated release folders, SDKs/caches, personal state and maintenance session notes.
+It does not include untracked edits or prove that every possible secret format is absent.
+Native builds work without `.git`; the Windows Docker wrapper also supports that source ZIP.
+
+### Local debug commands
+
+```powershell
+Set-Location apps\mirrormesh_flutter
+flutter run -d windows
+# On a Linux desktop: flutter run -d linux
+# On a Mac with Xcode: flutter run -d macos
+```
+
+For Android, build/install the debug flavor and use the SDK's `adb logcat` for relevant
+app messages. Replace private device names, endpoints, paths and invitations before sharing
+output. The app's Copy diagnostics action provides counters/errors without an invitation.
+Use [the README FAQ](../README.md#faq--connection-and-playback) for known symptoms and fixes.

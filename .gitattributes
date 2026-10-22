@@ -1,0 +1,9 @@
+docs/THIRD-PARTY-NOTICES-rust.txt whitespace=-blank-at-eol
+# Unified patch context must preserve the pinned upstream source's whitespace.
+scripts/airplay/uxplay-mirrormesh.patch whitespace=-blank-at-eol,-space-before-tab
+*.sh text eol=lf
+*.Dockerfile text eol=lf
+# Personal source archives contain build inputs and public guides, not local releases.
+/releases export-ignore
+/session-context.md export-ignore
+/AGENTS.md export-ignore

@@ -1,0 +1,12 @@
+[package]
+name = "mm-adapter-tls"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+mm-domain.workspace = true
+mm-ports.workspace = true
+rustls.workspace = true
+sha2.workspace = true
+

@@ -1,0 +1,572 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
+
+import 'webrtc_engine.dart';
+import 'windows_pairing_bootstrap.dart';
+
+const _maxBufferedIceCandidates = 128;
+const _maxBufferedIceBytes = 64 * 1024;
+
+enum WindowsSenderSessionState {
+  idle,
+  negotiating,
+  transportConnected,
+  streaming,
+  reconnecting,
+  stopped,
+  revoked,
+  failed,
+}
+
+/// Coordinates a real libwebrtc offer with the Windows authenticated WSS bridge.
+///
+/// The user selects a desktop source before this controller opens native capture;
+/// the selected native video track is attached before the SDP offer is created.
+final class WindowsSenderSessionController {
+  WindowsSenderSessionController({
+    required this.pairing,
+    WebRtcPeerConnectionFactory? factory,
+    this.statsPollInterval = const Duration(seconds: 1),
+    this.firstEncodedFrameTimeout = const Duration(seconds: 15),
+    this.reconnectTimeout = const Duration(seconds: 10),
+  }) : _engineFactory = factory ?? const FlutterWebRtcPeerConnectionFactory(),
+       assert(statsPollInterval.inMicroseconds > 0),
+       assert(firstEncodedFrameTimeout.inMicroseconds > 0),
+       assert(reconnectTimeout.inMicroseconds > 0);
+
+  final WindowsPairingBootstrap pairing;
+  final WebRtcPeerConnectionFactory _engineFactory;
+  final Duration statsPollInterval;
+  final Duration firstEncodedFrameTimeout;
+  final Duration reconnectTimeout;
+  final StreamController<WindowsSenderSessionState> _states =
+      StreamController<WindowsSenderSessionState>.broadcast();
+  final StreamController<WebRtcOutboundVideoStats> _videoStats =
+      StreamController<WebRtcOutboundVideoStats>.broadcast();
+  final StreamController<WebRtcEngineEvent> _rtcEvents =
+      StreamController<WebRtcEngineEvent>.broadcast();
+  final List<WebRtcIceCandidate> _pendingLocalIce = [];
+  final List<WebRtcIceCandidate> _pendingRemoteIce = [];
+
+  WindowsSenderSessionState _state = WindowsSenderSessionState.idle;
+  FlutterWebRtcEngine? _engine;
+  StreamSubscription<WebRtcEngineEvent>? _engineEvents;
+  Timer? _pollTimer;
+  Timer? _statsTimer;
+  Timer? _firstEncodedFrameTimer;
+  Timer? _reconnectTimer;
+  Timer? _negotiationTimer;
+  Completer<void>? _localIceDrainComplete;
+  Future<void>? _stopOperation;
+  Future<void>? _failureOperation;
+  String? _sessionId;
+  int? _requestId;
+  int _pendingLocalIceBytes = 0;
+  int _pendingRemoteIceBytes = 0;
+  bool _remoteDescriptionSet = false;
+  bool _polling = false;
+  bool _statsPolling = false;
+  bool _sessionStartInFlight = false;
+  bool _sessionStartQueued = false;
+  bool _transportReady = false;
+  bool _transportWasConnected = false;
+  bool _hasEncodedVideo = false;
+  bool _starting = false;
+  bool _stopping = false;
+  bool _closed = false;
+  Object? _lastError;
+
+  WindowsSenderSessionState get state => _state;
+  Object? get lastError => _lastError;
+  Stream<WindowsSenderSessionState> get states => _states.stream;
+  Stream<WebRtcOutboundVideoStats> get videoStats => _videoStats.stream;
+  Stream<WebRtcEngineEvent> get rtcEvents => _rtcEvents.stream;
+
+  Future<List<WebRtcDesktopCaptureSource>> availableCaptureSources() {
+    if (_closed || _starting || _engine != null) {
+      throw StateError(
+        'Capture sources cannot be listed while a session is active.',
+      );
+    }
+    return _engineFactory.listDesktopCaptureSources();
+  }
+
+  Future<String> start({
+    required int requestId,
+    required String sourceId,
+  }) async {
+    if (_closed ||
+        _starting ||
+        _stopping ||
+        _sessionId != null ||
+        _engine != null) {
+      throw StateError('Windows sender session is already active or closed.');
+    }
+    _starting = true;
+    _requestId = requestId;
+    _sessionStartInFlight = false;
+    _sessionStartQueued = false;
+    _transportReady = false;
+    _transportWasConnected = false;
+    _hasEncodedVideo = false;
+    _firstEncodedFrameTimer?.cancel();
+    _firstEncodedFrameTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _stopOperation = null;
+    _failureOperation = null;
+    _lastError = null;
+    _setState(WindowsSenderSessionState.negotiating);
+    final engine = FlutterWebRtcEngine(factory: _engineFactory);
+    _engine = engine;
+
+    try {
+      final pairingStatus = await pairing.pollSenderPairing(requestId);
+      if (pairingStatus.state != WindowsSenderPairingState.approved) {
+        throw StateError('The Android TV has not approved this pairing.');
+      }
+      await engine.initialize();
+      await engine.startDesktopCapture(sourceId: sourceId);
+      _engineEvents = engine.events.listen(
+        _onRtcEvent,
+        onError: (Object error, StackTrace stackTrace) {
+          unawaited(_fail(error));
+        },
+      );
+      final offer = await engine.createOffer();
+      await engine.setLocalDescription(
+        type: WebRtcDescriptionType.offer,
+        sdp: offer,
+      );
+      _sessionId = await pairing.beginSenderSession(
+        requestId: requestId,
+        sdp: offer,
+      );
+      await _drainLocalIce();
+      _negotiationTimer = Timer(const Duration(seconds: 30), () {
+        if (!_transportWasConnected && !_closed) {
+          unawaited(
+            _fail(
+              StateError(
+                'The receiver did not establish video within 30 seconds. Check the LAN and pair again.',
+              ),
+            ),
+          );
+        }
+      });
+      _pollTimer = Timer.periodic(
+        const Duration(milliseconds: 100),
+        (_) => unawaited(_pollSessionEvent()),
+      );
+      _statsTimer = Timer.periodic(
+        statsPollInterval,
+        (_) => unawaited(_pollOutboundVideoStats()),
+      );
+      if (_transportReady) {
+        _startFirstEncodedFrameWait();
+        if (_hasEncodedVideo) await _sendSessionStart();
+      }
+      return _sessionId!;
+    } catch (error) {
+      await _fail(error);
+      rethrow;
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> stop() {
+    if (_closed) return Future<void>.value();
+    final failure = _failureOperation;
+    if (failure != null) return failure;
+    final stopping = _stopOperation;
+    if (stopping != null) return stopping;
+    _stopping = true;
+    final operation = _stopAndCleanup();
+    final completed = operation.whenComplete(() => _stopping = false);
+    _stopOperation = completed;
+    return completed;
+  }
+
+  Future<void> _stopAndCleanup() async {
+    final requestId = _requestId;
+    final sessionActive = _sessionId != null;
+    try {
+      await _closePeer();
+    } catch (error) {
+      _lastError = error;
+    }
+    if (requestId != null && sessionActive) {
+      try {
+        await pairing.stopSenderSession(
+          requestId: requestId,
+          reason: 'user-disconnected',
+        );
+      } catch (error) {
+        // Local media must still stop if the control channel is already gone.
+        _lastError = error;
+      }
+    }
+    try {
+      await _closePairingChannel();
+    } catch (error) {
+      _lastError ??= error;
+    }
+    _setState(WindowsSenderSessionState.stopped);
+  }
+
+  Future<void> dispose() async {
+    if (_closed) return;
+    await stop();
+    _closed = true;
+    await _states.close();
+    await _videoStats.close();
+    await _rtcEvents.close();
+  }
+
+  Future<void> _pollOutboundVideoStats() async {
+    final engine = _engine;
+    if (_statsPolling || _closed || engine == null) return;
+    _statsPolling = true;
+    try {
+      final stats = await engine.getOutboundVideoStats();
+      if (stats != null &&
+          identical(_engine, engine) &&
+          !_videoStats.isClosed) {
+        _videoStats.add(stats);
+        if (stats.hasEncodedVideo) _markVideoEncoded();
+      }
+    } on Object {
+      // Stats are diagnostic only; a native stats failure must not stop video.
+    } finally {
+      _statsPolling = false;
+    }
+  }
+
+  void _onRtcEvent(WebRtcEngineEvent event) {
+    if (_closed) return;
+    _rtcEvents.add(event);
+    if (event is WebRtcLocalIceCandidateEvent) {
+      _queueLocalIce(event.candidate);
+    } else if (event is WebRtcConnectionStateEvent) {
+      switch (event.state) {
+        case WebRtcConnectionState.connected:
+          _negotiationTimer?.cancel();
+          _negotiationTimer = null;
+          _reconnectTimer?.cancel();
+          _reconnectTimer = null;
+          _transportReady = true;
+          _transportWasConnected = true;
+          _setState(
+            _hasEncodedVideo
+                ? WindowsSenderSessionState.streaming
+                : WindowsSenderSessionState.transportConnected,
+          );
+          if (_hasEncodedVideo) {
+            unawaited(_sendSessionStart());
+          } else {
+            _startFirstEncodedFrameWait();
+          }
+        case WebRtcConnectionState.failed:
+        case WebRtcConnectionState.closed:
+          unawaited(_fail(StateError('The WebRTC peer connection failed.')));
+        case WebRtcConnectionState.disconnected:
+          if (_transportWasConnected && _transportReady) {
+            _transportReady = false;
+            _firstEncodedFrameTimer?.cancel();
+            _firstEncodedFrameTimer = null;
+            _setState(WindowsSenderSessionState.reconnecting);
+            _startReconnectWait();
+          }
+        case WebRtcConnectionState.newConnection:
+        case WebRtcConnectionState.connecting:
+          break;
+      }
+    }
+  }
+
+  Future<void> _sendSessionStart() async {
+    if (!_transportReady ||
+        !_hasEncodedVideo ||
+        _closed ||
+        _sessionStartQueued ||
+        _sessionStartInFlight ||
+        _sessionId == null) {
+      return;
+    }
+    _sessionStartInFlight = true;
+    try {
+      await _drainLocalIce();
+      if (_closed ||
+          !_transportReady ||
+          _sessionId == null ||
+          _sessionStartQueued) {
+        return;
+      }
+      await pairing.startSenderSession(
+        requestId: _requestId!,
+        sourceId: 'desktop-capture',
+      );
+      _sessionStartQueued = true;
+    } catch (error) {
+      await _fail(error);
+    } finally {
+      _sessionStartInFlight = false;
+    }
+  }
+
+  void _startFirstEncodedFrameWait() {
+    if (!_transportReady ||
+        _sessionId == null ||
+        _hasEncodedVideo ||
+        _firstEncodedFrameTimer != null) {
+      return;
+    }
+    _firstEncodedFrameTimer = Timer(firstEncodedFrameTimeout, () {
+      _firstEncodedFrameTimer = null;
+      if (_transportReady && !_hasEncodedVideo) {
+        unawaited(
+          _fail(
+            StateError(
+              'No outbound video frame was encoded before the media startup timeout.',
+            ),
+            stopReason: 'media-startup-failed',
+          ),
+        );
+      }
+    });
+    unawaited(_pollOutboundVideoStats());
+  }
+
+  void _markVideoEncoded() {
+    if (_hasEncodedVideo) return;
+    _hasEncodedVideo = true;
+    _firstEncodedFrameTimer?.cancel();
+    _firstEncodedFrameTimer = null;
+    if (_transportReady) {
+      _setState(WindowsSenderSessionState.streaming);
+      unawaited(_sendSessionStart());
+    }
+  }
+
+  void _startReconnectWait() {
+    if (_reconnectTimer != null) return;
+    _reconnectTimer = Timer(reconnectTimeout, () {
+      _reconnectTimer = null;
+      if (!_stopping &&
+          _transportWasConnected &&
+          !_transportReady &&
+          _state == WindowsSenderSessionState.reconnecting) {
+        unawaited(
+          _fail(
+            StateError(
+              'The WebRTC peer connection did not recover before the reconnect timeout.',
+            ),
+            stopReason: 'transport-failed',
+          ),
+        );
+      }
+    });
+  }
+
+  void _queueLocalIce(WebRtcIceCandidate candidate) {
+    if (candidate.sdpMid == null || candidate.sdpMLineIndex == null) {
+      unawaited(
+        _fail(StateError('Local ICE candidate is missing its media section.')),
+      );
+      return;
+    }
+    final bytes = utf8.encode(candidate.candidate).length;
+    if (_pendingLocalIce.length >= _maxBufferedIceCandidates ||
+        _pendingLocalIceBytes + bytes > _maxBufferedIceBytes) {
+      unawaited(_fail(StateError('The local ICE candidate buffer is full.')));
+      return;
+    }
+    _pendingLocalIce.add(candidate);
+    _pendingLocalIceBytes += bytes;
+    unawaited(_drainLocalIce());
+  }
+
+  Future<void> _drainLocalIce() {
+    if (_sessionId == null || _closed) return Future<void>.value();
+    final activeDrain = _localIceDrainComplete;
+    if (activeDrain != null) return activeDrain.future;
+    final completion = Completer<void>();
+    _localIceDrainComplete = completion;
+    unawaited(_runLocalIceDrain(completion));
+    return completion.future;
+  }
+
+  Future<void> _runLocalIceDrain(Completer<void> completion) async {
+    try {
+      while (_pendingLocalIce.isNotEmpty && !_closed) {
+        final candidate = _pendingLocalIce.removeAt(0);
+        _pendingLocalIceBytes -= utf8.encode(candidate.candidate).length;
+        await pairing.sendSenderSessionIce(
+          requestId: _requestId!,
+          candidate: candidate.candidate,
+          mediaId: candidate.sdpMid!,
+          mediaLineIndex: candidate.sdpMLineIndex!,
+        );
+      }
+    } catch (error) {
+      await _fail(error);
+    } finally {
+      if (identical(_localIceDrainComplete, completion)) {
+        _localIceDrainComplete = null;
+      }
+      if (!completion.isCompleted) completion.complete();
+    }
+  }
+
+  Future<void> _pollSessionEvent() async {
+    if (_polling || _closed || _sessionId == null) return;
+    _polling = true;
+    try {
+      final event = await pairing.pollSenderSessionEvent(_requestId!);
+      switch (event.kind) {
+        case WindowsSenderSessionEventKind.pending:
+          break;
+        case WindowsSenderSessionEventKind.answer:
+          if (event.sessionId != _sessionId) {
+            throw StateError('The TV answer belongs to a different session.');
+          }
+          await _engine!.setRemoteDescription(
+            type: WebRtcDescriptionType.answer,
+            sdp: event.sdp!,
+          );
+          _remoteDescriptionSet = true;
+          await _drainRemoteIce();
+        case WindowsSenderSessionEventKind.ice:
+          if (event.sessionId != _sessionId) {
+            throw StateError(
+              'The TV ICE candidate belongs to a different session.',
+            );
+          }
+          final candidate = WebRtcIceCandidate(
+            candidate: event.candidate!,
+            sdpMid: event.mediaId,
+            sdpMLineIndex: event.mediaLineIndex,
+          );
+          if (_remoteDescriptionSet) {
+            await _engine!.addRemoteIceCandidate(candidate);
+          } else {
+            _queueRemoteIce(candidate);
+          }
+        case WindowsSenderSessionEventKind.stopped:
+          if (event.sessionId != _sessionId) {
+            throw StateError('The TV stop belongs to a different session.');
+          }
+          await _closePeer();
+          await _closePairingChannel();
+          _setState(WindowsSenderSessionState.stopped);
+        case WindowsSenderSessionEventKind.revoked:
+          await _closePeer();
+          await _closePairingChannel();
+          _setState(WindowsSenderSessionState.revoked);
+      }
+    } catch (error) {
+      await _fail(error);
+    } finally {
+      _polling = false;
+    }
+  }
+
+  void _queueRemoteIce(WebRtcIceCandidate candidate) {
+    final bytes = utf8.encode(candidate.candidate).length;
+    if (_pendingRemoteIce.length >= _maxBufferedIceCandidates ||
+        _pendingRemoteIceBytes + bytes > _maxBufferedIceBytes) {
+      throw StateError('The remote ICE candidate buffer is full.');
+    }
+    _pendingRemoteIce.add(candidate);
+    _pendingRemoteIceBytes += bytes;
+  }
+
+  Future<void> _drainRemoteIce() async {
+    while (_pendingRemoteIce.isNotEmpty && !_closed) {
+      final candidate = _pendingRemoteIce.removeAt(0);
+      _pendingRemoteIceBytes -= utf8.encode(candidate.candidate).length;
+      await _engine!.addRemoteIceCandidate(candidate);
+    }
+  }
+
+  Future<void> _fail(Object error, {String stopReason = 'sender-failed'}) {
+    if (_closed || _stopping || _state == WindowsSenderSessionState.failed) {
+      return Future<void>.value();
+    }
+    return _failureOperation ??= _failAndCleanup(error, stopReason);
+  }
+
+  Future<void> _failAndCleanup(Object error, String stopReason) async {
+    final requestId = _requestId;
+    final sessionActive = _sessionId != null;
+    _lastError = error;
+    try {
+      await _closePeer();
+    } catch (_) {
+      // Continue by sending stop/cancel even if local media teardown failed.
+    }
+    if (requestId != null && sessionActive) {
+      try {
+        await pairing.stopSenderSession(
+          requestId: requestId,
+          reason: stopReason,
+        );
+      } catch (_) {
+        // The peer or approved channel may already be unavailable.
+      }
+    }
+    try {
+      await _closePairingChannel();
+    } catch (_) {
+      // Preserve the original session error while completing local cleanup.
+    }
+    _setState(WindowsSenderSessionState.failed);
+  }
+
+  Future<void> _closePairingChannel() async {
+    final requestId = _requestId;
+    _requestId = null;
+    if (requestId == null) return;
+    try {
+      await pairing.cancelSenderPairing(requestId);
+    } on PlatformException {
+      // A remote revoke or closed channel has already completed this cleanup.
+    }
+  }
+
+  Future<void> _closePeer() async {
+    _negotiationTimer?.cancel();
+    _negotiationTimer = null;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    _firstEncodedFrameTimer?.cancel();
+    _firstEncodedFrameTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    await _engineEvents?.cancel();
+    _engineEvents = null;
+    final engine = _engine;
+    _engine = null;
+    _sessionId = null;
+    _pendingLocalIce.clear();
+    _pendingRemoteIce.clear();
+    _pendingLocalIceBytes = 0;
+    _pendingRemoteIceBytes = 0;
+    _remoteDescriptionSet = false;
+    _transportReady = false;
+    _transportWasConnected = false;
+    _hasEncodedVideo = false;
+    if (engine != null) await engine.close();
+  }
+
+  void _setState(WindowsSenderSessionState state) {
+    if (_state == state || _states.isClosed) return;
+    _state = state;
+    _states.add(state);
+  }
+}

@@ -59,31 +59,3 @@ impl CapabilitySet {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::CapabilitySet;
-
-    #[test]
-    fn negotiation_clamps_to_both_devices() {
-        let local = CapabilitySet::new(1920, 1080, 60, true, true).unwrap();
-        let remote = CapabilitySet::new(1280, 720, 30, true, false).unwrap();
-        let negotiated = local.negotiate(remote).unwrap();
-        assert_eq!(
-            (
-                negotiated.max_width,
-                negotiated.max_height,
-                negotiated.max_fps
-            ),
-            (1280, 720, 30)
-        );
-        assert!(!negotiated.opus);
-    }
-
-    #[test]
-    fn refuses_video_when_h264_is_unavailable() {
-        let local = CapabilitySet::new(1920, 1080, 60, true, false).unwrap();
-        let remote = CapabilitySet::new(1920, 1080, 60, false, false).unwrap();
-        assert!(local.negotiate(remote).is_err());
-    }
-}

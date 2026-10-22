@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>RTCAppGroupIdentifier</key><string>$(MIRRORMESH_APP_GROUP)</string>
+	<key>RTCScreenSharingExtension</key><string>$(MIRRORMESH_BROADCAST_ID)</string>
+	<key>CFBundleURLTypes</key>
+	<array><dict><key>CFBundleURLName</key><string>MirrorMesh invitation</string><key>CFBundleURLSchemes</key><array><string>mirrormesh</string></array></dict></array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to your chosen MirrorMesh devices on this network for approved screen sharing.</string>
+	<key>NSBonjourServices</key>
+	<array><string>_mirrormesh._tcp</string></array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

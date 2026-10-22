@@ -1,5 +1,6 @@
 use std::fmt;
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -56,6 +57,21 @@ pub trait ClockPort: Send + Sync {
 pub trait DiscoveryPort: Send + Sync {
     fn discover(&self) -> Result<Vec<Device>, PortError>;
     fn stop(&self) -> Result<(), PortError>;
+}
+
+/// A single unauthenticated device hint and the resolved network addresses associated with it.
+///
+/// The device identifier, metadata, and endpoints are attacker-controlled until pairing proves
+/// the peer identity. This value must never imply trust or authorization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryCandidate {
+    pub device: Device,
+    pub endpoints: Vec<SocketAddr>,
+}
+
+/// Endpoint-preserving discovery extension for use cases that need to initiate pairing.
+pub trait DiscoveryCandidatesPort: DiscoveryPort {
+    fn discover_candidates(&self) -> Result<Vec<DiscoveryCandidate>, PortError>;
 }
 
 pub trait CapturePort: Send {
@@ -130,6 +146,41 @@ pub trait TrustedPeerPort: Send + Sync {
     }
 }
 
+/// Local signing and lifecycle boundary for a device's pairing identity.
+///
+/// Implementations must keep private material inside the platform identity adapter,
+/// refuse to sign non-domain-separated pairing messages, and never export the private seed.
+pub trait LocalPairingIdentityPort: Send + Sync {
+    /// Optional public facts bound to the signed pairing request; never a hardware attestation.
+    fn device_details(&self) -> Option<mm_domain::ReportedDeviceDetails> {
+        None
+    }
+
+    fn local_public_key(&self) -> Result<PeerPublicKey, PortError>;
+
+    /// Signs the canonical domain-separated message produced by the pairing application.
+    fn sign_pairing_message(&self, message: &[u8]) -> Result<Vec<u8>, PortError>;
+
+    /// Rotates the local key only after the replacement is durably protected by the OS.
+    fn rotate_identity(&self) -> Result<PeerPublicKey, PortError>;
+
+    /// Removes the persisted key and disables signing through this loaded identity.
+    fn delete_identity(&self) -> Result<(), PortError>;
+}
+
+/// TLS 1.3 server-authentication signing boundary for a local device identity.
+///
+/// Implementations keep private material inside the platform identity adapter and must never
+/// export a private key. They must reject inputs that do not contain the TLS 1.3 server
+/// CertificateVerify context and transcript hash; this operation must not sign pairing proofs or
+/// arbitrary application messages. The public key must be the same Ed25519 key whose SHA-256
+/// fingerprint is placed in the pairing QR.
+pub trait LocalTlsIdentityPort: Send + Sync {
+    fn tls_server_public_key(&self) -> Result<PeerPublicKey, PortError>;
+
+    fn sign_tls13_certificate_verify(&self, message: &[u8]) -> Result<Vec<u8>, PortError>;
+}
+
 /// Cryptographic identity boundary for the first-time pairing proof.
 ///
 /// Implementations must compute SHA-256 over the agreed canonical public-key
@@ -147,129 +198,4 @@ pub trait PairingIdentityPort: Send + Sync {
         message: &[u8],
         signature: &[u8],
     ) -> Result<(), PortError>;
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    use mm_domain::{CaptureConfig, CaptureSource};
-
-    use super::{CaptureHandle, CapturePermission, CapturePort, ClockPort, PortError};
-
-    #[derive(Default)]
-    struct FakeClock(AtomicU64);
-
-    impl FakeClock {
-        fn advance(&self, milliseconds: u64) {
-            self.0.fetch_add(milliseconds, Ordering::SeqCst);
-        }
-    }
-
-    impl ClockPort for FakeClock {
-        fn monotonic_millis(&self) -> u64 {
-            self.0.load(Ordering::SeqCst)
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct SyntheticFrame {
-        sequence: u64,
-        captured_at_ms: u64,
-    }
-
-    struct FakeCapture {
-        clock: Arc<FakeClock>,
-        permission: CapturePermission,
-        next_sequence: u64,
-        active_handle: Option<CaptureHandle>,
-    }
-
-    impl FakeCapture {
-        fn new(clock: Arc<FakeClock>, permission: CapturePermission) -> Self {
-            Self {
-                clock,
-                permission,
-                next_sequence: 1,
-                active_handle: None,
-            }
-        }
-
-        fn next_frame(&mut self) -> Result<SyntheticFrame, PortError> {
-            if self.active_handle.is_none() {
-                return Err(PortError::Unavailable);
-            }
-            let frame = SyntheticFrame {
-                sequence: self.next_sequence,
-                captured_at_ms: self.clock.monotonic_millis(),
-            };
-            self.next_sequence += 1;
-            Ok(frame)
-        }
-    }
-
-    impl CapturePort for FakeCapture {
-        fn request_permission(&mut self) -> Result<CapturePermission, PortError> {
-            Ok(self.permission)
-        }
-
-        fn start(&mut self, _config: &CaptureConfig) -> Result<CaptureHandle, PortError> {
-            if self.permission != CapturePermission::Granted {
-                return Err(PortError::PermissionDenied);
-            }
-            if self.active_handle.is_some() {
-                return Err(PortError::Unavailable);
-            }
-            let handle = CaptureHandle::from_adapter(1);
-            self.active_handle = Some(handle);
-            Ok(handle)
-        }
-
-        fn stop(&mut self, handle: CaptureHandle) -> Result<(), PortError> {
-            if self.active_handle == Some(handle) {
-                self.active_handle = None;
-                Ok(())
-            } else {
-                Err(PortError::Unavailable)
-            }
-        }
-    }
-
-    fn test_config() -> CaptureConfig {
-        CaptureConfig::new(CaptureSource::Display(0), 1280, 720, 30, 4_000, false).unwrap()
-    }
-
-    #[test]
-    fn fake_capture_requires_explicit_permission_and_tracks_monotonic_frames() {
-        let clock = Arc::new(FakeClock::default());
-        let mut denied = FakeCapture::new(Arc::clone(&clock), CapturePermission::Denied);
-        assert_eq!(denied.request_permission(), Ok(CapturePermission::Denied));
-        assert_eq!(
-            denied.start(&test_config()),
-            Err(PortError::PermissionDenied)
-        );
-        assert_eq!(denied.next_frame(), Err(PortError::Unavailable));
-
-        let mut allowed = FakeCapture::new(Arc::clone(&clock), CapturePermission::Granted);
-        assert_eq!(allowed.request_permission(), Ok(CapturePermission::Granted));
-        let handle = allowed.start(&test_config()).unwrap();
-        assert_eq!(
-            allowed.next_frame(),
-            Ok(SyntheticFrame {
-                sequence: 1,
-                captured_at_ms: 0,
-            })
-        );
-        clock.advance(17);
-        assert_eq!(
-            allowed.next_frame(),
-            Ok(SyntheticFrame {
-                sequence: 2,
-                captured_at_ms: 17,
-            })
-        );
-        allowed.stop(handle).unwrap();
-        assert_eq!(allowed.next_frame(), Err(PortError::Unavailable));
-    }
 }

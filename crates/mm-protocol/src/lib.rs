@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::str;
 
-use mm_domain::{DeviceId, MessageId, SessionId};
-use serde::Deserialize;
+use mm_domain::{DeviceId, MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS, MessageId, SessionId};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 pub const MAX_ENVELOPE_BYTES: usize = 256 * 1024;
@@ -170,7 +170,7 @@ pub enum MessagePayload {
     AnnotationClear(AnnotationClear),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
     pub video: Vec<String>,
@@ -191,9 +191,25 @@ pub struct DeviceHello {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PairBegin {
+    pub receiver_id: String,
     pub nonce: String,
+    pub peer_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub device_details: Option<DeviceDetails>,
+    pub public_key: String,
     pub requested_grants: Vec<String>,
-    pub sender_ephemeral_key: String,
+    pub signature: String,
+}
+
+/// Public sender-reported facts. The application binds these to proof v2.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceDetails {
+    pub platform: String,
+    pub manufacturer: String,
+    pub model: String,
+    pub os_version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,13 +225,13 @@ pub struct PairReject {
     pub reason: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PairRevoke {
     pub peer_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionOffer {
     pub role: String,
@@ -223,14 +239,14 @@ pub struct SessionOffer {
     pub sdp: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionAnswer {
     pub sdp: String,
     pub selected_codec: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionIce {
     pub candidate: String,
@@ -238,13 +254,13 @@ pub struct SessionIce {
     pub mline_index: Option<u16>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionStart {
     pub source_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionStop {
     pub reason: String,
@@ -341,6 +357,63 @@ struct RawEnvelope<'a> {
     payload: &'a RawValue,
 }
 
+#[derive(Serialize)]
+struct PairBeginEnvelope<'a> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: PairBeginPayloadRef<'a>,
+}
+
+#[derive(Serialize)]
+struct PairBeginPayloadRef<'a> {
+    receiver_id: &'a str,
+    nonce: &'a str,
+    peer_id: &'a str,
+    display_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_details: Option<&'a DeviceDetails>,
+    public_key: &'a str,
+    requested_grants: &'a [String],
+    signature: &'a str,
+}
+
+#[derive(Serialize)]
+struct PairApproveEnvelope<'a> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: PairApprovePayloadRef<'a>,
+}
+
+#[derive(Serialize)]
+struct PairApprovePayloadRef<'a> {
+    accepted_grants: &'a [String],
+    peer_identity_proof: &'a str,
+}
+
+#[derive(Serialize)]
+struct PairRejectEnvelope<'a> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: PairRejectPayloadRef<'a>,
+}
+
+#[derive(Serialize)]
+struct PairRejectPayloadRef<'a> {
+    reason: &'a str,
+}
+
 /// Performs byte and UTF-8 checks before a JSON decoder allocates a payload tree.
 /// This is deliberately a preflight step, not a JSON parser.
 pub fn preflight_json(bytes: &[u8]) -> Result<&str, ProtocolError> {
@@ -359,6 +432,260 @@ pub fn validate_version(version: u16) -> Result<(), ProtocolError> {
     } else {
         Err(ProtocolError::UnsupportedVersion)
     }
+}
+
+/// Encodes one validated `pair.begin` payload in the common sessionless v1 envelope.
+/// The caller must provide a signature over the canonical application proof bytes.
+pub fn encode_pair_begin(
+    message_id: MessageId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &PairBegin,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    validate_pair_begin(payload)?;
+
+    let envelope = PairBeginEnvelope {
+        v: 1,
+        message_type: "pair.begin",
+        message_id: message_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload: PairBeginPayloadRef {
+            receiver_id: &payload.receiver_id,
+            nonce: &payload.nonce,
+            peer_id: &payload.peer_id,
+            display_name: &payload.display_name,
+            device_details: payload.device_details.as_ref(),
+            public_key: &payload.public_key,
+            requested_grants: &payload.requested_grants,
+            signature: &payload.signature,
+        },
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Encodes the receiver's explicit approval decision in the sessionless v1 pairing envelope.
+/// `peer_identity_proof` is the canonical lowercase SHA-256 fingerprint of the receiver key
+/// pinned by the QR invitation.
+pub fn encode_pair_approve(
+    message_id: MessageId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &PairApprove,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    validate_pair_approve(payload)?;
+
+    let envelope = PairApproveEnvelope {
+        v: 1,
+        message_type: "pair.approve",
+        message_id: message_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload: PairApprovePayloadRef {
+            accepted_grants: &payload.accepted_grants,
+            peer_identity_proof: &payload.peer_identity_proof,
+        },
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Encodes the receiver's explicit rejection decision in the sessionless v1 pairing envelope.
+pub fn encode_pair_reject(
+    message_id: MessageId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &PairReject,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    validate_pair_reject(payload)?;
+
+    let envelope = PairRejectEnvelope {
+        v: 1,
+        message_type: "pair.reject",
+        message_id: message_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload: PairRejectPayloadRef {
+            reason: &payload.reason,
+        },
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Encodes revocation of the addressed peer on an authenticated control channel.
+pub fn encode_pair_revoke(
+    message_id: MessageId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &PairRevoke,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    validate_canonical_identifier(&payload.peer_id)?;
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "v": 1, "type": "pair.revoke", "message_id": message_id.to_string(),
+        "seq": sequence, "sent_at_ms": sent_at_ms, "payload": payload
+    }))
+    .map_err(|_| ProtocolError::InvalidPayload)?;
+    parse_message(&bytes)?;
+    Ok(bytes)
+}
+
+/// Encodes a session answer in the common v1 control envelope.
+pub fn encode_session_answer(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionAnswer,
+) -> Result<Vec<u8>, ProtocolError> {
+    encode_session_control(
+        "session.answer",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes a sender's H.264-capable session offer in the common v1 control envelope.
+pub fn encode_session_offer(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionOffer,
+) -> Result<Vec<u8>, ProtocolError> {
+    if payload.role != "sender" {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_capabilities(&payload.capabilities)?;
+    bounded_sdp(&payload.sdp)?;
+    encode_session_control(
+        "session.offer",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes the sender's source-start notification after the peer connection is ready.
+pub fn encode_session_start(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionStart,
+) -> Result<Vec<u8>, ProtocolError> {
+    encode_session_control(
+        "session.start",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes an explicit sender-initiated session stop in the common v1 envelope.
+pub fn encode_session_stop(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionStop,
+) -> Result<Vec<u8>, ProtocolError> {
+    bounded_text(&payload.reason, 1, 128)?;
+    encode_session_control(
+        "session.stop",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+/// Encodes a trickled ICE candidate in the common v1 control envelope.
+pub fn encode_session_ice(
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &SessionIce,
+) -> Result<Vec<u8>, ProtocolError> {
+    encode_session_control(
+        "session.ice",
+        message_id,
+        session_id,
+        sequence,
+        sent_at_ms,
+        payload,
+    )
+}
+
+fn encode_session_control<T: Serialize>(
+    message_type: &'static str,
+    message_id: MessageId,
+    session_id: SessionId,
+    sequence: u64,
+    sent_at_ms: u64,
+    payload: &T,
+) -> Result<Vec<u8>, ProtocolError> {
+    if sequence == 0 {
+        return Err(ProtocolError::InvalidSequence);
+    }
+    let envelope = SessionControlEnvelopeRef {
+        v: 1,
+        message_type,
+        message_id: message_id.to_string(),
+        session_id: session_id.to_string(),
+        seq: sequence,
+        sent_at_ms,
+        payload,
+    };
+    let bytes = serde_json::to_vec(&envelope).map_err(|_| ProtocolError::InvalidPayload)?;
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(ProtocolError::FrameTooLarge);
+    }
+    parse_message(&bytes)?;
+    Ok(bytes)
+}
+
+#[derive(Serialize)]
+struct SessionControlEnvelopeRef<'a, T> {
+    v: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    message_id: String,
+    session_id: String,
+    seq: u64,
+    sent_at_ms: u64,
+    payload: &'a T,
 }
 
 /// Parses a complete v1 JSON control message with strict envelope and payload schemas.
@@ -411,20 +738,17 @@ pub fn parse_message(bytes: &[u8]) -> Result<ValidatedMessage, ProtocolError> {
         }
         MessageKind::PairBegin => {
             let value: PairBegin = decode(raw.payload)?;
-            bounded_text(&value.nonce, 1, 256)?;
-            validate_grants(&value.requested_grants)?;
-            bounded_text(&value.sender_ephemeral_key, 1, 4096)?;
+            validate_pair_begin(&value)?;
             MessagePayload::PairBegin(value)
         }
         MessageKind::PairApprove => {
             let value: PairApprove = decode(raw.payload)?;
-            validate_grants(&value.accepted_grants)?;
-            bounded_text(&value.peer_identity_proof, 1, 8192)?;
+            validate_pair_approve(&value)?;
             MessagePayload::PairApprove(value)
         }
         MessageKind::PairReject => {
             let value: PairReject = decode(raw.payload)?;
-            bounded_text(&value.reason, 1, 128)?;
+            validate_pair_reject(&value)?;
             MessagePayload::PairReject(value)
         }
         MessageKind::PairRevoke => {
@@ -569,6 +893,61 @@ fn validate_identifier(value: &str) -> Result<(), ProtocolError> {
         .map_err(|_| ProtocolError::InvalidIdentifier)
 }
 
+fn validate_canonical_identifier(value: &str) -> Result<(), ProtocolError> {
+    let device_id = DeviceId::parse(value).map_err(|_| ProtocolError::InvalidIdentifier)?;
+    if device_id.to_string() != value {
+        return Err(ProtocolError::InvalidIdentifier);
+    }
+    Ok(())
+}
+
+fn validate_pair_begin(value: &PairBegin) -> Result<(), ProtocolError> {
+    if let Some(details) = &value.device_details {
+        for field in [
+            &details.platform,
+            &details.manufacturer,
+            &details.model,
+            &details.os_version,
+        ] {
+            if field.len() > 320 || field.chars().count() > 80 || contains_control(field)
+                || field.chars().any(|ch| matches!(ch, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) {
+                return Err(ProtocolError::InvalidPayload);
+            }
+        }
+        if details.platform.trim().is_empty() {
+            return Err(ProtocolError::InvalidPayload);
+        }
+    }
+    validate_canonical_identifier(&value.receiver_id)?;
+    validate_lower_hex(&value.nonce, 16)?;
+    validate_canonical_identifier(&value.peer_id)?;
+    if value.display_name.is_empty()
+        || value.display_name.chars().count() > MAX_TRUSTED_PEER_DISPLAY_NAME_CHARS
+        || contains_control(&value.display_name)
+    {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_lower_hex(&value.public_key, 32)?;
+    validate_grants(&value.requested_grants)?;
+    if value.requested_grants.is_empty() {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_lower_hex(&value.signature, 64)?;
+    Ok(())
+}
+
+fn validate_pair_approve(value: &PairApprove) -> Result<(), ProtocolError> {
+    validate_grants(&value.accepted_grants)?;
+    if value.accepted_grants.is_empty() {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    validate_lower_hex(&value.peer_identity_proof, 32)
+}
+
+fn validate_pair_reject(value: &PairReject) -> Result<(), ProtocolError> {
+    bounded_text(&value.reason, 1, 128)
+}
+
 fn validate_capabilities(value: &Capabilities) -> Result<(), ProtocolError> {
     if value.video.is_empty()
         || value.video.len() > 8
@@ -645,6 +1024,17 @@ fn validate_grants(values: &[String]) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn validate_lower_hex(value: &str, expected_bytes: usize) -> Result<(), ProtocolError> {
+    if value.len() != expected_bytes * 2
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(ProtocolError::InvalidPayload);
+    }
+    Ok(())
+}
+
 /// Tracks monotonically increasing sequence numbers per authenticated peer/session.
 /// The caller must remove a session when it is closed to keep this map bounded.
 pub struct SequenceTracker {
@@ -687,117 +1077,5 @@ impl SequenceTracker {
     pub fn forget_session(&mut self, session_id: SessionId) {
         self.latest
             .retain(|(tracked_session, _), _| *tracked_session != session_id);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        MAX_ANNOTATION_BYTES, MAX_ENVELOPE_BYTES, ProtocolError, SequenceTracker, parse_message,
-        preflight_json, validate_version,
-    };
-    use mm_domain::{DeviceId, SessionId};
-
-    const VALID_OFFER: &str = include_str!("../../../tests/protocol-golden/session-offer-v1.json");
-
-    fn id(value: u8) -> [u8; 16] {
-        [value; 16]
-    }
-
-    #[test]
-    fn checks_frame_size_before_decoder_work() {
-        assert_eq!(preflight_json(b"{}"), Ok("{}"));
-        assert_eq!(preflight_json(b""), Err(ProtocolError::EmptyFrame));
-        let oversized = vec![b' '; MAX_ENVELOPE_BYTES + 1];
-        assert_eq!(
-            preflight_json(&oversized),
-            Err(ProtocolError::FrameTooLarge)
-        );
-        assert_eq!(preflight_json(&[0xff]), Err(ProtocolError::InvalidUtf8));
-    }
-
-    #[test]
-    fn requires_protocol_v1() {
-        assert_eq!(validate_version(1), Ok(()));
-        assert_eq!(validate_version(2), Err(ProtocolError::UnsupportedVersion));
-    }
-
-    #[test]
-    fn accepts_golden_offer_and_rejects_unknown_fields() {
-        let parsed = parse_message(VALID_OFFER.as_bytes()).unwrap();
-        assert_eq!(parsed.header.version, 1);
-        assert_eq!(parsed.header.kind, super::MessageKind::SessionOffer);
-        let with_unknown_envelope_field =
-            VALID_OFFER.replace("\"v\": 1,", "\"v\": 1, \"extra\": true,");
-        assert!(matches!(
-            parse_message(with_unknown_envelope_field.as_bytes()),
-            Err(ProtocolError::InvalidJson)
-        ));
-        let with_unknown_payload_field = VALID_OFFER.replace(
-            "\"role\": \"sender\",",
-            "\"role\": \"sender\", \"extra\": true,",
-        );
-        assert!(matches!(
-            parse_message(with_unknown_payload_field.as_bytes()),
-            Err(ProtocolError::InvalidPayload)
-        ));
-    }
-
-    #[test]
-    fn enforces_session_and_sequence_rules() {
-        let missing_session = VALID_OFFER.replace(
-            "\"session_id\": \"8b3d8788-1476-4aae-a287-334a428b5b6f\",",
-            "",
-        );
-        assert!(matches!(
-            parse_message(missing_session.as_bytes()),
-            Err(ProtocolError::InvalidEnvelope)
-        ));
-        let zero_sequence = VALID_OFFER.replace("\"seq\": 7", "\"seq\": 0");
-        assert!(matches!(
-            parse_message(zero_sequence.as_bytes()),
-            Err(ProtocolError::InvalidSequence)
-        ));
-    }
-
-    #[test]
-    fn rejects_grants_outside_the_shared_permission_vocabulary() {
-        let unknown_grant = br#"{"v":1,"type":"pair.begin","message_id":"b8298043-8b3b-4a86-86e3-79c0b863879b","seq":1,"sent_at_ms":0,"payload":{"nonce":"nonce","requested_grants":["admin"],"sender_ephemeral_key":"key"}}"#;
-        assert!(matches!(
-            parse_message(unknown_grant),
-            Err(ProtocolError::InvalidPayload)
-        ));
-    }
-
-    #[test]
-    fn enforces_annotation_message_byte_limit() {
-        let mut annotation = br#"{"v":1,"type":"annotation.clear","message_id":"b8298043-8b3b-4a86-86e3-79c0b863879b","session_id":"8b3d8788-1476-4aae-a287-334a428b5b6f","seq":1,"sent_at_ms":0,"payload":{}}"#.to_vec();
-        annotation.resize(MAX_ANNOTATION_BYTES + 1, b' ');
-        assert!(matches!(
-            parse_message(&annotation),
-            Err(ProtocolError::FrameTooLarge)
-        ));
-    }
-
-    #[test]
-    fn rejects_replayed_sequences_and_caps_active_streams() {
-        let mut tracker = SequenceTracker::new(1);
-        let session = SessionId::from_bytes(id(1));
-        let peer = DeviceId::from_bytes(id(2));
-        assert_eq!(tracker.accept(session, peer, 7), Ok(()));
-        assert_eq!(
-            tracker.accept(session, peer, 7),
-            Err(ProtocolError::SequenceReplay)
-        );
-        assert_eq!(tracker.accept(session, peer, 8), Ok(()));
-        assert_eq!(
-            tracker.accept(SessionId::from_bytes(id(3)), peer, 1),
-            Err(ProtocolError::SequenceTrackerFull),
-        );
-        tracker.forget_session(session);
-        assert_eq!(
-            tracker.accept(SessionId::from_bytes(id(3)), peer, 1),
-            Ok(())
-        );
     }
 }

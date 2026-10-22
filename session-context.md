@@ -1,184 +1,39 @@
-# MirrorMesh session context
+# MirrorMesh release checkpoint
 
-Updated: 2026-10-18
+## Final repository consolidation - 2026-10-22
 
-## Active objective and user direction
-
-Continue the MirrorMesh master implementation prompt from the initial CORE/P1 kickoff. The user explicitly directed: “Continue with all the tasks subsequently without waiting for approval.” Preserve that direction across turns. Keep the Android TV native receiver as the primary TV target and the TV browser as a capability-gated fallback. Do not claim a streaming product or hardware support without evidence.
-
-The repository's `AGENTS.md` is authoritative: one scoped task per patch, CORE owns protocol/ports/FFI/golden fixtures, no frame buffers over Dart FFI, request capture permission through OS UX, keep dependencies locked, report exact commands/results, and treat REA only as lawful behavioral research. The active goal is the implementation kickoff; real-media implementation remains a separate hardware/API gated task.
-
-## Work completed
-
-### CORE and Rust bridge
-
-- Seven-crate Rust 2024 workspace: `mm-domain`, `mm-protocol`, `mm-ports`, `mm-security`, `mm-store`, `mm-runtime`, and `mm-ffi`; exact dependency lockfile and `rust-toolchain.toml` pin Rust 1.99.1.
-- Strict bounded protocol parser with message validation, UUIDv4 session IDs, per-peer/session sequence tracking, and the `session-offer-v1.json` golden fixture. It is still a candidate contract pending cross-track review; do not call protocol v1 frozen.
-- Domain state machine, scoped/expiring grants, adapter ports, test-only fake capture metadata, local preferences store, synchronized session manager, bounded state subscriptions, and state-only FFI DTOs.
-- Pinned `flutter_rust_bridge` 2.13.0 and generated Rust/Dart bindings. `mm-ffi` exposes a state-only stream; no raw image/audio payloads or Dart-controlled permission booleans cross the bridge. Windows app startup loads the bridge safely, the Settings page displays its state stream, and Windows CMake builds/packages `mm_ffi.dll`. Linux CMake/CI are configured to bundle `libmm_ffi.so` and run a native state test against it; Android CI is configured to build `aarch64-linux-android`, stage its `.so` under `jniLibs/arm64-v8a`, and verify the ARM64 APK entry; iOS Xcode device builds link the `aarch64-apple-ios` static library, generate an FRB export list from `nm`, and preserve global symbols for process lookup. Linux, Android, and iOS runner results are pending; the iOS simulator bridge remains unavailable.
-- Added three `mm-ffi` integration tests for state event delivery, rejection of unauthorized capture/stream transitions, and the safe demo discovery/pairing/stop sequence.
-
-### Applications
-
-- `apps/mirrormesh_flutter`: generated Windows/Linux/Android/iOS scaffolds; four-tab Connect/Session/Devices/Settings UI; demo scan/pairing-start/end actions use narrow Rust state transitions; preview placeholder with in-memory annotation drawing, undo, and clear; screenshot export disabled until a real frame exists. Live Connect remains disabled. The demo does not touch the network, request capture, verify a peer, or stream video.
-- `apps/android-tv`: separate native Java receiver shell with Leanback/D-pad UI and a local-only fictional sender request flow. Accept/Reject/Disconnect mutate only a pure Java demo state; no network, capture, decoder, media, or permission path exists. `scripts/test-demo-state.ps1` runs JDK behavior checks and `scripts/verify-shell.ps1` validates XML, D-pad focus, labels, and permission/API absence. The Android app has not been built or installed.
-- `apps/tv-web`: dependency-free capability/status fallback shell. It reports HTTPS trust, RTCPeerConnection, H.264, authenticated signaling, and autoplay status; Connect stays disabled without signaling. Native links/buttons and tested arrow-key cycling support TV remote focus. No peer connection, camera/mic permission, or stream is created.
-
-### Tooling and documentation
-
-- Added pinned GitHub Actions for Rust, Flutter checks and Windows/Linux/Android/iOS shell builds, Windows/Linux Rust bridge builds and native widget smoke tests, web checks, Android TV source/state validation plus debug APK build, weekly Rust dependency advisory/license/source checks, and CycloneDX source SBOM generation. The TV build pins JDK 17, Android platform 37, Build Tools 36.0.0 and Gradle 9.6.0, and now retains its APK, package SBOM, build manifest, and checksums as seven-day CI evidence; release signing/publishing is not configured. The Rust safety workflow pins cargo-audit 0.22.2 and cargo-deny 0.20.2 and has no advisory ignores. The source SBOM is retained for seven days and is not a release-package SBOM. Added `.gitignore`, `.editorconfig`, contribution/security docs, issue and PR templates.
-- Added `docs/adr/0002-transport-spike.md`. It compares `str0m`, GStreamer `webrtcbin`, and native libwebrtc from upstream documentation and defers choosing a transport because no candidate or hardware integration was run. No benchmark result is claimed.
-- Updated README, verification ledger, implementation/device/UI docs, and this continuation file with current evidence and limits.
-
-## Verification evidence (2026-10-18)
-
-- Rust dependency metadata: `cargo metadata --locked --offline --format-version 1` exited 0 using the installed 1.99.1 toolchain binaries; license expressions were inspected offline. The rustup proxy could not write under its protected temporary directory, so direct toolchain binaries were used. A later Task 06 continuation also ran the pinned audit/deny tools from temporary directories; current outcomes are recorded below and in `docs/verification.md`.
-
-- Rust 1.99.1 / Cargo on Windows with Visual Studio 2022 Build Tools:
-  - `cargo fmt --all -- --check` — exit 0.
-  - `cargo check --workspace --all-targets` — exit 0.
-  - `cargo clippy --workspace --all-targets -- -D warnings` — exit 0.
-  - `cargo fmt --all -- --check` — exit 0 after the QR parser and trust record changes.
-  - `cargo check --workspace --all-targets --locked` — exit 0.
-  - `cargo clippy --workspace --all-targets --locked -- -D warnings` — exit 0.
-  - `cargo test --locked --workspace --all-features` — exit 0; 41 unit tests + 2 FFI integration tests passed; doc tests passed.
-- Flutter 3.47.7 stable / Dart 3.13.5:
-  - `dart format --output=none --set-exit-if-changed lib test` — exit 0.
-  - `flutter analyze --no-pub` — exit 0; no issues.
-  - `flutter test --no-pub` — exit 0; 5 total tests passed (4 UI widget tests and one Windows FFI initialization/state-view test using the packaged DLL).
-  - `flutter build windows --release --no-pub` — exit 0; release EXE and adjacent `mm_ffi.dll` compiled.
-  - Packaged Windows EXE stayed alive through a 3-second hidden startup smoke check; module inspection confirmed `mm_ffi.dll` loaded from the executable directory. No visual inspection was available.
-  - Flutter tests and Windows build ran from writable temporary mirrors because sandbox policy denies creation of the app's ignored `build/` path inside the repository. MSBuild warned about temp-directory intermediate/output paths; builds still exited 0.
-- TV web (current): `npm run typecheck` — exit 0; locked temporary mirror `npm ci --offline --ignore-scripts --no-audit --no-fund` + `npm test` — exit 0, 7 passed; compiled `dist/app.js` and `dist/capabilities.js` syntax checks pass. In-workspace `npm test` exited 1 because the sandbox denied writing ignored `dist/`. A fresh headless Microsoft Edge 155.0.4283.62 localhost smoke loaded the shell, detected secure origin/WebRTC/H.264, kept Connect disabled without signaling, and left autoplay unverified (exit 0). The screenshot is `docs/assets/tv-web-shell-edge-155.png`; no TV browser/device test ran.
-- Android TV: `powershell.exe -ExecutionPolicy Bypass -File .\apps\android-tv\scripts\verify-shell.ps1` — exit 0; 7 XML resources valid, five D-pad buttons, no permissions.
-- Android TV state harness: `powershell.exe -ExecutionPolicy Bypass -File .\apps\android-tv\scripts\test-demo-state.ps1` — exit 0; explicit request/accept/reject/disconnect transitions passed.
-- GitHub workflow/issue YAML: Dart YAML parser over six `.yml` files — exit 0.
-- `flutter_rust_bridge_codegen generate --config-file apps/mirrormesh_flutter/flutter_rust_bridge.yaml` — exit 0 with the final pinned 2.13.0 configuration.
-- Latest Rust quality gates after adding the demo operations: `cargo fmt --all -- --check` — exit 0; `cargo clippy --workspace --all-targets --locked -- -D warnings` — exit 0; `cargo test --locked --workspace --all-features` — exit 0 (54 unit tests, 3 FFI integration tests, doc tests passed); `cargo build --locked -p mm-ffi` — exit 0.
-- Flutter/Rust Step C integration: from a writable temp mirror, `dart format --output=none --set-exit-if-changed lib test` — exit 0; `flutter analyze --no-pub` — exit 0; `flutter test --no-pub` with `MIRRORMESH_FFI_LIBRARY` pointing to the built Windows DLL — exit 0, all 14 tests passed, including UI clicks verifying Rust states Discovered, Pairing, and Stopped. An initial widget assertion looked for the Pairing label on the Session page; it failed because the label belongs to the Devices page. The assertion was corrected to check the Session page's “Demo pairing active” status card, then the full suite passed.
-- Flutter Windows after Step C: the first shallow temp project copy failed with MSB3191 because CMake derived the Rust workspace root outside the mirror. A workspace-shaped temp copy preserved the relative `apps/mirrormesh_flutter/../../..` layout; `flutter build windows --release --no-pub` then exited 0 and staged `mm_ffi.dll` beside the EXE. MSBuild emitted only temporary-directory MSB8029 warnings. A hidden 3-second startup smoke passed and module inspection confirmed the updated EXE loaded `mm_ffi.dll` (exit 0).
-- Kickoff documentation audit: corrected the Flutter app README to describe the Rust-backed demo flow; expanded the root README with source-build steps, troubleshooting, security/privacy, performance-methodology, and roadmap sections; added the CORE/WIN/LNX/AND/IOS/TV/WEB/GUI/QA/RESEARCH status and next-task board to `docs/implementation.md`. Local Markdown links pass across 13 updated files. Step D remains the one open A–F phase and is explicitly blocked in `codex/02-transport-spike.md` and its environment report.
-- iOS bridge script/project static checks: Git Bash `bash -n` and balanced Xcode project delimiters — exit 0; no Xcode build was possible.
-- Apple iOS ScreenCaptureKit research recorded in `docs/spikes/ios-capture-spike.md`: Apple's current sample requires iOS 27+; local SDK and physical-device gates remain open.
-
-### Android TV CI update
-
-- The Android TV workflow runs the Java state harness in its Windows source-check job and adds a separate Ubuntu debug APK build using JDK 17, Android platform 37, Build Tools 36.0.0, and Gradle 9.6.0. It now pins Syft 1.50.0, generates a CycloneDX preview from the APK, captures the observed runner image and installed SDK versions with APK/SBOM hashes, and uploads the debug APK plus evidence as a seven-day CI artifact. It does not publish a release. The hosted workflow has not run, and this host has no Gradle or Android SDK.
-
-### Rust dependency safety update
-
-- Added `deny.toml` with the current lockfile's observed permissive license expressions, no advisory suppressions, a crates.io-only registry policy, yanked-version denial, and development-dependency license checks. The `allo-isolate` license file is Apache-2.0; workspace crates marked unpublished are ignored by the license scan.
-- Added weekly and dependency-change CI that installs cargo-audit 0.22.2 and cargo-deny 0.20.2 with `--locked`, runs `cargo audit`, and checks advisories/licenses/sources. The scanner workflow has not run in hosted CI; detailed local scan outcomes are recorded in the later Task 06 dependency-safety section.
-
-### Source SBOM workflow
-
-- Added a read-only GitHub Actions workflow using pinned Syft and upload-artifact actions to create a CycloneDX source inventory, print SHA-256, and retain the artifact for seven days. It explicitly disables release uploads. The workflow has not run; no SBOM file or digest has been produced in this workspace. Package-level SBOMs remain a release gate.
-
-### Task 06 protocol fuzzing
-
-- Added an isolated cargo-fuzz workspace and parse_message target that feeds arbitrary byte slices into the existing bounded mm-protocol parser. The seed corpus contains the checked-in valid session-offer fixture and a valid annotation-clear message; production dependencies and protocol behavior are unchanged.
-- Added a weekly, manual, and protocol-change PR workflow using cargo-fuzz 0.13.2 and nightly-2026-10-17, with a five-minute run, 262,145-byte maximum input, two-second per-input timeout, read-only repository permissions, and failure-only crash artifact retention.
-- Extended dependency-safety CI to audit and check the separate fuzz lockfile. Cargo 1.99.1 generated the lockfile successfully (23 third-party packages); full locked offline metadata, rustfmt, and TOML parsing pass after fetching crates into temp. The initial pinned cargo-audit 0.22.2 scan reported no advisories for 95 root / 24 fuzz crates; a later scan against the updated lockfiles reported 98 root / 24 fuzz crates with no findings. Pinned cargo-deny 0.20.2 passes both graphs with separate root/fuzz policies; NCSA is permitted only for fuzz-only libfuzzer-sys 0.4.13. No local cargo-fuzz/nightly campaign or hosted workflow run is available, so fuzz execution remains unverified.
-
-### Task 06 release metadata
-
-- Added scripts/create_release_metadata.py and a JSON context template. The tool emits deterministic SHA256SUMS and a per-platform manifest with artifact sizes/hashes, exact source and SDK context, runner image, build commands, and reproducibility status. It requires a recognizable package-level CycloneDX/SPDX JSON SBOM and a nonempty UTF-8 third-party notices file, and rejects template/latest values, symlinks, and empty artifacts.
-- Python syntax, template JSON, and CLI help checks passed. A temporary fixture generated three artifact hashes that independently matched; the unfilled template was refused with expected exit 2. These temporary sample artifacts are not MirrorMesh release evidence.
-- No package-level SBOM or complete third-party notices exist; the generator does not claim to author or legally validate notices. No product package is eligible for release metadata.
-
-### Task 06 Rust third-party notice preview
-
-- Added about.toml and a plain-text cargo-about template plus a weekly/dependency-change workflow pinned to cargo-about 0.9.2. CI compares regeneration with docs/THIRD-PARTY-NOTICES-rust.txt and retains its output for seven days; it excludes dev dependencies but includes build and transitive dependencies.
-- The original generation produced 136,066 bytes across 22 license sections. The later Task 06 revalidation regenerated 147,057 bytes with the locked `getrandom 0.4.3` Apache-2.0/MIT texts and updated the checked-in snapshot. cargo-about still warns that allo-isolate 0.1.27 lacks a manifest license field; its bundled Apache-2.0 text is included, consistent with the separately inspected crate file. This remains a Rust-only review artifact, not a complete platform package notice. Flutter runtime notices are separate; Android Gradle, Apple, codec, and other packaged dependencies remain to be inventoried. Hosted generation has not run.
-
-### Task 06 dependency revalidation (2026-10-18)
-
-- Found the pinned cargo-audit 0.22.2, cargo-deny 0.20.2, and cargo-about 0.9.2 binaries under writable temporary tool directories. Both `cargo audit --no-fetch` scans exited 0 using the cached advisory database (1,338 advisories loaded): 98 root and 24 fuzz crates, with no findings. The database was not refreshed over the network.
-- `cargo deny --offline` exited 0 for root and fuzz advisory/license/source checks. Root retains one upstream metadata warning: allo-isolate 0.1.27 omits a license field, though the bundled Apache-2.0 text is included in the generated notice. Separate `fuzz/deny.toml` and workflow routing remove the root's unused NCSA exception and fuzz's unused 0BSD/Zlib allow warnings; fuzz policy passes without warnings.
-- Regenerated the Rust notice snapshot; cargo-about output matched the checked-in file at SHA-256 `F4D38A12D24D625F1AD1FB4F4D29BC5B90CBE1A156AF62C97B4FD0C3D25EAE51`. Dart YAML 3.1.3 parsed the changed dependency-safety workflow. Hosted CI remains unrun because this workspace has no Git metadata or remote.
-
-### Task 06 Flutter third-party notice preview
-
-- Added `scripts/create_flutter_notices.py`, which traverses runtime dependencies from Dart's generated package graph, maps them to exact package roots from package_config.json, and collects root-level LICENSE/COPYING/NOTICE text. It excludes dev-only packages, requires a notice file for every included package, rejects symlinked notice files, and normalizes output to UTF-8 LF.
-- Added a weekly, manual, and dependency-change GitHub workflow pinned to Flutter 3.47.7. It resolves the locked graph, regenerates the notice preview, diffs it against `docs/THIRD-PARTY-NOTICES-flutter.txt`, and retains a seven-day review artifact. Hosted workflow is unrun.
-- Local generation from the existing validation mirror succeeded for 14 runtime packages, producing 1,298,582 bytes. Workspace and mirror `pubspec.lock` SHA-256 values matched; two independent generations matched at SHA-256 `396522708E961E96EF3832997F887153BF646CF738EDC997FF5AA6FD2FB4FDFE`. Python syntax passed and all 11 workflow/issue YAML files parsed with Dart YAML 3.1.3. The notice is Flutter package-source scope, not a complete staged package notice; native SDK, Gradle, Apple, and codec coverage remains outstanding.
-
-### Task 06 Android TV debug package evidence
-
-- Added `scripts/create_android_tv_build_manifest.py` to capture the exact GitHub runner image variables, Java/Gradle/Android Gradle Plugin/sdkmanager versions, installed Android SDK package revisions, source SHA, and hashes/sizes for the APK and its CycloneDX SBOM. It fails when required runner identity, package revisions, or artifact evidence is missing.
-- Extended the Android TV CI build to pin Syft 1.50.0, scan the APK file, validate the CycloneDX result, and retain the debug APK, SBOM, and build manifest for seven days. Release uploads remain disabled.
-- A mocked smoke passed twice with deterministic manifest output and independently recomputed APK hash; Python AST and YAML parsing passed. The host lacks Gradle/Android SDK, and the GitHub workflow has not run. This is not a release artifact or a TV hardware result.
-
-### Task 07 integration readiness
-
-- Read `codex/07-integration-matrix.md` and recorded its unmet entry gate in `docs/spikes/integration-readiness.md`: no sender/native Android TV protocol exchange, selected transport, built TV APK, or physical TV run exists. Added `tests/e2e/README.md` as a truthful harness entry point and linked the blocked pathway statuses from the device and verification matrices. No E2E or hardware evidence was created.
-
-### Task 03 CORE endpoint, nonce, QR, and trust-record contracts
-
-- Added a bounded parser in `crates/mm-security` for numeric IPv4 and bracketed IPv6 `address:port` input. It rejects URI/path/query/user-info syntax, DNS names, IPv6 zone identifiers, private-key markers, malformed/noncanonical ports, oversized inputs, and ports not present in the caller's explicitly approved list. It performs no DNS lookup or connection.
-- Tests were added before implementation; the first compile failed on the new missing API as expected. The manual endpoint parser is covered by IPv4/IPv6, authority grammar, private-key rejection, input bound, and approved-port cases. DNS fallback remains deferred until a network adapter pins a one-time resolution, refuses redirects, and checks the peer fingerprint.
-- Added `getrandom` 0.4.3 as an exact locked dependency after reviewing the official API, supported targets, and MIT/Apache license. `mm-security` now encodes 128-bit nonces as canonical lowercase hex and provides a maximum-1,024-entry, process-local, single-use registry with an OS random source and 120-second monotonic expiry. Tests were written first; the initial compile failed on the absent API. Focused tests cover encoding, replay, expiry, capacity, collisions, overflow, source failure, and the Windows OS source. Format, workspace check, Clippy, and full locked tests passed. The initially stale Rust notice and dependency audits were subsequently refreshed using the pinned temporary tools; the new evidence and one upstream license-field warning are recorded in `docs/verification.md`.
-- QR UI, fingerprint/signature verification, trusted-peer persistence, mDNS, authenticated signaling, and hardware flows remain unimplemented. The strict QR parser now validates fields and wall-clock expiry but is not connected to an application pairing flow.
-- Added the validated `TrustedPeer` domain record and expanded `TrustedPeerPort` to get/save/list/revoke records. Records hold only opaque public-key bytes, a 32-byte fingerprint, explicit grants, and pairing/last-seen/revocation timestamps. Validation rejects unbounded names/keys, empty grants, backward timestamps, and use after revocation. ADR-0004 records the fingerprint/record contract. Tests were written before implementation; five focused domain tests pass. No concrete persistence or cryptographic identity proof exists yet.
-- Added `parse_pairing_qr` with test-first strict v1 URI parsing, canonical UUID/hex validation, approved literal IP endpoints, exact-field rejection, and a 120-second wall-clock expiry limit. It does not consume the nonce, verify a signature, display a QR, or connect. Fourteen focused `mm-security` tests pass.
-- Investigated the next SQLite adapter. Official docs/license review supported `rusqlite 0.39.0` with bundled public-domain SQLite, but `cargo fetch` could not reach `index.crates.io:443` and the crate is not cached. Removed the tentative dependency and adapter tests before they affected the lockfile; added [a spike report](docs/spikes/sqlite-store-dependency.md) and proposed ADR-0005. Pinned audit tools are now available from temporary directories; the SQLite dependency remains blocked by the unreachable package source.
-
-## Environment setup and blockers
-
-- Rust executable: `C:\Users\Beasty\.cargo\bin\cargo.exe`. For Windows Rust builds, initialize `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat` and add `C:\Program Files (x86)\Microsoft Visual Studio\Installer` to PATH to avoid `vswhere` warnings.
-- Flutter's original SDK was installed under protected AppData and could not write its SDK lock/telemetry files. A writable copy is at `%TEMP%\MirrorMeshFlutterSDK`; set `APPDATA=%TEMP%\MirrorMeshAppData` and `FLUTTER_SUPPRESS_ANALYTICS=true` for tool runs. Flutter analysis ran against the workspace source; tests/build ran against a temp mirror at `%TEMP%\MirrorMeshFlutterAppValidation` because the app's ignored `build/` path is denied by the sandbox.
-- The workspace has no `.git` metadata or remote. GitHub Actions YAML was syntax-parsed but no hosted workflow, branch protection, PR, or release run exists.
-- No crates.io network access is available; `cargo fetch` failed with an index connection error for the proposed SQLite dependency. No Gradle, Android SDK/NDK, or Xcode is installed. Android TV APK/emulator, Android Flutter APK, Linux Flutter, and iOS Flutter builds were not run. Linux, Android, and iOS CI packaging is configured but awaits platform runner evidence. No Android TV or iPhone hardware is available. Apple's current ScreenCaptureKit iOS sample requires iOS 27 or later; the availability and capture gates are documented in `docs/spikes/ios-capture-spike.md`.
-- No interactive CUA browser/desktop surface was available, so no Flutter full-app screenshot/GIF was captured. A headless Edge screenshot now proves the TV web capability shell rendered, but Node/browser smoke evidence is not TV-device or media proof.
-- No complete pairing/identity flow, authenticated signaling, production WebRTC engine, native capture/encode/decode/render adapters, or end-to-end media flow exists. ADR-0002 is intentionally deferred pending reproducible candidates and hardware.
-- No proprietary reference-app binary was provided or authorized for examination. REA investigation was not run; independent implementation continues from public APIs and original design.
-
-## Next task
-
-Task 03 continuation completed in this turn:
-
-- Added `crates/mm-application` with `PairingCoordinator`, `PairingProof`, and `PendingPairingApproval`. Invitations use the strict numeric endpoint/QR code and monotonic nonce registry. Proofs bind receiver ID, nonce, sender ID, bounded name, and requested grants under `MirrorMesh.PairingProof.v1\0`; identity verification and SHA-256 fingerprinting are ports only.
-- The coordinator rejects wrong/self receiver identity and unknown/expired nonces before signature work, verifies signature and fingerprint, consumes a successful nonce once, and persists trust only after explicit approval of a requested-grant subset. Pending approvals are bound to the receiver that verified them.
-- Added fake-backed tests for QR round-trip, proof domain separation/grant binding, signature rejection, nonce replay, approval persistence, grant reduction, expiry, size bounds, and receiver binding. The receiver-binding regression failed before the fix (other receiver saved the peer), then passed after the implementation.
-- Added proposed [ADR-0006](docs/adr/0006-pairing-coordinator-proof-contract.md) and updated protocol, security, implementation, task, README, and verification docs. Protocol wire encoding/key algorithms remain candidate details pending security and cross-track review.
-- Final Rust gates after the fix: `cargo fmt --all` exit 0; `cargo fmt --all -- --check` exit 0; `cargo check --workspace --all-targets --locked` exit 0; `cargo clippy --workspace --all-targets --locked -- -D warnings` exit 0; `cargo test --locked --workspace --all-features --quiet` exit 0 with 54 unit and 2 FFI integration tests passing (doc tests passed).
-
-### Task 03 production identity provider research
-
-- Proposed Ed25519 raw 32-byte public keys, raw 64-byte signatures, and SHA-256 fingerprints over the raw key bytes; added [ADR-0007](docs/adr/0007-ed25519-identity-candidate.md), [identity-provider spike](docs/spikes/identity-provider.md), and links/status updates in README, protocol, security, source ledger, implementation, verification, and Task 03.
-- The previously named `ed25519-compact 2.6.0` version is unverified. Isolated Cargo fetch failed twice at `index.crates.io:443`; a renewed official web lookup found inconsistent docs.rs views (latest manifest identifies 2.4.0, while a package-page result lists through 2.4.2), and the exact 2.6.0 page/crates.io version API were inaccessible. This does not prove 2.6.0 is unpublished, but it invalidates the earlier confidence that docs.rs had confirmed that version. No dependency or lockfile change was made. The 2.4.x MIT metadata is not an exact 2.6 source/license audit. `ed25519-dalek 3.0.0` remains outside the current deny allow-list (`BSD-3-Clause`).
-- No production provider was implemented. The existing identity port has no local signing/key lifecycle API; OS keystore adapters remain future work. Require source/security/license/advisory review plus strict malformed/weak-key test vectors before implementation. ADR-0007 and protocol v1 remain proposed pending review.
-
-### Task 04 annotation coordinate mapping
-
-- Added `apps/mirrormesh_flutter/lib/annotation_geometry.dart` with an `AnnotationCoordinateMapper` for source-normalized point conversion, quarter-turn orientation, `BoxFit` contain/cover crop, and viewport resizing. The local 16:9 demo records normalized source points, paints through the mapper, rejects contain letterbox touches, and clips strokes to the preview bounds.
-- Added five test-first mapper tests covering 0°/90°/180°/270°, contain letterboxing, cover crop, resize invariance, and invalid geometry. The first run correctly failed because the mapper did not exist; after implementation and a floating-point-tolerant assertion, all five passed. The full Flutter suite passed 9 tests with 1 skipped; analyzer found no issues; Dart format check passed. Test/build output used `%TEMP%\MirrorMeshFlutterAppValidation` because direct formatter overwrite was denied in the workspace; formatted files were copied back and hash-matched before final checks.
-- Extracted `AnnotationOverlayPainter` from the placeholder background painter. It clips to the viewport, paints taps as dots, and consumes vector coordinates/layout only. Added a golden test that paints a normalized multi-segment stroke and tap over a 128×96 synthetic RGB frame. The generated PNG was inspected visually and copied into the workspace; temp/workspace SHA-256 matched at `03E442585691D31334843D2F21B21875B07DA46D46ADA93EB639D40BE698A44A`.
-- After extraction, Dart format check and Flutter analyzer passed; the full Flutter suite passed 10 tests with one skipped. The Windows release build passed from the writable validation mirror (exit 0); MSBuild emitted only temporary-directory `MSB8029` warnings. No full-app screenshot/GIF, native video surface, or hardware evidence was produced.
-- Added selectable local demo colors (teal, amber, coral, white) and fine/medium/bold widths. `AnnotationStroke` captures its immutable normalized points, color, and width when the stroke starts, so later style selection does not recolor older strokes. A widget test exercises that behavior. Final format/analyzer/full tests passed (11 passed, 1 skipped); the Windows release rebuild exited 0 with the same temporary-directory MSBuild warnings.
-- Added session-only `P` to toggle local drawing and `Ctrl+Z` / `Command+Z` to undo; the button labels expose the shortcuts, and widget semantics assertions cover palette/width choices and the action names. The focused test first failed on the missing shortcut label, then passed after implementation. The full suite then reached 13 passed, 1 skipped (native bridge test without a configured DLL); analyzer found no issues; Dart format checked 13 files with none changed; Windows release build exited 0 with temporary-directory MSB8029 warnings. Workspace sources and six tested mirror inputs hash-match.
-- Added a responsive-navigation widget test at 400 and 800 logical pixels with a simulated 2x device-pixel ratio. The full suite now passes 13 tests with one native bridge test skipped; analyzer, format, and Windows release build pass. This does not verify physical monitor DPI, display rotation, touch, or a hardware UI session.
-- Added `docs/spikes/flutter-surface-snapshot.md` as a proposal-only report. Current `docs/protocol.md` has RenderPort pseudocode, while `mm-ports` and the Flutter shell still lack a native render/snapshot implementation. The report preserves the no-frame-pixels-over-FFI rule, defines lifecycle and explicit snapshot behavior for review, and records platform evidence gates; no shared interface or FFI code changed. PowerShell link check passed (8/8 paths); this docs-only change did not require runtime tests.
-- Android TV: added a verifier requirement for polite live announcements on dynamic help text. The first source-check run failed as intended; after adding `android:accessibilityLiveRegion="polite"`, `verify-shell.ps1` and the JDK local approval-state test passed (exit 0). Gradle/Android SDK are unavailable, so no APK or hardware/accessibility-service result exists.
-- Updated Task 04, feature, and verification docs. This remains a local placeholder only: video surface orientation, screenshot composition, hardware performance, and a product screenshot/GIF are not verified.
-
-### Kickoff closeout audit
-
-- Confirmed the kickoff still has follow-on platform work; `codex/README.md` already assigns concrete task briefs to CORE, WIN, LNX, AND, IOS, TV, WEB, and CI/integration.
-- Found and corrected stale readiness reporting: README now reports the current 7 Node tests and TypeScript capability shell, not the old 3-test JavaScript claim. `docs/implementation.md` and `docs/verification.md` now reflect 54 Rust unit tests + 3 FFI integration tests and the Flutter suite's latest 14-pass run with the native DLL configured, alongside current web evidence. Local Markdown link and stale web claim scans pass after the TypeScript conversion.
-- TypeScript WEB scaffold: official TypeScript documentation and Apache-2.0 source license reviewed; exact dev dependency `typescript@7.0.2` is pinned in package.json/lockfile. Strict `npm run typecheck` passed. A locked offline temporary mirror compiled TypeScript and passed 7 Node tests plus emitted-JS syntax checks. `npm test` in the workspace exited 1 (TS5033) because the sandbox denies writes to ignored `dist/`. A later headless Edge 155 localhost run rendered the shell and captured `docs/assets/tv-web-shell-edge-155.png`; no TV/browser hardware, signaling, or media path was exercised.
-- The edited `.github/workflows/web.yml` parsed successfully with the existing Dart YAML 3.1.3 parser (exit 0); local Markdown links and stale WEB-claim scans passed. PyYAML was unavailable, so it was not installed.
-- The Step C GUI gap identified above has since been closed locally: scan, pairing-start and end buttons call named Rust operations, and the native Flutter/Rust integration test verifies the resulting state. The narrow FFI remains a candidate pending CORE/GUI cross-track review; this workspace has no Git metadata or remote to create a review PR. No demo path reaches Paired or Streaming.
-- Individual next-task assignments already exist in `codex/README.md`; the final response still needs the requested CORE/WIN/LNX/AND/IOS/TV/WEB/GUI/QA/RESEARCH status table. Later transport, identity-provider, native media, platform builds, and hardware integration remain separate follow-on work.
-## Current handoff (2026-10-18)
-
-Task 02 software control slice is implemented and remains `IN_PROGRESS`. It adds `crates/mm-transport/`, the metadata-only async WebRTC port, ADR-0002 selection, and implementation/status evidence. Hardware tests are explicitly deferred and do not block source work. The Flutter libwebrtc package is not in the local cache and no production engine, authenticated signaling, H.264 encoder, media rendering, or peer session exists yet.
-
-Verified after the latest source edits: `cargo fmt --all -- --check` exit 0; `cargo clippy --locked --offline --workspace --all-targets -- -D warnings` exit 0; `cargo test --locked --offline --workspace --all-features` exit 0 (69 unit tests, 3 FFI integration tests, doc tests passed). Rust 1.99.1 was invoked from `C:\Users\Beasty\.rustup\toolchains\1.99.1-x86_64-pc-windows-msvc\bin` with `CARGO_HOME=C:\Users\Beasty\AppData\Local\Temp\MirrorMeshCargoSafetyHome`.
-
-GitHub push workflow requested by the user: remote `https://github.com/AKeybladeMaster/MirrorMesh.git` returned no refs on read-only `git ls-remote`; this workspace currently has no `.git`. Initialize `main` from the current workspace, push the actual project state, and create/use `task_2` for continued Task 02 feature work. Preserve remote history and never force push. Create additional `task_<n>` branches as tasks are completed, then merge all task branches into `dev` at the final project milestone. User has explicitly authorized continuing without approval.
-
-Next: finish the Task 02 code-first integration work that can be supported by exact sources and available toolchains; keep docs honest about unverified runtime behavior. Then proceed to the next independent software task and maintain this handoff.
-## Credit-usage instruction
-
-The session credit percentage is not exposed to this agent, so the 98% threshold could not be observed. This context file has been saved proactively for continuation.
+- Owner authorized preserving test_6, consolidating on pre_release, and merging/pushing
+  pre_release into main as the final repository release for now. Earlier stop is revoked.
+  Inspect local/remote Git refs for exact publication commits before future changes.
+- Safe original workspace is pushed at test_6 / 4052f40; original implementation c22b9a0.
+  Consolidated source commit: 65c17bd. All older refs and published history are preserved.
+- Current tree: 319 tracked files; minimal committed source ZIP: 304 build/guide files.
+  All 17 Rust crates, canonical native Android and desktop/iOS apps, locks and relative
+  native build paths retained. Legacy prototypes/reports remain in the checkpoint history.
+  Local archive is ignored; private extracted receiver files are untouched and ignored.
+- README has product readiness, generalized FAQ and code tree; docs cover architecture,
+  protocol/storage, builds/personal releases and actual verification. No private values
+  are intentionally included. Source ZIP stages/validates before public output.
+- Final consolidation Windows build/package exit0: pre-release-windows-final.log.
+  Android phone/TV debug and unsigned optimized builds exit0. Host Rust format/Clippy,
+  Dart format/analysis, PowerShell and POSIX syntax checks pass. No test suites/workflows run.
+- Source ZIP generated/extracted successfully. Gitless Linux Docker build from 65c17bd
+  compiled, analyzed and packaged, exit0: pre-release-linux-source.log. Output imported
+  into local releases. Required source inputs and export exclusions checked.
+- Windows artifact: 94,086,239bytes, 285 payload digests verified; SHA256
+  24ce2e20b6fe74f05a3a116cbb0955789a71f3e01b74c5e2b3645e174be8363b.
+  Linux artifact: 23,681,265bytes, 21 payload digests verified; SHA256
+  5eda7b78bf37a1eb7bf59ad1bfc94e86908c9f96713a6d00e2f569f227227a1c.
+  All four APK sidecars match. Linux has no unresolved reported libraries or world-writable
+  tar members. Packages are local outputs; source and public binary checksum metadata are Git-tracked.
+- Source ZIP/sidecar are generated locally from the selected committed tree, excluded
+  from Git to avoid circular metadata. Regenerate from main after final publication.
+- Read-only consolidation and final packaging reviews found no blockers; minor old links
+  corrected. Code/lockfiles are unchanged by final evidence updates.
+- Hardware limitations: TV/Linux desktop media unverified; no Mac/Xcode means no Apple
+  binaries or Apple build/device claims. Native Miracast failure unresolved; Google Cast
+  unavailable. Earlier PC/Android sharing and native iOS connections were owner-confirmed.
+- Publication sequence: push pre_release, merge it into main without rewriting history,
+  push main, verify both remote refs and preserved older refs. No further implementation
+  work is queued; await owner instructions/device feedback after publication.
+- No credit gauge is exposed. Keep future checkpoints concise and sanitized.

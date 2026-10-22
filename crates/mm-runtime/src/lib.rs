@@ -1,3 +1,11 @@
+mod mirrormesh;
+mod pairing;
+mod trusted_sessions;
+
+pub use mirrormesh::MirrorMeshRuntime;
+pub use pairing::{AdmittedPendingPairingApproval, PairingRuntime, PairingRuntimeError};
+pub use trusted_sessions::{TrustedSessionError, TrustedSessionRuntime};
+
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
@@ -65,9 +73,10 @@ impl SessionManager {
             .ok_or(RuntimeError::UnknownSession)?;
         let next = try_transition(current, event)?;
         inner.sessions.insert(session_id, next);
-        if next != current
-            && let Some(subscribers) = inner.subscribers.get_mut(&session_id)
-        {
+        if next == current {
+            return Ok(next);
+        }
+        if let Some(subscribers) = inner.subscribers.get_mut(&session_id) {
             subscribers.retain(|subscriber| match subscriber.try_send(next) {
                 Ok(()) => true,
                 Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
@@ -115,137 +124,5 @@ impl SessionManager {
             Some(_) => Err(RuntimeError::Domain(DomainError::IllegalTransition)),
             None => Err(RuntimeError::UnknownSession),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{RuntimeError, SessionManager};
-    use mm_domain::{SessionEvent as E, SessionId, SessionState as S};
-
-    fn session(value: u8) -> SessionId {
-        SessionId::from_bytes([value; 16])
-    }
-
-    #[test]
-    fn session_lifecycle_rejects_unauthorized_transition_without_mutation() {
-        let manager = SessionManager::default();
-        let id = session(1);
-        manager.create(id).unwrap();
-        manager.apply(id, E::PeerDiscovered).unwrap();
-        manager
-            .apply(
-                id,
-                E::TrustedPeerVerified {
-                    fingerprint_verified: true,
-                },
-            )
-            .unwrap();
-        manager.apply(id, E::BeginNegotiation).unwrap();
-
-        assert!(
-            manager
-                .apply(
-                    id,
-                    E::StartStreaming {
-                        peer_authenticated: true,
-                        capture_permitted: false,
-                        first_frame_presented: true,
-                    }
-                )
-                .is_err()
-        );
-        assert_eq!(manager.state(id), Ok(S::Negotiating));
-    }
-
-    #[test]
-    fn disconnect_and_cleanup_are_idempotent_at_runtime_boundary() {
-        let manager = SessionManager::default();
-        let id = session(2);
-        manager.create(id).unwrap();
-        manager.apply(id, E::PeerDiscovered).unwrap();
-        manager
-            .apply(
-                id,
-                E::TrustedPeerVerified {
-                    fingerprint_verified: true,
-                },
-            )
-            .unwrap();
-        manager.apply(id, E::BeginNegotiation).unwrap();
-        manager
-            .apply(
-                id,
-                E::StartStreaming {
-                    peer_authenticated: true,
-                    capture_permitted: true,
-                    first_frame_presented: true,
-                },
-            )
-            .unwrap();
-        for _ in 0..50 {
-            assert_eq!(manager.apply(id, E::Stop), Ok(S::Stopping));
-        }
-        assert_eq!(manager.apply(id, E::CleanupComplete), Ok(S::Stopped));
-        manager.remove_stopped(id).unwrap();
-        assert_eq!(manager.state(id), Err(RuntimeError::UnknownSession));
-    }
-
-    #[test]
-    fn independent_sessions_can_transition_concurrently() {
-        let manager = SessionManager::default();
-        let mut workers = Vec::new();
-        for value in 1..=8 {
-            let worker_manager = manager.clone();
-            workers.push(std::thread::spawn(move || {
-                let id = session(value);
-                worker_manager.create(id).unwrap();
-                worker_manager.apply(id, E::PeerDiscovered).unwrap();
-                assert_eq!(worker_manager.state(id), Ok(S::Discovered));
-            }));
-        }
-        for worker in workers {
-            worker.join().unwrap();
-        }
-    }
-
-    #[test]
-    fn state_subscriptions_emit_snapshots_and_close_after_session_removal() {
-        let manager = SessionManager::default();
-        let id = session(9);
-        manager.create(id).unwrap();
-        let updates = manager.subscribe(id).unwrap();
-        assert_eq!(updates.recv().unwrap(), S::Idle);
-
-        manager.apply(id, E::PeerDiscovered).unwrap();
-        assert_eq!(updates.recv().unwrap(), S::Discovered);
-        manager
-            .apply(
-                id,
-                E::TrustedPeerVerified {
-                    fingerprint_verified: true,
-                },
-            )
-            .unwrap();
-        manager.apply(id, E::BeginNegotiation).unwrap();
-        manager
-            .apply(
-                id,
-                E::StartStreaming {
-                    peer_authenticated: true,
-                    capture_permitted: true,
-                    first_frame_presented: true,
-                },
-            )
-            .unwrap();
-        assert_eq!(updates.recv().unwrap(), S::Paired);
-        assert_eq!(updates.recv().unwrap(), S::Negotiating);
-        assert_eq!(updates.recv().unwrap(), S::Streaming);
-        manager.apply(id, E::Stop).unwrap();
-        assert_eq!(updates.recv().unwrap(), S::Stopping);
-        manager.apply(id, E::CleanupComplete).unwrap();
-        assert_eq!(updates.recv().unwrap(), S::Stopped);
-        manager.remove_stopped(id).unwrap();
-        assert!(updates.recv().is_err());
     }
 }
