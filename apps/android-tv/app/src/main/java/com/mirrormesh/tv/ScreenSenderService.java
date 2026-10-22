@@ -157,6 +157,8 @@ public final class ScreenSenderService extends Service {
                 else if (remoteIce.size() < 64) remoteIce.add(candidate);
                 else throw new IllegalStateException("Too many remote candidates");
                 break;
+            case "stop":
+            case "revoke":
             case "ended": stopSelf(); break;
         }
     }

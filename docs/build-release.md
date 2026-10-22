@@ -1,7 +1,7 @@
-# Build Windows and Android
+# Build desktop and Android apps
 
 All commands below are local; no GitHub Actions or unit tests are invoked. Run from the
-repository root on `test_5` only. Build scripts enforce that branch. Preserve every other branch.
+repository root on `test_6` only. Build scripts enforce that branch. Preserve every other branch.
 
 ## Toolchain
 
@@ -132,6 +132,77 @@ In Xcode select your development team, use an extension identifier prefixed with
 Runner app identifier, and provision the same App Group for Runner and MirrorMeshBroadcast.
 The configurator creates/embeds the ReplayKit Upload Extension and configures entitlements.
 It changes the local Xcode project; review and commit those generated project settings only
-on `test_5`. Credentials and provisioning profiles stay outside Git. Full-device sharing
+on `test_6`. Credentials and provisioning profiles stay outside Git. Full-device sharing
 appears only when the extension is present; app-only ReplayKit capture remains available.
 Check `docs/connections.md` for directions and verification boundaries.
+
+## Linux x64 from Windows / Docker Desktop
+
+Docker Desktop must be running with its Linux engine (WSL2 backend). No extra Ubuntu WSL
+distribution is needed. The wrapper builds the pinned Ubuntu 24.04/Flutter 3.47.7/Rust 1.99.1
+toolchain, snapshots source roots, then builds in a separate container filesystem:
+
+```powershell
+.\scripts\build-linux-docker.ps1
+# Reuse an already built toolchain image:
+.\scripts\build-linux-docker.ps1 -SkipToolchainBuild
+```
+
+Native Linux build, after installing that same Flutter/Rust toolchain plus clang, CMake,
+Ninja, pkg-config, GTK3, OpenSSL and Secret Service development libraries:
+
+```sh
+sh scripts/build-linux.sh
+```
+
+Outputs: `releases/MirrorMesh-0.4.1-linux-x64.tar.gz`, its `.sha256` sidecar, and the complete
+`releases/linux-x64/MirrorMesh/` folder. Extract the archive into a new directory and run:
+
+```sh
+tar -xzf MirrorMesh-0.4.1-linux-x64.tar.gz
+./MirrorMesh/MirrorMesh
+```
+
+Keep `lib/` and `data/` next to the executable. This Ubuntu 24.04 x86_64 build needs a compatible
+desktop (glibc 2.39 or newer), GTK3, graphics/audio system libraries and a session D-Bus with an
+unlocked Secret Service keyring. Headless Docker supplies compilation evidence only; run the
+app as your desktop user. Linux Wayland/PipeWire portal capture and individual GPU codecs
+still need desktop/device verification. App sharing remains video-only in this release.
+
+## macOS source build (a Mac is required)
+
+There is no macOS binary produced on this Windows/WSL host. On a Mac with the full Xcode
+toolchain supported by Flutter 3.47.7 and Rust 1.99.1, check out `test_6`, then:
+
+```sh
+sh scripts/build-macos.sh
+```
+
+The source targets macOS 13+ and both Apple Silicon / Intel. The script builds the Rust static
+bridge for both architectures, retains runtime FFI exports, and packages `MirrorMesh.app`
+as an **unsigned preview ZIP**. SwiftPM is used where supported; CocoaPods is required only
+when Flutter generates a fallback Podfile. Do not use `flutter build ios` for the Mac desktop app.
+
+For actual use/distribution, open `apps/mirrormesh_flutter/macos/Runner.xcworkspace` on the Mac,
+select your team and a unique bundle identifier, and sign with the network entitlements intact.
+Data Protection Keychain access requires an appropriately signed/entitled app; unsigned
+compilation alone does not prove secure identity storage. Allow local-network access and
+explicit screen-recording permission when macOS asks. Signing/notarization and Keychain,
+capture, universal linking and actual media behavior remain unverified without that Mac.
+
+## Miracast diagnosis
+
+In Windows MirrorMesh choose **Android wireless display options → Wireless display / Miracast**.
+The popup reads Windows receiver status; the separate Wireless Display window owns approval,
+video and Stop. Use **Projection settings** to inspect Windows' settings yourself. If Android
+sees the PC but fails to connect, discovery works; obtain the exact Windows receiver error.
+
+```powershell
+.\scripts\diagnose-miracast.ps1
+```
+
+This read-only report collects capability/listening state without private IPs or driver changes.
+The current host reported Wi-Fi support but mixed display-driver support; no actual Miracast
+handshake repair is verified. Use the MirrorMesh Android app for the owner-confirmed path.
+No Google Cast provider is installed: no compatible permanently free Windows provider has
+been verified, and the owner declined paid licenses/trials.

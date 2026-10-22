@@ -462,6 +462,32 @@ void ReceiverHost::Handle(
       result->Error("wireless_display_unavailable", error);
     return;
   }
+  if (call.method_name() == "wireless_display_status") {
+    if (!wireless_status_.valid())
+      wireless_status_ =
+          std::async(std::launch::async, QueryWirelessDisplayStatus);
+    if (wireless_status_.wait_for(std::chrono::seconds(0)) !=
+        std::future_status::ready) {
+      result->Success(EncodableValue(
+          EncodableMap{{EncodableValue("pending"), EncodableValue(true)}}));
+    } else {
+      const auto status = wireless_status_.get();
+      result->Success(EncodableValue(EncodableMap{
+          {EncodableValue("pending"), EncodableValue(false)},
+          {EncodableValue("wifi"), EncodableValue(status.wifi)},
+          {EncodableValue("listening"), EncodableValue(status.listening)},
+          {EncodableValue("error"), EncodableValue(status.error)}}));
+    }
+    return;
+  }
+  if (call.method_name() == "wireless_display_settings") {
+    const auto error = OpenWirelessDisplaySettings();
+    if (error.empty())
+      result->Success();
+    else
+      result->Error("settings_unavailable", error);
+    return;
+  }
   if (call.method_name() == "fullscreen") {
     const auto *enabled =
         call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;

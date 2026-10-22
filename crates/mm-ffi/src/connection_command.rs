@@ -19,6 +19,9 @@ pub(crate) fn dispatch(input: &str) -> Result<Value, String> {
     };
     let failed = |_| "Native session operation failed".to_owned();
     match text("op")? {
+        "prepare" => Ok(
+            json!({"ok":true, "device_id":native_platform::local_device_id().map_err(|_| "Device identity unavailable")?.to_string()}),
+        ),
         "configure_device" => {
             let details = mm_domain::ReportedDeviceDetails::new(
                 text("platform")?.to_owned(),
@@ -124,7 +127,11 @@ pub(crate) fn dispatch(input: &str) -> Result<Value, String> {
             Ok(json!({"ok":true}))
         }
         "send_stop" => {
-            sender::stop_sender_session(number("id")? as u64, "user-stopped").map_err(failed)?;
+            sender::stop_sender_session(
+                number("id")? as u64,
+                command["reason"].as_str().unwrap_or("user-stopped"),
+            )
+            .map_err(failed)?;
             Ok(json!({"ok":true}))
         }
         "send_event" => {
@@ -142,7 +149,12 @@ pub(crate) fn dispatch(input: &str) -> Result<Value, String> {
                 } => {
                     json!({"ok":true,"kind":"ice","session_id":session_id,"candidate":candidate,"mid":media_id,"line":media_line_index})
                 }
-                _ => json!({"ok":true,"kind":"ended"}),
+                sender::SenderSessionEvent::Stopped { session_id, reason } => {
+                    json!({"ok":true,"kind":"stop","session_id":session_id,"reason":reason})
+                }
+                sender::SenderSessionEvent::Revoked { peer_id } => {
+                    json!({"ok":true,"kind":"revoke","peer_id":peer_id})
+                }
             })
         }
         _ => Err("Unknown connection command".to_owned()),

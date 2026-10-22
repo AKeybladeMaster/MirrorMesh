@@ -6,6 +6,11 @@
 /releases/**/*.zip
 /releases/**/*.apk
 /releases/**/*.aab
+/releases/**/*.tar.gz
+/releases/linux-x64/*
+!/releases/linux-x64/README.md
+/releases/macos-universal/*
+!/releases/macos-universal/README.md
 /releases/**/data/
 /releases/windows-x64/*
 !/releases/windows-x64/README.md

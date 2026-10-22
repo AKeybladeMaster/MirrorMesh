@@ -6,6 +6,32 @@ Historical test evidence on `dev` does not establish correctness of these new ch
 
 ## Current evidence
 
+### Desktop 0.4.1 integration (2026-10-22, test_6)
+
+- Linux Docker/native x86_64 release compilation and packaging exit 0; Linux locked
+  workspace/lib Clippy and Flutter analysis exit 0. Actual complete tarball exists.
+  Archive permission inspection found no world-writable members, and all 19 file digests
+  match. Dependency report resolves all libraries in Ubuntu 24.04. These are build and
+  artifact checks, not an app/session/decoded-frame integration run.
+- Android phone/TV ARM64 debug and unsigned release package commands exit 0, version
+  0.4.1/code10. Unit/instrumentation suites and GitHub workflows were not run or added.
+- Windows 0.4.1+10 final compile/package command exits 0, log
+  `.toolchains/test6-windows-final.log`. Host Rust Clippy exit 0; Dart format and Flutter analysis
+  exit 0. Changed C++ formatting and PowerShell syntax checks exit 0.
+- Final versioned Windows archive verifies all 285 payload digests and its SHA-256 sidecar;
+  final Linux archive verifies all 19 payload digests and its sidecar. All four APK sidecars
+  and 0.4.1/code10 output metadata match. These checks exit 0; no media session ran.
+- POSIX Linux/macOS build-script syntax exit 0. macOS source review found and fixed
+  unconditional CocoaPods fallback, static FFI retention, process library selection
+  and standalone dylib callback-link issues. No Mac compile or signing evidence exists.
+- OS Miracast status reads are diagnostics only. Owner-reported Android discovery succeeds
+  but connection fails. Wi-Fi support and mixed display-driver reports do not establish
+  the handshake failure's root cause. No native Miracast media verification occurred.
+- Read-only `scripts/diagnose-miracast.ps1` exits 0 and reports Wireless Display installed,
+  MiracastSupported Wi-Fi, NotListening while inactive, and running Wi-Fi service. It
+  does not activate a receiver, approve a device or collect private addresses.
+- TV, Linux desktop media, macOS/iOS app execution and 0.4.1 hardware behavior remain pending.
+
 ### Windows 0.3.2 missing AirPlay code (2026-10-21, test_4)
 
 - Owner confirms iOS asks for an AirPlay code but PC shows none. Reproduced with one

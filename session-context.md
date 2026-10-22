@@ -1,5 +1,124 @@
 # MirrorMesh session context
 
+## FINAL BUILD CHECKPOINT - 2026-10-22 / test_6 / 0.4.1
+
+- Final Windows and Linux rebuild/package commands both exit0 after ALL source changes,
+  including Flutter iOS stop/revoke compatibility. Logs .toolchains/test6-windows-final.log
+  and .toolchains/test6-linux-final.log. Windows actual0.4.1+10; phone/TV0.4.1/code10.
+- Windows ZIP releases/MirrorMesh-0.4.1-windows-x64.zip:94,085,016bytes;
+  SHA256 3e7f6d069827212977ffc826281d45dc439885c5fb08a232497da7a59fc6db66.
+  All285payloadfiledigests and archive sidecar verified, exit0. Full bundle includes AirPlay,
+  read-only Miracast diagnostic and TV guide. Keep all DLL/data files with EXE.
+- Linux releases/MirrorMesh-0.4.1-linux-x64.tar.gz:23,674,899bytes;
+  SHA256 e649ba8ff3bb428c378534aa692c35361c2c41fbcaa98f54add83e2edf4201d7.
+  All19payloadfiledigests and archive sidecar verified, no world-writable members, exit0.
+  Native ELF dependency check passes in Ubuntu24.04; desktop/keyring/capture/media UNVERIFIED.
+- All4AndroidARM64 APK sidecars and version metadata verified, exit0. Debug APKs locally
+  signed/installable; optimized APKs unsigned. Windows unsigned. No production-complete claim.
+- Final format check0/zerochanges; Flutteranalysis0/noissues; host+LinuxClippy0;
+  C++format0; PowerShellparse0; POSIXsyntax0; MacXML/Xcodeobject-referencevalidation0.
+  No tests/workflows/physical device verification were added or run.
+- Mac source/build pipeline reviewed and source blockers corrected, but NO Mac/Xcode:
+  no .app, universalZIP/DMG, iOSIPA, MacKeychain/capture/link/sign evidence exists.
+- Owner clarified nativeMiracast: phone remains Connecting; Windowsreceiver shows nothing.
+  Read-only diagnostics return0: installed, WiFiMiracastSupported, NotListening at check,
+  WlanSvcRunning; no matching recent crash IDs returned. Cause/repair NOT established.
+  Popup now shows live OS state and settings shortcut; no security/driver changes.
+- No compatible permanently free WindowsGoogleCastprovider verified; owner declined paid
+  trials/licenses. No provider installed, unavailableGUIoption removed. MirrorMesh app and
+  OS-owned Miracast are the retained Android choices. NativeiOSAirPlay remains Windows-only.
+- TV install guide docs/install-android-tv.md covers USBdrive, phoneMTP limits and wirelessADB.
+  TV remains UNTESTED. Full build instructions/status/ADR0061 updated. Working0.4.0 preserved
+  at pre_release_v1/origin/pre_release_v1 = d4c9c1e. Protected local refs checked unchanged.
+- This checkpoint accompanies the release implementation commit. Inspect HEAD/origin/test_6
+  for publication state; push ONLY HEAD:refs/heads/test_6. Existing owner deleted old0.3.1/0.3.2
+  checksum files and untracked releases/MirrorMesh-win-x64/ remain excluded from this work.
+- Next genuine verification: owner TV install/playback, Linux desktop keyring/capture/media,
+  latest PC/Mobile popup/cleanup behavior, Miracast state while WirelessDisplay is open.
+  Mac/iOS compilation/signing needs access to a Mac. No credit gauge exposed; progress saved.
+
+## RESUMED CHECKPOINT - 2026-10-22 / test_6
+
+- Latest: Linux build/package exit0 confirmed (second build and finalized-docs build;
+  .toolchains/test6-linux-{build,final}.log). Initial archive all19filedigests verified,
+  no world-writable members. Host/Linux Clippy0, Flutteranalysis0, C++format0, PowerShell
+  parse0, POSIXshellsyntax0. Mac XML/Xcode UUID reference validation0 (not compilation).
+- Android phone/TV ARM64 debug AND optimized unsigned release0.4.1/code10 built/packaged
+  exit0; all4APKdigests and build metadata match. Logs .toolchains/test6-android-{debug,release}.log.
+  Windows final build/package exit0 (.toolchains/test6-windows-final.log), version0.4.1+10.
+  Versioned ZIP94,085,013bytes SHA33223cd5e5a8a055778f59df494771ffb0338295419c48aefecd937245e50bcb
+  existed before one final Flutter iOS compatibility source correction; refresh final archives.
+- Read-only review completed; all findings addressed: optional pod fallback, static export
+  retention, Mac RustSessionStatus process library, and cargo rustc --lib --crate-type staticlib
+  to avoid linking Swift callbacks into an independent dylib. Mac remains SOURCE ONLY.
+- Final caller audit found Flutter iOS mobile sender also expected legacy ended; now handles
+  stop/revoke/ended, matching the Android fix. Rebuild desktop packages once after this fix,
+  then hash/verify, commit/push test_6 only. No unit/instrumentation/workflow tests run.
+- Owner clarified Miracast: phone stays Connecting, Windows Wireless Display shows nothing.
+  Current read-only query reports installed, MiracastSupported WiFi, NotListening, WlanSvc
+  running; no matching recent crash IDs returned. This does NOT establish historical failure
+  root cause. No receiver activation/approval/media/driver/security change was performed.
+  Retain honest diagnosis boundary; actual native Miracast handshake is still unresolved.
+
+- Resumed existing worktree; HEAD remains d4c9c1e on test_6. No other branch changed.
+  Windows package completed overnight: .toolchains/test6-windows-build.log reports build
+  and portable packaging success; actual EXE ProductVersion/FileVersion is 0.4.1+10.
+  Prior exec sessions no longer exist, so their process exit codes are not retained.
+- Docker Linux toolchain completed/exported successfully; Linux application build started
+  with scripts/build-linux-docker.ps1 -SkipToolchainBuild, log .toolchains/test6-linux-build.log.
+  It builds a source snapshot in a separate Linux filesystem, leaving Windows caches intact.
+- Added OS-owned Miracast status dialog backed by bounded WinRT worker query (Wi-Fi support,
+  listening/pending/connected/policy). Opens projection Settings only on button click.
+  This is diagnosis/feedback, NOT a verified repair of the owner's failing Android connection.
+- Added scripts/build-linux.sh, build-linux-docker.ps1, build-macos.sh; TV installation guide
+  docs/install-android-tv.md (USB/MTP limits, wireless ADB, ARM64/AndroidTV compatibility).
+- Read-only requesting-code-review began, but reviewer hit a service usage limit before
+  final report. Its concrete Mac findings were addressed: conditional CocoaPods fallback
+  and explicit generated Rust exported-symbol retention. Review is incomplete; no tests run.
+- Continue Linux compile/package fixes, final Windows/static checks, Mac source/build review,
+  ADR0061/readiness/build docs; save all work and commit/push only test_6. Preserve owner
+  untracked release folder and existing old checksum deletions. No Mac binary can be built here.
+
+## ACTIVE CHECKPOINT - 2026-10-21 / test_6 desktop release work
+
+- Owner reports Windows/Android apps and iOS connections working on0.4.0, TV NOT tested.
+  Native Miracast sees PC but fails connecting; Google Cast not working. Pushed immutable
+  pre_release_v1 at d4c9c1e66bd0dc11d11618f8c691b2aa53dac47e; created/switched test_6.
+  Work/push onlytest_6; all older refs preserved. Existing owner deletions of old0.3.1/0.3.2
+  Windows ZIP checksum files remain uncommitted; keep them, do not restore/discard silently.
+  Preserve untracked releases/MirrorMesh-win-x64/ and the user's running app.
+- Owner has WSL/Windows only, NO Mac, NO paid Cast license. Updated direction: use free
+  Cast only if legitimate usable option exists; otherwise stick to Miracast and MirrorMesh.
+  Official AirServer/Reflector are licensed/time-limited, not a free bundled provider.
+  Do not install paid trials/purchase/license-bypass. Google Cast option removed in test_6.
+- Docker engine works (Linux x86_64); only docker-desktop WSL distro. Pulled officialUbuntu
+  24.04 digest68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac.
+  scripts/linux.Dockerfile builds pinned Flutter3.47.7 source abaf9c523780a608bd46686fd5e53740a07077f8,
+  Rust1.99.1, GTK toolchain. Build running .toolchains/test6-linux-toolchain.log (exec81326).
+  Official prebuilt Linux Flutter release archive/JSON returned404, but pinned Git tag and
+  engine Linux artifacts accessible. Source checkout/precache used; no dependency downgrade.
+- Added Linux shared NativePairingService/revocation facade using existing Secret Service
+  identity and private SQLite runtime. Enabled common FFI connection/receiver on Linux/Mac;
+  macOS reuses Apple adapter/Keychain ABI with desktop-private namespace. Only Cargo.lock
+  change adds existing workspace mm-adapter-signaling dependency edge to Linux adapter.
+- Desktop sender reuses existing WebRTC session controller; Windows native channel stays,
+  Linux/Mac use same JSON command API, including stop/revoke events. Linux/mac profile,
+  automatic LAN and native fullscreen integrated; Linux runner adds receiver channel.
+- Generated macOS shell ONLY in ignored .toolchains/test6-macos-shell, copied platform files
+  excluding tests. Removed generated Xcode test target/records using balanced object parser,
+  added static Rust build phase/force-load and macOS13deployment/network entitlements.
+  MainFlutterWindow.swift implements Apple Keychain callbacks, desktop pairing bootstrap,
+  NWPathMonitor LAN/public device info/fullscreen. Mac source NOT compiled; no .app/DMG.
+- Miracast read-only diagnostics: Microsoft.PPIProjection now installed; netsh Wi-Fi reports
+  wireless display supported; WinRT status WiFiStatus MiracastSupported, NotListening while
+  system receiver not active. DxDiag overall Available/noHDCP, each NVIDIA RTX2070SUPER /
+  Parsec display says NotSupportedByGraphicsDriver. No driver/security/authorization changed.
+  Need accurate receiver capability/error reporting; do not claim actual connection fixed.
+- Next: finish portable UI/static checks, Linux toolchain/build/package, Mac release script
+  source review, TV install guide (USB/file transfer/Wi-Fi ADB/ABI), native Miracast diagnosis
+  and honest UX, Windows rebuild, docs/readiness/checksums, test_6-only commit/push.
+  No test files/suites/workflows allowed. No credit gauge available; checkpoints saved.
+
 ## ACTIVE CHECKPOINT - 2026-10-21 / test_5 product integration
 
 - Owner now confirms PC/Android apps work and iPhone/iPad connect to PC via AirPlay code.

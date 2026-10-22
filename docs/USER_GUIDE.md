@@ -71,6 +71,9 @@ image on Android is needed to confirm reception and presentation.
 
 ## Troubleshooting
 
+For TV installation by USB drive, phone transfer or wireless ADB, follow the
+[Android TV installation guide](install-android-tv.md). TV hardware has not yet been verified.
+
 | Symptom | Action |
 | --- | --- |
 | No Android address | Connect to Wi-Fi/Ethernet and retry Start receiver; allow local-network permission |

@@ -1,12 +1,14 @@
 # MirrorMesh release branch operating contract
 
-The owner confirmed Windows/Android sharing and native iPhone/iPad AirPlay connections,
-then requested `test_5` from committed `test_4` at 56a8a28. Work, commit and push only on
-`test_5`. Preserve `test_4`, `test_3`, `test_2`, `test`, `dev`, `main` and all `task_*` refs.
-Scope: informative device approval, one automatically selected LAN listener, private
-network addresses outside incoming approval, popup operation feedback, minimal native
-interfaces, and the requested screen-sharing directions/native receiver integrations.
-Never present unsupported native casting or unbuilt iOS binaries as completed products.
+The owner confirmed the Windows/Android apps and iOS connections, with TV untested and
+native Miracast/Google Cast not working. The confirmed 0.4.0 commit d4c9c1e is pushed as
+`pre_release_v1`. Work, commit and push only on `test_6`, created from that checkpoint.
+Preserve `pre_release_v1`, `test_5`, all older test branches, `dev`, `main` and `task_*` refs.
+Scope: TV installation instructions, legitimate native Cast provider integration, diagnosis
+of native receiver prerequisites, and functional macOS/Linux source and release builds.
+An external licensed receiver is not an embedded MirrorMesh engine. Do not purchase a
+license or redistribute commercial providers without authorization and applicable rights.
+Never present unsupported native casting or unbuilt Apple/Linux binaries as completed products.
 
 Read `README.md`, `docs/IMPLEMENTATION_STATUS.md`, `docs/build-release.md`,
 `docs/protocol.md`, `docs/security-legal.md` and `session-context.md` before changes.

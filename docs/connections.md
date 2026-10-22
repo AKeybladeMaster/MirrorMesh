@@ -62,20 +62,25 @@ See [AirPlay details](airplay.md). The owner confirmed native AirPlay connection
 
 ## Native Android wireless display options
 
-On Windows choose Android wireless display / Cast options:
+On Windows choose Android wireless display options:
 
 - **Wireless display / Miracast:** opens Microsoft's installed Wireless Display app in its
   own window. Windows handles device approval, rendering and disconnect. Install the
   optional feature in Settings > System > Projecting to this PC if it is missing. A
   compatible Wi-Fi adapter and Android Miracast sender are required. This is an external
-  system receiver handoff, not an embedded MirrorMesh session. Check its own support message.
-- **Google Cast:** unavailable because there is no compatible Windows receiver SDK/provider.
-  Google's public receiver SDK targets Cast devices/Web/Android TV. The option reports this
-  limitation and offers the MirrorMesh Android route; it does not pretend to start casting.
+  system receiver handoff, not an embedded MirrorMesh session. The popup observes OS
+  listening/connection state and offers projection settings. If the PC appears but fails
+  connecting, note the exact receiver error; no Miracast repair is verified here.
 - **MirrorMesh app:** opens the PC QR receiver page for the Android app.
 
 Switch modes after ending the current sharing session. Close Wireless Display in its own
 window when finished; MirrorMesh does not terminate a system-owned receiver process.
+
+No Google Cast option/provider is installed. No compatible permanently free Windows
+provider was verified; the owner chose Miracast and MirrorMesh instead of paid providers.
+Linux/macOS source uses the same MirrorMesh app connection/approval flow; native Windows
+AirPlay/Miracast companion options do not appear on those platforms. Linux is build-verified,
+with actual desktop media pending; macOS is source-only and requires a Mac to build/sign.
 
 ## Stop, privacy and verification
 

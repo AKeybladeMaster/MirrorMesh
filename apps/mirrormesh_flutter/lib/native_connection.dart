@@ -7,7 +7,7 @@ import 'dart:isolate';
 Future<Map<String, dynamic>> nativeConnection(
   Map<String, dynamic> command,
 ) => Isolate.run(() {
-  final library = Platform.isIOS
+  final library = (Platform.isIOS || Platform.isMacOS)
       ? DynamicLibrary.process()
       : DynamicLibrary.open(Platform.isWindows ? 'mm_ffi.dll' : 'libmm_ffi.so');
   final allocate = library

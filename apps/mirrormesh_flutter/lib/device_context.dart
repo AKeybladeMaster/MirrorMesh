@@ -5,8 +5,13 @@ import 'receiver_window.dart';
 
 /// Public OS facts and one local routed interface; never displayed as setup addresses.
 Future<Map<String, String>> readDeviceContext() async {
-  if (!Platform.isWindows && !Platform.isIOS) {
-    throw UnsupportedError('This interface requires Windows or iOS.');
+  if (!Platform.isWindows &&
+      !Platform.isIOS &&
+      !Platform.isMacOS &&
+      !Platform.isLinux) {
+    throw UnsupportedError(
+      'This platform does not provide device information.',
+    );
   }
   final values = await ReceiverWindow.channel.invokeMapMethod<String, dynamic>(
     'device_context',

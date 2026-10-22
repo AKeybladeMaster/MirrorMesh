@@ -15,6 +15,7 @@ import 'native_connection.dart';
 import 'device_context.dart';
 import 'connection_popups.dart';
 import 'receiver_window.dart';
+import 'wireless_display_dialog.dart';
 import 'airplay_receiver_page.dart';
 
 class MirrorMeshApp extends StatelessWidget {
@@ -126,7 +127,10 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                 onPressed:
                     _requestId == null &&
                         !_busy &&
-                        (Platform.isWindows || Platform.isIOS)
+                        (Platform.isWindows ||
+                            Platform.isMacOS ||
+                            Platform.isLinux ||
+                            Platform.isIOS)
                     ? () => Navigator.of(context).push<void>(
                         MaterialPageRoute(
                           builder: (_) => const ReceiveScreenPage(),
@@ -139,7 +143,11 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                 ),
               ),
               OutlinedButton.icon(
-                onPressed: Platform.isWindows && !_searching
+                onPressed:
+                    (Platform.isWindows ||
+                            Platform.isMacOS ||
+                            Platform.isLinux) &&
+                        !_searching
                     ? _searchDevices
                     : null,
                 icon: Icon(_searching ? Icons.hourglass_top : Icons.search),
@@ -169,7 +177,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                       ? _nativeAndroidReceiver
                       : null,
                   icon: const Icon(Icons.connected_tv),
-                  label: const Text('Android wireless display / Cast options'),
+                  label: const Text('Android wireless display options'),
                 ),
               if (_nearby.isNotEmpty) ...[
                 const SizedBox(height: 12),
@@ -254,7 +262,9 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
                         children: [
                           FilledButton.icon(
                             onPressed:
-                                Platform.isWindows &&
+                                (Platform.isWindows ||
+                                        Platform.isMacOS ||
+                                        Platform.isLinux) &&
                                     !_busy &&
                                     _requestId == null
                                 ? _connect
@@ -364,7 +374,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
               ),
               const SizedBox(height: 20),
               Text(
-                Platform.isWindows
+                (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
                     ? 'Local encrypted screen sharing · receiver approval · no account required'
                     : 'This Flutter release sends screens on Windows. Use the native Android receiver APK on phones and TVs.',
               ),
@@ -426,14 +436,6 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
             ),
           ),
           SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, 'cast'),
-            child: const ListTile(
-              leading: Icon(Icons.cast),
-              title: Text('Google Cast'),
-              subtitle: Text('A Windows receiver provider is required'),
-            ),
-          ),
-          SimpleDialogOption(
             onPressed: () => Navigator.pop(context, 'app'),
             child: const ListTile(
               leading: Icon(Icons.qr_code_2),
@@ -449,12 +451,6 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
       await Navigator.of(context).push<void>(
         MaterialPageRoute(builder: (_) => const ReceiveScreenPage()),
       );
-    } else if (mode == 'cast') {
-      await connectionNotice(
-        context,
-        'Google Cast is unavailable',
-        'No compatible Windows Google Cast receiver provider is installed. You can share from the MirrorMesh Android app using the PC QR invitation.',
-      );
     } else {
       try {
         await withConnectionProgress(
@@ -465,10 +461,9 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
           ),
         );
         if (!mounted) return;
-        await connectionNotice(
-          context,
-          'Use the Windows receiver window',
-          'Choose this PC from Wireless display on your Android device. Windows handles connection approval, rendering and disconnect in its own window. Check that window for hardware support.',
+        await showDialog<void>(
+          context: context,
+          builder: (_) => const WirelessDisplayDialog(),
         );
       } on PlatformException catch (error) {
         if (!mounted) return;
@@ -900,7 +895,7 @@ class _MirrorMeshHomeState extends State<MirrorMeshHome> {
   Future<void> _copyDiagnostics() => Clipboard.setData(
     ClipboardData(
       text:
-          'MirrorMesh Windows 0.4.0\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
+          'MirrorMesh ${Platform.operatingSystem} 0.4.1\nStatus: $_status\nPairing code: ${_pairingStatus?.errorCode ?? 0}\nFrames encoded: ${_stats?.framesEncoded ?? 0}\nBytes sent: ${_stats?.bytesSent ?? 0}\nCodec: ${_stats?.codecMimeType ?? 'unknown'}\nEncoder: ${_stats?.encoderImplementation ?? 'unknown'}\nError: ${_error ?? 'none'}\n',
     ),
   );
 

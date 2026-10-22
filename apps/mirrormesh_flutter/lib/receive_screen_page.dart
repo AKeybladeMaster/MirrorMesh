@@ -7,6 +7,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import 'ios_pairing_bootstrap.dart';
+import 'windows_pairing_bootstrap.dart';
 import 'native_connection.dart';
 import 'device_context.dart';
 import 'connection_popups.dart';
@@ -74,7 +75,11 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
         context,
         'Starting receiver',
         () async {
-          if (Platform.isIOS) await const IosPairingBootstrap().prepare();
+          if (Platform.isIOS) {
+            await const IosPairingBootstrap().prepare();
+          } else {
+            await const WindowsPairingBootstrap().prepare();
+          }
           final address = await preferredLanAddress();
           if (!mounted || generation != _generation || _disposing) {
             throw StateError('Receiver start cancelled.');
@@ -344,7 +349,8 @@ class _ReceiveScreenPageState extends State<ReceiveScreenPage> {
     appBar: AppBar(
       title: const Text('Receive another device’s screen'),
       actions: [
-        if (Platform.isWindows && _connection != null)
+        if ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
+            _connection != null)
           IconButton(
             tooltip: _fullscreen
                 ? 'Exit full screen (Esc)'

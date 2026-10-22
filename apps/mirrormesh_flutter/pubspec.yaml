@@ -1,7 +1,7 @@
 name: mirrormesh_flutter
 description: MirrorMesh cross-platform session control UI.
 publish_to: none
-version: 0.4.0+9
+version: 0.4.1+10
 
 environment:
   sdk: ">=3.13.0 <4.0.0"

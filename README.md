@@ -1,9 +1,10 @@
 # MirrorMesh
 
 Local screen sharing from a **Windows x64 PC to a native Android phone, tablet or TV receiver**.
-Current development is exclusively on `test_5`, from preserved `test_4` at `56a8a28`.
-Version 0.4.0 adds signed reported device facts in approval dialogs, automatic LAN selection,
-private setup screens and popup feedback on Windows, Android and iOS source interfaces.
+Current development is exclusively on `test_6`, from working version 0.4.0 preserved on
+`pre_release_v1` at `d4c9c1e`. Desktop version 0.4.1 adds Linux/macOS shared pairing integration
+and live Windows Miracast status. macOS source is unbuilt; Linux x64 is build-verified.
+Version 0.4.0 introduced signed device facts, automatic LAN selection and approval popups.
 Update Windows and Android together: new device-fact proofs require upgraded receivers.
 
 The owner reports PC/Android sharing and native iPhone/iPad AirPlay connections working
@@ -16,8 +17,9 @@ compilation/signing on macOS remains pending. See the [readiness table](docs/IMP
 ## Get started
 
 1. [Install and use the apps](docs/USER_GUIDE.md).
-2. [Build Windows and Android](docs/build-release.md).
+2. [Build the desktop and Android apps](docs/build-release.md).
 3. [Read the actual implementation and build status](docs/IMPLEMENTATION_STATUS.md).
+4. [Install the APK on Android TV / Google TV](docs/install-android-tv.md).
 
 The implemented path uses an expiring receiver invitation, pinned TLS 1.3 signaling,
 Ed25519 sender identity, explicit receiver approval, native WebRTC H.264 capture and
@@ -46,6 +48,6 @@ Per the owner's instruction, this branch contains no unit/instrumentation test s
 fuzz targets or GitHub Actions workflows. Their history remains on `dev`. Local compilation,
 formatting and static analysis are used here without executing test suites.
 
-The broader design still includes Linux, Android sending, iOS and browser reception.
-Those retained foundations are **not** complete products. See [status](docs/IMPLEMENTATION_STATUS.md)
+The broader design includes Linux/macOS desktop, Android sending, iOS and browser reception.
+Readiness differs by platform; see [status](docs/IMPLEMENTATION_STATUS.md)
 and [the original specification](docs/SPEC-001-mirrormesh.md).

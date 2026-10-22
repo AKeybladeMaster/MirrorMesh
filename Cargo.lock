@@ -1185,6 +1185,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "mm-adapter-identity",
+ "mm-adapter-signaling",
  "mm-domain",
  "mm-ports",
  "mm-runtime",

@@ -1,46 +1,48 @@
 #include "my_application.h"
+#include "device_context.h"
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
-#include <flutter_linux/flutter_linux.h>
 #include <flutter_linux/fl_method_call.h>
 #include <flutter_linux/fl_method_channel.h>
 #include <flutter_linux/fl_method_response.h>
 #include <flutter_linux/fl_standard_method_codec.h>
 #include <flutter_linux/fl_value.h>
+#include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
 
-extern "C" int32_t mirrormesh_linux_prepare_pairing_runtime(
-    uint8_t* device_id_out,
-    size_t device_id_capacity);
+extern "C" int32_t
+mirrormesh_linux_prepare_pairing_runtime(uint8_t *device_id_out,
+                                         size_t device_id_capacity);
 
 struct _MyApplication {
   GtkApplication parent_instance;
-  char** dart_entrypoint_arguments;
-  FlMethodChannel* pairing_channel;
+  char **dart_entrypoint_arguments;
+  FlMethodChannel *pairing_channel;
+  FlMethodChannel *receiver_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 struct PairingRuntimeReply {
-  FlMethodCall* method_call;
+  FlMethodCall *method_call;
   int32_t status;
   uint8_t device_id[16];
 };
 
 static gboolean respond_pairing_runtime(gpointer user_data) {
   std::unique_ptr<PairingRuntimeReply> reply(
-      static_cast<PairingRuntimeReply*>(user_data));
+      static_cast<PairingRuntimeReply *>(user_data));
   g_autoptr(FlMethodResponse) response = nullptr;
 
   if (reply->status == 0) {
-    g_autofree gchar* device_id = g_strdup_printf(
+    g_autofree gchar *device_id = g_strdup_printf(
         "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
         reply->device_id[0], reply->device_id[1], reply->device_id[2],
         reply->device_id[3], reply->device_id[4], reply->device_id[5],
@@ -65,15 +67,15 @@ static gboolean respond_pairing_runtime(gpointer user_data) {
 }
 
 static gpointer initialize_pairing_runtime(gpointer user_data) {
-  auto* reply = static_cast<PairingRuntimeReply*>(user_data);
+  auto *reply = static_cast<PairingRuntimeReply *>(user_data);
   reply->status = mirrormesh_linux_prepare_pairing_runtime(
       reply->device_id, sizeof(reply->device_id));
   g_main_context_invoke(nullptr, respond_pairing_runtime, reply);
   return nullptr;
 }
 
-static void pairing_method_call_cb(FlMethodChannel* channel,
-                                   FlMethodCall* method_call,
+static void pairing_method_call_cb(FlMethodChannel *channel,
+                                   FlMethodCall *method_call,
                                    gpointer user_data) {
   (void)channel;
   (void)user_data;
@@ -85,22 +87,47 @@ static void pairing_method_call_cb(FlMethodChannel* channel,
     return;
   }
 
-  auto* reply = new PairingRuntimeReply{
+  auto *reply = new PairingRuntimeReply{
       FL_METHOD_CALL(g_object_ref(method_call)), 2, {0}};
-  GThread* worker = g_thread_new(
-      "mirrormesh-pairing-runtime", initialize_pairing_runtime, reply);
+  GThread *worker = g_thread_new("mirrormesh-pairing-runtime",
+                                 initialize_pairing_runtime, reply);
   g_thread_unref(worker);
 }
 
+static void receiver_method_call_cb(FlMethodChannel *, FlMethodCall *call,
+                                    gpointer user_data) {
+  const gchar *method = fl_method_call_get_name(call);
+  if (g_strcmp0(method, "device_context") == 0) {
+    g_autoptr(FlValue) context = query_device_context();
+    fl_method_call_respond_success(call, context, nullptr);
+  } else if (g_strcmp0(method, "fullscreen") == 0) {
+    FlValue *value = fl_method_call_get_args(call);
+    if (!value || fl_value_get_type(value) != FL_VALUE_TYPE_BOOL) {
+      fl_method_call_respond_error(call, "invalid_argument",
+                                   "Expected a fullscreen setting.", nullptr,
+                                   nullptr);
+      return;
+    }
+    auto *window = GTK_WINDOW(user_data);
+    if (fl_value_get_bool(value))
+      gtk_window_fullscreen(window);
+    else
+      gtk_window_unfullscreen(window);
+    fl_method_call_respond_success(call, nullptr, nullptr);
+  } else {
+    fl_method_call_respond_not_implemented(call, nullptr);
+  }
+}
+
 // Called when first Flutter frame received.
-static void first_frame_cb(MyApplication* self, FlView* view) {
+static void first_frame_cb(MyApplication *self, FlView *view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
 // Implements GApplication::activate.
-static void my_application_activate(GApplication* application) {
-  MyApplication* self = MY_APPLICATION(application);
-  GtkWindow* window =
+static void my_application_activate(GApplication *application) {
+  MyApplication *self = MY_APPLICATION(application);
+  GtkWindow *window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
   // Use a header bar when running in GNOME as this is the common style used
@@ -112,22 +139,22 @@ static void my_application_activate(GApplication* application) {
   // if future cases occur).
   gboolean use_header_bar = TRUE;
 #ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
+  GdkScreen *screen = gtk_window_get_screen(window);
   if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
+    const gchar *wm_name = gdk_x11_screen_get_window_manager_name(screen);
     if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
       use_header_bar = FALSE;
     }
   }
 #endif
   if (use_header_bar) {
-    GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
+    GtkHeaderBar *header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "mirrormesh_flutter");
+    gtk_header_bar_set_title(header_bar, "MirrorMesh");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "mirrormesh_flutter");
+    gtk_window_set_title(window, "MirrorMesh");
   }
 
   gtk_window_set_default_size(window, 1280, 720);
@@ -136,7 +163,7 @@ static void my_application_activate(GApplication* application) {
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
 
-  FlView* view = fl_view_new(project);
+  FlView *view = fl_view_new(project);
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.
@@ -161,14 +188,20 @@ static void my_application_activate(GApplication* application) {
   fl_method_channel_set_method_call_handler(
       self->pairing_channel, pairing_method_call_cb, nullptr, nullptr);
 
+  g_clear_object(&self->receiver_channel);
+  self->receiver_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "com.mirrormesh/receiver_window", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->receiver_channel, receiver_method_call_cb, window, nullptr);
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
 // Implements GApplication::local_command_line.
-static gboolean my_application_local_command_line(GApplication* application,
-                                                  gchar*** arguments,
-                                                  int* exit_status) {
-  MyApplication* self = MY_APPLICATION(application);
+static gboolean my_application_local_command_line(GApplication *application,
+                                                  gchar ***arguments,
+                                                  int *exit_status) {
+  MyApplication *self = MY_APPLICATION(application);
   // Strip out the first argument as it is the binary name.
   self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
 
@@ -186,7 +219,7 @@ static gboolean my_application_local_command_line(GApplication* application,
 }
 
 // Implements GApplication::startup.
-static void my_application_startup(GApplication* application) {
+static void my_application_startup(GApplication *application) {
   // MyApplication* self = MY_APPLICATION(object);
 
   // Perform any actions required at application startup.
@@ -195,7 +228,7 @@ static void my_application_startup(GApplication* application) {
 }
 
 // Implements GApplication::shutdown.
-static void my_application_shutdown(GApplication* application) {
+static void my_application_shutdown(GApplication *application) {
   // MyApplication* self = MY_APPLICATION(object);
 
   // Perform any actions required at application shutdown.
@@ -204,14 +237,15 @@ static void my_application_shutdown(GApplication* application) {
 }
 
 // Implements GObject::dispose.
-static void my_application_dispose(GObject* object) {
-  MyApplication* self = MY_APPLICATION(object);
+static void my_application_dispose(GObject *object) {
+  MyApplication *self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_object(&self->pairing_channel);
+  g_clear_object(&self->receiver_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
-static void my_application_class_init(MyApplicationClass* klass) {
+static void my_application_class_init(MyApplicationClass *klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
   G_APPLICATION_CLASS(klass)->local_command_line =
       my_application_local_command_line;
@@ -220,9 +254,9 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication *self) {}
 
-MyApplication* my_application_new() {
+MyApplication *my_application_new() {
   // Set the program name to the application ID, which helps various systems
   // like GTK and desktop environments map this running application to its
   // corresponding .desktop file. This ensures better integration by allowing

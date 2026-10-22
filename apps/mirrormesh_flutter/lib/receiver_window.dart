@@ -7,7 +7,7 @@ abstract final class ReceiverWindow {
   static const channel = MethodChannel('com.mirrormesh/receiver_window');
 
   static Future<void> setFullscreen(bool enabled) async {
-    if (Platform.isWindows) {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       await channel.invokeMethod<void>('fullscreen', enabled);
     }
   }

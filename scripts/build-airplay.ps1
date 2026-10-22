@@ -1,7 +1,7 @@
 param([string]$MsysRoot = '', [switch]$SkipCompile)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ((git -C $root branch --show-current) -ne 'test_5') { throw 'Build only from test_5.' }
+if ((git -C $root branch --show-current) -ne 'test_6') { throw 'Build only from test_6.' }
 if (-not $MsysRoot) { $MsysRoot = Join-Path $root '.toolchains/msys64' }
 $MsysRoot = (Resolve-Path -LiteralPath $MsysRoot).Path
 $bash = Join-Path $MsysRoot 'usr/bin/bash.exe'

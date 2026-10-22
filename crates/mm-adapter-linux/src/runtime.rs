@@ -75,9 +75,10 @@ mod linux_runtime {
 
     static LINUX_PAIRING_RUNTIME: OnceLock<Mutex<Option<(DeviceId, LinuxPairingRuntime)>>> =
         OnceLock::new();
+    static DATABASE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
     /// Opens Linux identity and trust storage after the user explicitly starts pairing.
-    pub(super) fn initialize_pairing_runtime() -> Result<DeviceId, PortError> {
+    pub fn initialize_pairing_runtime() -> Result<DeviceId, PortError> {
         initialize_once(&LINUX_PAIRING_RUNTIME, || {
             let data_home = data_home_directory(
                 env::var_os("XDG_DATA_HOME").as_deref().map(Path::new),
@@ -99,8 +100,45 @@ mod linux_runtime {
             let fingerprint = identity.fingerprint_public_key(&public_key)?;
             let device_id = device_id_from_fingerprint(fingerprint);
             let runtime = PairingRuntime::new(device_id, identity, trusted_peers)?;
+            let _ = DATABASE_PATH.set(database_path);
             Ok((device_id, runtime))
         })
+    }
+
+    pub fn create_pairing_service(
+        address: std::net::SocketAddr,
+    ) -> Result<
+        mm_adapter_signaling::native_service::NativePairingService<
+            SqliteTrustedPeers,
+            LinuxPairingIdentity,
+        >,
+        mm_adapter_signaling::native_service::NativePairingServiceError,
+    > {
+        use mm_adapter_signaling::native_service::{
+            NativePairingService, NativePairingServiceError,
+        };
+        let id = initialize_pairing_runtime().map_err(NativePairingServiceError::Platform)?;
+        let path = DATABASE_PATH
+            .get()
+            .ok_or(NativePairingServiceError::Platform(PortError::Unavailable))?;
+        let identity = Arc::new(
+            LinuxPairingIdentity::open_or_create().map_err(NativePairingServiceError::Platform)?,
+        );
+        let peers = Arc::new(
+            SqliteTrustedPeers::open(path)
+                .map_err(|_| NativePairingServiceError::Platform(PortError::StorageFailure))?,
+        );
+        let runtime = PairingRuntime::new(id, Arc::clone(&identity), peers)
+            .map_err(NativePairingServiceError::Platform)?;
+        NativePairingService::bind(address, runtime, identity)
+    }
+
+    pub fn revoke_trusted_peer(id: DeviceId, now: u64) -> Result<(), PortError> {
+        use mm_ports::TrustedPeerPort;
+        let path = DATABASE_PATH.get().ok_or(PortError::Unavailable)?;
+        SqliteTrustedPeers::open(path)
+            .map_err(|_| PortError::StorageFailure)?
+            .revoke(id, now)
     }
 
     fn ensure_private_directory(path: &Path) -> Result<(), PortError> {
@@ -163,4 +201,4 @@ mod linux_runtime {
 }
 
 #[cfg(target_os = "linux")]
-pub use linux_runtime::initialize_pairing_runtime;
+pub use linux_runtime::{create_pairing_service, initialize_pairing_runtime, revoke_trusted_peer};

@@ -110,7 +110,7 @@ pub(crate) fn start_pairing(address: &str) -> Result<String, String> {
         .create_invitation(&address.to_string(), monotonic_millis(), now_unix_seconds)
         .map_err(|_| "receiver pairing invitation could not be created".to_owned())?;
     let uri = invitation.uri().to_owned();
-    #[cfg(windows)]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     {
         // Discovery is optional and never changes the pinned invitation or consent flow.
         if let Ok(id) = local_device_id()
@@ -307,7 +307,7 @@ pub(crate) fn stop_pairing() -> Result<Value, String> {
     let _lifecycle = LIFECYCLE
         .lock()
         .map_err(|_| "receiver lifecycle lock unavailable".to_owned())?;
-    #[cfg(windows)]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     crate::network_devices::stop_advertisement();
     let service = service_slot()
         .lock()

@@ -1,11 +1,11 @@
 use mm_adapter_discovery::MdnsDiscoveryAdapter;
 use serde_json::json;
 
-#[cfg(windows)]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 static RECEIVER_ADVERTISEMENT: std::sync::OnceLock<mm_adapter_discovery::MdnsServicePublisher> =
     std::sync::OnceLock::new();
 
-#[cfg(windows)]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub(crate) fn publish_receiver(
     id: mm_domain::DeviceId,
     address: std::net::SocketAddr,
@@ -32,7 +32,7 @@ pub(crate) fn publish_receiver(
         )
 }
 
-#[cfg(windows)]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub(crate) fn stop_advertisement() {
     if let Some(publisher) = RECEIVER_ADVERTISEMENT.get() {
         let _ = publisher.stop();

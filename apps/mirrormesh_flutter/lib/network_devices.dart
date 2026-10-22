@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:isolate';
+import 'dart:io';
 
 /// Reuses the shared Rust DNS-SD adapter; this never scans a subnet or trusts a result.
 Future<List<Map<String, dynamic>>> discoverNetworkDevices() => Isolate.run(() {
-  final library = DynamicLibrary.open('mm_ffi.dll');
+  final library = Platform.isMacOS
+      ? DynamicLibrary.process()
+      : DynamicLibrary.open(Platform.isWindows ? 'mm_ffi.dll' : 'libmm_ffi.so');
   final discover = library
       .lookupFunction<Pointer<Uint8> Function(), Pointer<Uint8> Function()>(
         'mirrormesh_discover_devices',

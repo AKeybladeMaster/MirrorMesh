@@ -1,6 +1,7 @@
 # Implementation status — test release integration
 
-Current branch: `test_5`, from preserved `test_4` / `56a8a28`. Windows/Android version 0.4.0.
+Current branch: `test_6`, from working 0.4.0 preserved as `pre_release_v1` / `d4c9c1e`.
+Current desktop/Android preview version: 0.4.1. No other branch is modified.
 This document supersedes historical increment counts for this release candidate.
 
 ## Readiness labels
@@ -15,6 +16,53 @@ This document supersedes historical increment counts for this release candidate.
 - **CODE_COMPLETE:** the complete agreed product requirements are implemented; not yet achieved project-wide.
 
 ## Current reference pipeline
+
+### 0.4.1 desktop integration and receiver diagnosis (2026-10-22, test_6)
+
+- **Source implemented:** Linux/macOS desktop send and receive use the existing Rust
+  identity, pinned TLS, approval, signaling, trust and native WebRTC pipeline. Linux
+  reuses Secret Service/private SQLite; macOS reuses the Apple adapter with a separate
+  Keychain namespace. Public device facts, one LAN interface and fullscreen are integrated.
+  Shared stop/revoke events now retain their details; Android and Flutter iOS senders
+  handle both terminal events.
+- **BUILD_VERIFIED:** Linux x86_64 Ubuntu 24.04 build/package exit 0; locked workspace
+  Clippy and Flutter analysis exit 0. Archive contains the native executable, Flutter,
+  WebRTC and Rust shared libraries; all 19 packaged file digests match. All reported
+  dynamic dependencies resolve in the build image. System-audio loopback is unavailable
+  in that image; app screen sharing remains video-only. No Linux desktop media ran.
+- **BUILD_VERIFIED:** Android ARM64 phone/TV debug and unsigned optimized release APK
+  build/package commands exit 0, version 0.4.1/code 10. No test suite or workflow ran.
+- **BUILD_VERIFIED:** Windows 0.4.1+10 native/Flutter portable build and packaging exit 0.
+  The complete unsigned bundle includes the AirPlay runtime, Miracast diagnostic and TV
+  installation guide. Owner-confirmed 0.4.0 remains preserved on `pre_release_v1`.
+- **macOS:** source and universal build pipeline added, including explicit static-only
+  Rust link and runtime FFI exports. POSIX shell syntax is valid. No Mac/Xcode is available;
+  Swift/Apple linking, entitlement/signing, Keychain, capture and playback are UNVERIFIED.
+  No macOS .app, ZIP/DMG or iOS IPA was produced on Windows/WSL.
+- **Miracast:** Windows-owned Wireless Display handoff now has a live OS status popup
+  and explicit projection-settings button, plus a read-only diagnostic script. Owner
+  reports PC discovery succeeds but connection fails. This host reports Wi-Fi support
+  with mixed display-driver support/no HDCP. These findings do not prove a root cause
+  or repair. No driver, firewall, policy or authorization setting was changed.
+- **Google Cast:** no compatible permanently free Windows receiver provider verified.
+  Owner declined paid providers/trials and chose Miracast/MirrorMesh. No provider installed;
+  unavailable Cast GUI option removed. Cast reception remains unimplemented.
+- **HARDWARE_VERIFIED:** owner reports Windows/Android app sharing and native iOS AirPlay
+  connections on the preserved version. TV, new desktop platforms, 0.4.1 changes and native
+  Miracast media remain hardware verification pending. No project-wide CODE_COMPLETE claim.
+
+| Target | Source | Build/release | Hardware |
+| --- | --- | --- | --- |
+| Windows x64 | Integrated sender/receiver, AirPlay companion, OS Miracast status | 0.4.1 portable preview build/package exit 0 | Prior app/AirPlay owner-confirmed; Miracast connection fails |
+| Android phone ARM64 | Native sender/receiver and terminal cleanup | 0.4.1 installable debug / unsigned optimized APKs, exit 0 | Prior app owner-confirmed; new cleanup pending |
+| Android TV ARM64 | Shared native receiver/sender | 0.4.1 TV APKs, exit 0; installation guide added | NOT tested on TV |
+| Linux x64 | Shared desktop pairing/media, GTK context/fullscreen | 0.4.1 tarball, build/static/package exit 0 | Desktop keyring, capture, decode and codec behavior pending |
+| macOS ARM64/x64 | Shared Apple adapter, desktop native channels and build pipeline | Source only; no Mac compiler or binary | Pending |
+| iOS app | Existing native receive / ReplayKit source | No Mac build/signing or IPA | App build pending; native iOS AirPlay to Windows owner-confirmed |
+| Browser receiver | Retained foundation | Shared authenticated media path incomplete | Pending |
+
+See [ADR0061](adr/0061-shared-desktop-platform-integration.md),
+[build instructions](build-release.md) and [TV installation](install-android-tv.md).
 
 ### 0.4.0 device approval and private connection UI (test_5)
 

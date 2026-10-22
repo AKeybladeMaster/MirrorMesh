@@ -2,6 +2,18 @@ use mm_domain::DeviceId;
 use mm_ports::{LocalPairingIdentityPort, PortError};
 use std::sync::Arc;
 
+#[cfg(target_os = "linux")]
+pub use mm_adapter_linux::create_pairing_service as create_platform_service;
+#[cfg(target_os = "linux")]
+use mm_adapter_linux::{LinuxPairingIdentity as Identity, initialize_pairing_runtime};
+
+#[cfg(target_os = "macos")]
+pub use mm_adapter_ios::create_pairing_service as create_platform_service;
+#[cfg(target_os = "macos")]
+use mm_adapter_ios::{
+    IosPairingIdentity as Identity, local_device_id as initialize_pairing_runtime,
+};
+
 #[cfg(target_os = "android")]
 pub use mm_adapter_android::create_tv_pairing_service as create_platform_service;
 #[cfg(target_os = "android")]
@@ -30,6 +42,14 @@ pub fn sender_identity() -> Result<(DeviceId, Arc<dyn LocalPairingIdentityPort>)
 }
 
 pub fn revoke_peer(id: DeviceId, now: u64) -> Result<(), PortError> {
+    #[cfg(target_os = "linux")]
+    {
+        mm_adapter_linux::revoke_trusted_peer(id, now)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        mm_adapter_ios::revoke_trusted_peer(id, now)
+    }
     #[cfg(target_os = "android")]
     {
         mm_adapter_android::revoke_trusted_peer(id, now)

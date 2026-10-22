@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'native_connection.dart';
 
 import 'package:flutter/services.dart';
 
-/// Requests lazy Windows pairing-runtime initialization after explicit user action.
+/// Reuses the desktop pairing/session controller with each platform's secure adapter.
 class WindowsPairingBootstrap {
   const WindowsPairingBootstrap() : _channel = const MethodChannel(channelName);
 
@@ -20,17 +23,29 @@ class WindowsPairingBootstrap {
   final MethodChannel _channel;
 
   Future<String> prepare() async {
-    final deviceId = await _channel.invokeMethod<String>(_prepareMethod);
+    final deviceId = Platform.isLinux
+        ? (await nativeConnection({'op': 'prepare'}))['device_id'] as String?
+        : Platform.isMacOS
+        ? await const MethodChannel('com.mirrormesh/desktop_pairing')
+              .invokeMethod<String>(_prepareMethod)
+        : await _channel.invokeMethod<String>(_prepareMethod);
     if (deviceId == null || deviceId.isEmpty) {
       throw PlatformException(
         code: 'pairing_runtime_unavailable',
-        message: 'Windows did not return a local device ID.',
+        message: 'The desktop did not return a local device ID.',
       );
     }
     return deviceId;
   }
 
   Future<int> beginSenderPairing(String invitationUri) async {
+    if (!Platform.isWindows) {
+      return (await nativeConnection({
+            'op': 'send_pair',
+            'invitation': invitationUri,
+          }))['id']
+          as int;
+    }
     final requestId = await _channel.invokeMethod<int>(
       _beginSenderPairingMethod,
       invitationUri,
@@ -38,13 +53,24 @@ class WindowsPairingBootstrap {
     if (requestId == null || requestId <= 0) {
       throw PlatformException(
         code: 'pairing_unavailable',
-        message: 'Windows did not start sender pairing.',
+        message: 'The desktop did not start sender pairing.',
       );
     }
     return requestId;
   }
 
   Future<WindowsSenderPairingStatus> pollSenderPairing(int requestId) async {
+    if (!Platform.isWindows) {
+      final value = await nativeConnection({
+        'op': 'send_poll',
+        'id': requestId,
+      });
+      return WindowsSenderPairingStatus(
+        state: WindowsSenderPairingState.fromNative(value['state'] as int),
+        errorCode: value['error'] as int,
+        receiverFingerprint: value['fingerprint'] as String,
+      );
+    }
     final values = await _channel.invokeMapMethod<String, Object?>(
       _pollSenderPairingMethod,
       requestId,
@@ -55,7 +81,7 @@ class WindowsPairingBootstrap {
     if (state is! int || errorCode is! int || fingerprint is! String) {
       throw PlatformException(
         code: 'pairing_status_invalid',
-        message: 'Windows returned invalid sender pairing status.',
+        message: 'The desktop returned invalid sender pairing status.',
       );
     }
     return WindowsSenderPairingStatus(
@@ -66,6 +92,10 @@ class WindowsPairingBootstrap {
   }
 
   Future<void> cancelSenderPairing(int requestId) async {
+    if (!Platform.isWindows) {
+      await nativeConnection({'op': 'send_cancel', 'id': requestId});
+      return;
+    }
     await _channel.invokeMethod<bool>(_cancelSenderPairingMethod, requestId);
   }
 
@@ -73,6 +103,14 @@ class WindowsPairingBootstrap {
     required int requestId,
     required String sdp,
   }) async {
+    if (!Platform.isWindows) {
+      return (await nativeConnection({
+            'op': 'send_offer',
+            'id': requestId,
+            'sdp': sdp,
+          }))['session_id']
+          as String;
+    }
     final sessionId = await _channel.invokeMethod<String>(
       _beginSenderSessionMethod,
       <String, Object?>{'requestId': requestId, 'sdp': sdp},
@@ -80,7 +118,7 @@ class WindowsPairingBootstrap {
     if (sessionId == null || sessionId.isEmpty) {
       throw PlatformException(
         code: 'session_unavailable',
-        message: 'Windows did not start the sender session.',
+        message: 'The desktop did not start the sender session.',
       );
     }
     return sessionId;
@@ -92,6 +130,16 @@ class WindowsPairingBootstrap {
     required String mediaId,
     required int mediaLineIndex,
   }) async {
+    if (!Platform.isWindows) {
+      await nativeConnection({
+        'op': 'send_ice',
+        'id': requestId,
+        'candidate': candidate,
+        'mid': mediaId,
+        'line': mediaLineIndex,
+      });
+      return;
+    }
     await _channel.invokeMethod<bool>(
       _sendSenderSessionIceMethod,
       <String, Object?>{
@@ -107,6 +155,14 @@ class WindowsPairingBootstrap {
     required int requestId,
     required String sourceId,
   }) async {
+    if (!Platform.isWindows) {
+      await nativeConnection({
+        'op': 'send_start',
+        'id': requestId,
+        'source': sourceId,
+      });
+      return;
+    }
     final started = await _channel.invokeMethod<bool>(
       _startSenderSessionMethod,
       <String, Object?>{'requestId': requestId, 'sourceId': sourceId},
@@ -114,7 +170,7 @@ class WindowsPairingBootstrap {
     if (started != true) {
       throw PlatformException(
         code: 'session_start_unavailable',
-        message: 'Windows did not start the approved sender source.',
+        message: 'The desktop did not start the approved sender source.',
       );
     }
   }
@@ -123,6 +179,14 @@ class WindowsPairingBootstrap {
     required int requestId,
     required String reason,
   }) async {
+    if (!Platform.isWindows) {
+      await nativeConnection({
+        'op': 'send_stop',
+        'id': requestId,
+        'reason': reason,
+      });
+      return;
+    }
     final stopped = await _channel.invokeMethod<bool>(
       _stopSenderSessionMethod,
       <String, Object?>{'requestId': requestId, 'reason': reason},
@@ -130,7 +194,7 @@ class WindowsPairingBootstrap {
     if (stopped != true) {
       throw PlatformException(
         code: 'session_stop_unavailable',
-        message: 'Windows could not send the session stop message.',
+        message: 'The desktop could not send the session stop message.',
       );
     }
   }
@@ -138,21 +202,34 @@ class WindowsPairingBootstrap {
   Future<WindowsSenderSessionEvent> pollSenderSessionEvent(
     int requestId,
   ) async {
-    final encoded = await _channel.invokeMethod<String>(
-      _pollSenderSessionEventMethod,
-      requestId,
-    );
-    if (encoded == null) {
-      throw PlatformException(
-        code: 'session_event_invalid',
-        message: 'Windows returned no sender session event.',
+    final Object? decoded;
+    if (Platform.isWindows) {
+      final encoded = await _channel.invokeMethod<String>(
+        _pollSenderSessionEventMethod,
+        requestId,
       );
+      if (encoded == null) {
+        throw StateError('Native sender returned no session event.');
+      }
+      decoded = jsonDecode(encoded);
+    } else {
+      final event = await nativeConnection({
+        'op': 'send_event',
+        'id': requestId,
+      });
+      decoded = {
+        ...event,
+        'pending': event['pending'] == true,
+        'sessionId': event['session_id'],
+        'mediaId': event['mid'],
+        'mediaLineIndex': event['line'],
+        'peerId': event['peer_id'],
+      };
     }
-    final decoded = jsonDecode(encoded);
     if (decoded is! Map<String, dynamic> || decoded['pending'] is! bool) {
       throw PlatformException(
         code: 'session_event_invalid',
-        message: 'Windows returned an invalid sender session event.',
+        message: 'The desktop returned an invalid sender session event.',
       );
     }
     final pending = decoded['pending']! as bool;
@@ -163,7 +240,7 @@ class WindowsPairingBootstrap {
     if (kind is! String) {
       throw PlatformException(
         code: 'session_event_invalid',
-        message: 'Windows returned an invalid sender session event kind.',
+        message: 'The desktop returned an invalid sender session event kind.',
       );
     }
     return switch (kind) {
@@ -192,7 +269,8 @@ class WindowsPairingBootstrap {
         WindowsSenderSessionEvent.revoked(peerId: decoded['peerId']! as String),
       _ => throw PlatformException(
         code: 'session_event_invalid',
-        message: 'Windows returned an invalid sender session event payload.',
+        message:
+            'The desktop returned an invalid sender session event payload.',
       ),
     };
   }
@@ -298,22 +376,22 @@ class WindowsSenderPairingStatus {
 
   String? get failureDescription => switch (errorCode) {
     0 => null,
-    1 => 'Windows could not open its protected device identity or trust store.',
+    1 => 'The desktop could not open its protected device identity or trust store.',
     2 =>
       'The receiver rejected pairing. Refresh its invitation before retrying.',
     3 => 'The authenticated signaling connection failed. Check the receiver status.',
     4 => 'The receiver closed the connection before approval. Check its status and refresh the invitation.',
     5 => 'The receiver did not approve screen viewing. Select Allow view and approve the new request.',
-    6 => 'Windows could not complete a local pairing operation.',
+    6 => 'The desktop could not complete a local pairing operation.',
     7 => 'The approved signaling channel failed.',
     10 => 'The invitation format is invalid. Copy the entire mirrormesh:// link, not a browser search or sharing-page URL.',
     11 => 'This invitation has expired. Refresh the code on Android, then immediately copy and paste the new link.',
     12 => 'The invitation expiry is ahead of the allowed window. Enable automatic date and time on both devices, then refresh the code.',
     13 => 'The receiver refused the connection. Start the receiver and check its selected Wi-Fi or Ethernet address.',
     14 => 'The receiver did not answer in time. Check that both devices are on the same LAN and the receiver is listening.',
-    15 => 'Windows could not reach the receiver. Check the network, selected address and app-specific firewall access.',
+    15 => 'The desktop could not reach the receiver. Check the network, selected address and app-specific firewall access.',
     16 => 'The secure TLS/WebSocket handshake failed. Use a fresh invitation from this receiver and check its status. Identity checks remain enforced.',
-    17 => 'Windows could not sign its pairing request with the local device identity.',
+    17 => 'The desktop could not sign its pairing request with the local device identity.',
     18 => 'The receiver identity did not match the invitation. Pairing was blocked.',
     19 => 'The receiver returned an invalid pairing response. Update both apps to the same build.',
     20 => 'The pinned TLS connection could not be initialized.',

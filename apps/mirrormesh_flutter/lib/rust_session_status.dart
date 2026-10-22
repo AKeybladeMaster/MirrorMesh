@@ -59,7 +59,8 @@ class RustSessionStatus {
 
   static Future<RustSessionStatus> initialize({String? libraryPath}) async {
     try {
-      final library = libraryPath == null && Platform.isIOS
+      final library =
+          libraryPath == null && (Platform.isIOS || Platform.isMacOS)
           ? ExternalLibrary.process(iKnowHowToUseIt: true)
           : ExternalLibrary.open(libraryPath ?? _defaultLibraryPath());
       await RustLib.init(externalLibrary: library);

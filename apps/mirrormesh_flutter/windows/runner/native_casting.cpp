@@ -3,9 +3,78 @@
 #include <windows.h>
 #include <appmodel.h>
 // clang-format on
+#include <chrono>
+#include <shellapi.h>
 #include <shobjidl.h>
 #include <vector>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Media.Miracast.h>
 #include <wrl/client.h>
+
+WirelessDisplayStatus QueryWirelessDisplayStatus() {
+  using namespace winrt::Windows::Media::Miracast;
+  WirelessDisplayStatus result;
+  try {
+    winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    struct Apartment {
+      ~Apartment() { winrt::uninit_apartment(); }
+    } apartment;
+    auto operation = MiracastReceiver().GetStatusAsync();
+    if (operation.wait_for(std::chrono::seconds(5)) !=
+        winrt::Windows::Foundation::AsyncStatus::Completed) {
+      operation.Cancel();
+      result.error = "Windows did not return Miracast status in time.";
+      return result;
+    }
+    const auto status = operation.GetResults();
+    switch (status.WiFiStatus()) {
+    case MiracastReceiverWiFiStatus::MiracastSupported:
+      result.wifi = "supported";
+      break;
+    case MiracastReceiverWiFiStatus::MiracastSupportNotOptimized:
+      result.wifi = "limited";
+      break;
+    case MiracastReceiverWiFiStatus::MiracastNotSupported:
+      result.wifi = "unsupported";
+      break;
+    default:
+      result.wifi = "unknown";
+    }
+    switch (status.ListeningStatus()) {
+    case MiracastReceiverListeningStatus::Listening:
+      result.listening = "listening";
+      break;
+    case MiracastReceiverListeningStatus::ConnectionPending:
+      result.listening = "pending";
+      break;
+    case MiracastReceiverListeningStatus::Connected:
+      result.listening = "connected";
+      break;
+    case MiracastReceiverListeningStatus::DisabledByPolicy:
+      result.listening = "policy";
+      break;
+    case MiracastReceiverListeningStatus::TemporarilyDisabled:
+      result.listening = "disabled";
+      break;
+    default:
+      result.listening = "not_listening";
+    }
+  } catch (const winrt::hresult_error &) {
+    result.error = "Windows could not query Miracast. Check Projecting to this "
+                   "PC in Settings.";
+  } catch (...) {
+    result.error =
+        "Miracast status is unavailable on this Windows installation.";
+  }
+  return result;
+}
+
+std::string OpenWirelessDisplaySettings() {
+  const auto result = reinterpret_cast<INT_PTR>(
+      ShellExecuteW(nullptr, L"open", L"ms-settings:project", nullptr, nullptr,
+                    SW_SHOWNORMAL));
+  return result > 32 ? "" : "Windows could not open projection settings.";
+}
 
 std::string OpenWirelessDisplay() {
   // Exact Microsoft package family; no executable path or app ID from a peer.

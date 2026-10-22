@@ -331,7 +331,7 @@ class _MobileSharePageState extends State<MobileSharePage>
             } else if (_remoteIce.length < 64) {
               _remoteIce.add(ice);
             }
-          case 'ended':
+          case 'stop' || 'revoke' || 'ended':
             await _stop();
             return;
         }

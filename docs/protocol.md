@@ -11,6 +11,11 @@ New receivers accept both proof forms; new v2 senders require upgraded receivers
 Windows and Android together. [ADR0060](adr/0060-device-facts-and-private-connection-ui.md)
 defines canonical field order, validation, privacy and native protocol boundaries.
 
+The test_6 desktop integration reuses this same protocol on Linux/macOS. Its local
+metadata API preserves stop/revoke event details without changing wire messages or
+approval rules. [ADR0061](adr/0061-shared-desktop-platform-integration.md) records the
+platform storage/permission and external Miracast boundaries.
+
 The Rust parser is implemented in `crates/mm-protocol` and is covered by the `session.offer` and candidate `pair.begin` golden fixtures plus malformed-input tests. `mm-runtime` can parse a bounded `pair.begin` frame, reserve source admission, convert it to the application proof, and verify it through the coordinator. `mm-security` provides strict manual IP parsing and a bounded, single-use 128-bit pairing nonce registry. `mm-domain` defines a validated trusted-peer record, `mm-ports` exposes storage and identity contracts, and `mm-application` coordinates QR invitation, signed-proof verification, nonce use, and explicit approval. `mm-adapter-tls` contains the native TLS 1.3 raw-public-key pinning candidate under proposed [ADR-0023](adr/0023-tls13-raw-public-key-pinning-candidate.md); `mm-adapter-signaling` adds the bounded native WSS listener candidate under proposed [ADR-0024](adr/0024-bounded-wss-pairing-listener-candidate.md). Neither candidate is assembled into a platform app or approval UI, and neither carries media. Cross-track/security review and CI remain open before protocol v1 is frozen.
 
 This document defines the **app-owned control protocol**; WebRTC media conforms to negotiated SDP/ICE/DTLS-SRTP RFC behavior, not a homegrown packet protocol. Native iOS AirPlay reception is a separate Windows preview adapter (ADR0059), with its own native PIN/consent authentication. It does not use or weaken this QR/TLS protocol. Cast and Miracast are not implemented by it.

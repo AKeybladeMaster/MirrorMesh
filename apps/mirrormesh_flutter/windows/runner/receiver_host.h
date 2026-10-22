@@ -1,7 +1,9 @@
 #ifndef MIRRORMESH_RECEIVER_HOST_H_
 #define MIRRORMESH_RECEIVER_HOST_H_
+#include "native_casting.h"
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
+#include <future>
 #include <memory>
 #include <string>
 #include <windows.h>
@@ -34,5 +36,6 @@ private:
   ULONGLONG pin_deadline_ = 0;
   WINDOWPLACEMENT placement_{};
   LONG_PTR style_ = 0;
+  std::future<WirelessDisplayStatus> wireless_status_;
 };
 #endif
